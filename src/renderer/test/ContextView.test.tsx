@@ -2,15 +2,6 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ContextView } from '../components/tabs/ContextView'
 
-// Mock Electron API
-const mockListDirectory = vi.fn();
-const mockPickDirectory = vi.fn();
-
-(window as any).electronAPI = {
-  listDirectory: mockListDirectory,
-  pickDirectory: mockPickDirectory,
-};
-
 describe('ContextView - FileBrowserModal Integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -30,6 +21,26 @@ describe('ContextView - FileBrowserModal Integration', () => {
               }
             }
           })
+        } as Response)
+      }
+      if (u.includes('/api/context/repos/browse')) {
+        const urlObj = new URL(u);
+        const path = urlObj.searchParams.get('path') || '';
+        let entries = [];
+        if (path === "/Users/home/code/project-a") {
+          entries = [
+            { name: "src", isDirectory: true, path: "/Users/home/code/project-a/src" }
+          ];
+        } else {
+          entries = [
+            { name: "project-a", isDirectory: true, path: "/Users/home/code/project-a" },
+            { name: "project-b", isDirectory: true, path: "/Users/home/code/project-b" }
+          ];
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(entries)
         } as Response)
       }
       if (u.includes('/api/context/repos')) {
@@ -67,16 +78,13 @@ describe('ContextView - FileBrowserModal Integration', () => {
     // Check if FileBrowserModal is visible
     expect(screen.getByText(/\/\/ BROWSE SERVER DIRECTORY/i)).toBeInTheDocument()
     await waitFor(() => {
-      expect(mockListDirectory).toHaveBeenCalled()
+      const calls = vi.mocked(window.fetch).mock.calls;
+      const hasBrowseCall = calls.some(call => call[0].toString().includes('/api/context/repos/browse'));
+      expect(hasBrowseCall).toBe(true);
     })
   })
 
   it('navigates directories and selects a path', async () => {
-    mockListDirectory.mockResolvedValue([
-      { name: "project-a", isDirectory: true, path: "/Users/home/code/project-a" },
-      { name: "project-b", isDirectory: true, path: "/Users/home/code/project-b" },
-    ]);
-
     render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject={null} />)
     
     // Open modals
@@ -92,9 +100,6 @@ describe('ContextView - FileBrowserModal Integration', () => {
     })
 
     // Click on project-a to navigate
-    mockListDirectory.mockResolvedValueOnce([
-      { name: "src", isDirectory: true, path: "/Users/home/code/project-a/src" },
-    ]);
     fireEvent.click(screen.getByText("project-a"))
 
     await waitFor(() => {
@@ -111,3 +116,4 @@ describe('ContextView - FileBrowserModal Integration', () => {
     expect(input.value).toBe("project-a")
   })
 })
+

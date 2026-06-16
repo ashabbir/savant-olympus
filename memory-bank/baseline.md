@@ -1,6 +1,6 @@
 # Savant Olympus Baseline Documentation
 
-Welcome to the **Savant Olympus** (internally configured as **Savant Quorum**) baseline documentation. This document serves as the unified, comprehensive blueprint for the application's runtime architecture, data boundaries, module dependencies, API integrations, build pipelines, and testing suites as of June 2026.
+Welcome to the **Savant Olympus** baseline documentation. This document serves as the unified, comprehensive blueprint for the application's runtime architecture, data boundaries, module dependencies, API integrations, build pipelines, and testing suites as of June 2026.
 
 ---
 
@@ -39,8 +39,8 @@ Olympus follows the standard Electron multi-process model:
 graph TD
     subgraph Electron Main Process ["Electron Main Process (NodeJS context)"]
         main["main.ts"]
-        db[("SQLite (quorum.db)")]
-        log["Logs (quorum.log)"]
+        db[("SQLite (olympus.db)")]
+        log["Logs (olympus.log)"]
         ipcM["ipcMain Handlers"]
         main --> db
         main --> log
@@ -96,7 +96,7 @@ graph TD
 ## 4. Directory & Module Breakdown
 
 ### 📂 Main Process (`src/main/electron/`)
-*   [main.ts](file:///Users/home/code/project-x/savant-olympus/src/main/electron/main.ts): Configures and spawns the `BrowserWindow` and desktop tray icon, overrides console loggers to write to `~/.savant/quorum.log`, initializes the SQLite database engine, hosts provider and model discovery, and handles IPC.
+*   [main.ts](file:///Users/home/code/project-x/savant-olympus/src/main/electron/main.ts): Configures and spawns the `BrowserWindow` and desktop tray icon, overrides console loggers to write to `~/.savant/olympus.log`, initializes the SQLite database engine, hosts provider and model discovery, and handles IPC.
 *   [preload.ts](file:///Users/home/code/project-x/savant-olympus/src/main/electron/preload.ts): Forms the context-isolated bridge between Chromium and NodeJS. Exposes type-safe helper functions on the global object.
 
 ### 📂 React Shell (`src/renderer/`)
@@ -121,20 +121,20 @@ graph TD
     *   Browses and edits prompt assets (Personas, Rules, Policies, Styles, and Repos).
     *   Features a resolution panel builder that compiles these rules into finalized prompt blueprints.
 7.  [UsersView.tsx](file:///Users/home/code/project-x/savant-olympus/src/renderer/components/tabs/UsersView.tsx):
-    *   Renders and manages active operator details, roles (Admin, Operator, Guest), and API authorization keys.
+    *   Renders and manages active user details, roles (Admin, Operator, Guest), and API authorization keys.
 
 ### 📂 Shared UI and Layouts (`src/renderer/components/`)
 *   [LeftSidebar.tsx](file:///Users/home/code/project-x/savant-olympus/src/renderer/components/LeftSidebar.tsx): Primary tab navigation and profile/settings access.
 *   [RightPanel.tsx](file:///Users/home/code/project-x/savant-olympus/src/renderer/components/RightPanel.tsx): Drawer for context-sensitive metrics, real-time log trace streams, agent interaction topologies, semantic searches, and index code exploration.
-*   [TopBar.tsx](file:///Users/home/code/project-x/savant-olympus/src/renderer/components/TopBar.tsx) & [BottomBar.tsx](file:///Users/home/code/project-x/savant-olympus/src/renderer/components/BottomBar.tsx): Display database connectivity status, dynamic latency updates, active operator name, and app controls.
+*   [TopBar.tsx](file:///Users/home/code/project-x/savant-olympus/src/renderer/components/TopBar.tsx) & [BottomBar.tsx](file:///Users/home/code/project-x/savant-olympus/src/renderer/components/BottomBar.tsx): Display database connectivity status, dynamic latency updates, active user name, and app controls.
 *   [FileBrowserModal.tsx](file:///Users/home/code/project-x/savant-olympus/src/renderer/components/FileBrowserModal.tsx): Handles server-side directory navigation for repository registration.
 
 ---
 
 ## 5. Persistence, State, & IPC Contracts
 
-### Local SQLite Persistence (`quorum.db`)
-Stored at `~/.savant/quorum.db`. Configured via `better-sqlite3`:
+### Local SQLite Persistence (`olympus.db`)
+Stored at `~/.savant/olympus.db`. Configured via `better-sqlite3`:
 *   **Table**: `settings`
     *   `key TEXT PRIMARY KEY`: Setting identifier (e.g. `gateway:config`, `server:config`, `user:apiKey`, `user:name`).
     *   `value TEXT`: Plaintext value or stringified JSON payload.
@@ -168,7 +168,12 @@ The application communicates with the external backend plane using the following
 ### 1. Savant Server Plane (Default: `http://127.0.0.1:8090`)
 All server requests require `X-API-Key` authentication headers.
 *   **Authentication**: `GET /api/auth/validate`
-*   **Operators**: `GET /api/auth/operators`
+*   **Users**:
+    *   `GET /api/users?include_inactive=true` — Fetches flat list of all users.
+    *   `POST /api/users` — Creates a new user profile.
+    *   `PUT /api/users/:id` — Edits active status or details.
+    *   `DELETE /api/users/:id` — Deactivates/deletes a user.
+    *   `POST /api/users/:id/api-key` — Regenerates a user's API authorization key.
 *   **Context & Code Indexing**:
     *   `GET /api/context/repos` — Lists active repositories.
     *   `POST /api/context/repos` — Registers a new repository.
@@ -179,6 +184,7 @@ All server requests require `X-API-Key` authentication headers.
     *   `POST /api/context/repos/ast/generate` — Begins AST parser.
     *   `GET /api/context/repos/indexing-status` — Fetches active job progressions.
     *   `GET /api/context/repos/sources` — Resolves supported server configurations.
+    *   `GET /api/context/repos/browse?path=...` — Browses repository directories server-side.
     *   `GET /api/context/ast/list?repo=...` — Retrieves code node symbols.
     *   `GET /api/context/code/list?repo=...` — Lists absolute code filenames.
     *   `GET /api/context/code/read?uri=...` — Reads raw codebase files.

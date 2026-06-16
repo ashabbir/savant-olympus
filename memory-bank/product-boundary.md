@@ -10,7 +10,7 @@ Olympus should expose operational modules for:
 - Savant Context: indexed repositories, AST/code analysis, semantic search, memory resources.
 - Savant Abilities: persona/rule/policy/repo asset browsing, editing, validation, bootstrap, and prompt resolution.
 - MCP Tools and Skills: registry/playground surfaces for available tools and audited capabilities.
-- Operators/Users: operator and credential visibility/editing.
+- Users: user and credential visibility/editing.
 - Gateway/server health, provider discovery, and local settings.
 
 ## Out of scope / legacy-suspect areas

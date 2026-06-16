@@ -4,6 +4,7 @@ import { ToolsView } from '../components/tabs/ToolsView'
 import { SkillsView } from '../components/tabs/SkillsView'
 import { WorkspaceView } from '../components/tabs/WorkspaceView'
 import { RightPanel } from '../components/RightPanel'
+import { RemindersView } from '../components/tabs/RemindersView'
 
 describe('ToolsView Component', () => {
   beforeEach(() => {
@@ -108,7 +109,7 @@ describe('SkillsView Component', () => {
     })
   })
 
-  it('allows searching, adding, deleting, and selecting skills', async () => {
+  it('allows searching, uploading zip, selecting, and deleting skills', async () => {
     render(<SkillsView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
 
     // Check initial skills render (fallback skills)
@@ -125,17 +126,33 @@ describe('SkillsView Component', () => {
     // Clear search
     fireEvent.change(searchInput, { target: { value: '' } })
 
-    // Add a skill
-    fireEvent.click(screen.getByText(/ADD_SKILL/i))
-    fireEvent.change(screen.getByPlaceholderText(/Skill Name/i), { target: { value: 'new_savant_skill' } })
-    fireEvent.change(screen.getByPlaceholderText(/Description/i), { target: { value: 'Cool skill' } })
-    
-    const form = screen.getByPlaceholderText(/Skill Name/i).closest('form')
-    if (form) {
-      fireEvent.submit(form)
-    } else {
-      fireEvent.click(screen.getByText(/CREATE_SKILL/i))
-    }
+    // Mock JSZip
+    const JSZip = require('jszip')
+    vi.spyOn(JSZip, 'loadAsync').mockResolvedValue({
+      files: {
+        'metadata.json': {
+          async: vi.fn().mockResolvedValue(JSON.stringify({
+            name: 'new_savant_skill',
+            description: 'Cool skill',
+            status: 'unlocked'
+          }))
+        },
+        'prompt.txt': {
+          async: vi.fn().mockResolvedValue('System prompt content')
+        },
+        'schema.json': {
+          async: vi.fn().mockResolvedValue('{}')
+        },
+        'index.js': {
+          async: vi.fn().mockResolvedValue('// code')
+        }
+      }
+    } as any)
+
+    // Upload ZIP skill
+    const file = new File(['mock zip binary'], 'new_savant_skill.zip', { type: 'application/zip' })
+    const uploadInput = screen.getByTestId('upload-file-input')
+    fireEvent.change(uploadInput, { target: { files: [file] } })
 
     await waitFor(() => {
       expect(screen.getAllByText('new_savant_skill').length).toBeGreaterThan(0)
@@ -162,18 +179,128 @@ describe('SkillsView Component', () => {
 })
 
 describe('UsersView Component', () => {
+  let mockUsers: any[] = []
+
   beforeEach(() => {
-    vi.spyOn(window, 'fetch').mockImplementation((url) => {
+    mockUsers = [
+      {
+        id: "usr-1",
+        username: "ahmed",
+        name: "Ahmed Shabbir",
+        email: "ahmed@savant.ai",
+        role: "admin",
+        active: true,
+        api_keys: ["sk-ahmed-savant-001"]
+      },
+      {
+        id: "usr-2",
+        username: "lex",
+        name: "Lex Friedman",
+        email: "lex@savant.ai",
+        role: "operator",
+        active: true,
+        api_keys: ["sk-lex-savant-001"]
+      },
+      {
+        id: "usr-3",
+        username: "inactive_admin",
+        name: "Inactive Admin",
+        email: "inactive_admin@savant.ai",
+        role: "admin",
+        active: false,
+        api_keys: ["sk-inactive-admin-001"]
+      },
+      {
+        id: "usr-4",
+        username: "inactive_user",
+        name: "Inactive User",
+        email: "inactive_user@savant.ai",
+        role: "operator",
+        active: false,
+        api_keys: ["sk-inactive-user-001"]
+      }
+    ]
+
+    vi.spyOn(window, 'fetch').mockImplementation((url, options) => {
       const u = url.toString()
-      if (u.includes('/api/auth/operators')) {
+      const method = (options?.method || 'GET').toUpperCase()
+
+      if (u.includes('/api/users')) {
+        if (method === 'DELETE') {
+          const userId = u.split('/').pop()
+          mockUsers = mockUsers.map(user => 
+            (user.id === userId || user.username === userId) ? { ...user, active: false } : user
+          )
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ success: true, message: "User deactivated" })
+          } as Response)
+        }
+
+        if (method === 'POST' && (u.endsWith('/api-key') || u.includes('/api-key?_') || u.includes('/api-key/'))) {
+          const parts = u.split('/')
+          const userId = parts[parts.length - 2]
+          const newKey = "sk-regenerated-new-key-123"
+          mockUsers = mockUsers.map(user => 
+            (user.id === userId || user.username === userId) ? { ...user, api_key: newKey, api_keys: [newKey] } : user
+          )
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ api_key: newKey })
+          } as Response)
+        }
+
+        if (method === 'POST') {
+          const body = options?.body ? JSON.parse(options.body.toString()) : {}
+          const newUser = {
+            id: `usr-${Date.now()}`,
+            username: body.username,
+            name: body.name,
+            email: body.email,
+            role: body.role,
+            active: true,
+            api_keys: ["sk-generated-key"]
+          }
+          mockUsers.push(newUser)
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve(newUser)
+          } as Response)
+        }
+
+        if (method === 'PUT') {
+          const userId = u.split('/').pop()
+          const body = options?.body ? JSON.parse(options.body.toString()) : {}
+          let updatedUser: any = null
+          mockUsers = mockUsers.map(user => {
+            if (user.id === userId || user.username === userId) {
+              updatedUser = {
+                ...user,
+                name: body.name,
+                email: body.email,
+                role: body.role
+              }
+              return updatedUser
+            }
+            return user
+          })
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve(updatedUser)
+          } as Response)
+        }
+
         return Promise.resolve({
           ok: true,
           status: 200,
-          json: () => Promise.resolve([
-            { username: "ahmed", name: "Ahmed Shabbir", email: "ahmed@savant.ai", role: "admin", api_keys: ["sk-ahmed-savant-001"] }
-          ])
+          json: () => Promise.resolve(mockUsers)
         } as Response)
       }
+
       return Promise.resolve({
         ok: true,
         status: 200,
@@ -182,38 +309,106 @@ describe('UsersView Component', () => {
     })
   })
 
-  it('allows clicking an operator and editing name, key, email, and role', async () => {
+  it('lists all users in the sidebar index', async () => {
     const { UsersView } = await import('../components/tabs/UsersView')
     render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
 
-    // Wait for operators list to load
+    await waitFor(() => {
+      expect(screen.getByText('Ahmed Shabbir')).toBeInTheDocument()
+      expect(screen.getByText('Lex Friedman')).toBeInTheDocument()
+      expect(screen.getByText('Inactive Admin')).toBeInTheDocument()
+      expect(screen.getByText('Inactive User')).toBeInTheDocument()
+    })
+  })
+
+  it('allows creating a new user via the Create form', async () => {
+    const { UsersView } = await import('../components/tabs/UsersView')
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+
     await waitFor(() => {
       expect(screen.getByText('Ahmed Shabbir')).toBeInTheDocument()
     })
 
-    // Click edit button
-    const editBtn = screen.getByTitle('Edit operator information')
-    fireEvent.click(editBtn)
+    const addBtn = screen.getByRole('button', { name: /ADD_USER/i })
+    fireEvent.click(addBtn)
 
-    // Edit fields
+    const usernameInput = screen.getByLabelText(/Username/i)
     const nameInput = screen.getByLabelText(/Full Name/i)
     const emailInput = screen.getByLabelText(/Email/i)
     const roleSelect = screen.getByLabelText(/Role/i)
-    const keyInput = screen.getByLabelText(/API Key/i)
+
+    fireEvent.change(usernameInput, { target: { value: 'steve' } })
+    fireEvent.change(nameInput, { target: { value: 'Steve Jobs' } })
+    fireEvent.change(emailInput, { target: { value: 'steve@apple.com' } })
+    fireEvent.change(roleSelect, { target: { value: 'operator' } })
+
+    const createBtn = screen.getByRole('button', { name: /CREATE_USER/i })
+    fireEvent.click(createBtn)
+
+    await waitFor(() => {
+      expect(screen.getByText('Steve Jobs')).toBeInTheDocument()
+      expect(screen.getByText('(steve)')).toBeInTheDocument()
+    })
+  })
+
+  it('allows clicking a user and editing name, email, and role', async () => {
+    const { UsersView } = await import('../components/tabs/UsersView')
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Ahmed Shabbir')).toBeInTheDocument()
+    })
+
+    const editBtn = screen.getAllByTitle('Edit user information')[0]
+    fireEvent.click(editBtn)
+
+    const nameInput = screen.getByLabelText(/Full Name/i) as HTMLInputElement
+    const emailInput = screen.getByLabelText(/Email/i) as HTMLInputElement
+    const roleSelect = screen.getByLabelText(/Role/i) as HTMLSelectElement
 
     fireEvent.change(nameInput, { target: { value: 'Ahmed Modified' } })
     fireEvent.change(emailInput, { target: { value: 'ahmed.mod@savant.ai' } })
     fireEvent.change(roleSelect, { target: { value: 'operator' } })
-    fireEvent.change(keyInput, { target: { value: 'sk-new-key-123' } })
 
-    // Click save
-    fireEvent.click(screen.getByText(/SAVE/i))
+    const form = nameInput.closest('form')!
+    fireEvent.submit(form)
 
-    // Verify values updated in display
     await waitFor(() => {
       expect(screen.getByText('Ahmed Modified')).toBeInTheDocument()
       expect(screen.getByText('ahmed.mod@savant.ai')).toBeInTheDocument()
-      expect(screen.getByText('OPERATOR')).toBeInTheDocument()
+      expect(screen.getAllByText('OPERATOR').length).toBeGreaterThan(0)
+    })
+  })
+
+  it('allows deactivating/deleting a user', async () => {
+    const { UsersView } = await import('../components/tabs/UsersView')
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Ahmed Shabbir')).toBeInTheDocument()
+    })
+
+    const deactivateBtns = screen.getAllByTitle('Deactivate user')
+    fireEvent.click(deactivateBtns[0])
+
+    await waitFor(() => {
+      expect(screen.getAllByText('INACTIVE')[0]).toBeInTheDocument()
+    })
+  })
+
+  it('allows regenerating API Key for a user', async () => {
+    const { UsersView } = await import('../components/tabs/UsersView')
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Ahmed Shabbir')).toBeInTheDocument()
+    })
+
+    const regenBtns = screen.getAllByTitle('Regenerate API Key')
+    fireEvent.click(regenBtns[0])
+
+    await waitFor(() => {
+      expect(screen.getByText('sk-regenerated-new-key-123')).toBeInTheDocument()
     })
   })
 })
@@ -394,5 +589,110 @@ describe('RightPanel & KnowledgeView Events', () => {
     const bootstrapBtn = screen.getByTitle("Bootstrap Assets")
     fireEvent.click(bootstrapBtn)
     expect(dispatchSpy.mock.calls[2][0].type).toBe("abilities-bootstrap")
+  })
+})
+
+describe('RemindersView Component', () => {
+  beforeEach(() => {
+    vi.spyOn(window, 'fetch').mockImplementation((url) => {
+      const u = url.toString()
+      if (u.includes('/api/reminders')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve([
+            { id: "rem-101", text: "Database clean up", description: "Clear temporary workspace databases", due_date: "2026-06-25T12:00:00Z", status: "pending", user_id: "ahmed" },
+            { id: "rem-102", text: "Review user keys", description: "Audit active user API keys", due_date: "2026-06-28T15:00:00Z", status: "done", user_id: "lex" }
+          ])
+        } as Response)
+      }
+      if (u.includes('/api/users')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve([
+            { user_id: "ahmed", name: "Ahmed Shabbir" },
+            { user_id: "lex", name: "Lex Friedman" }
+          ])
+        } as Response)
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ valid: true })
+      } as Response)
+    })
+  })
+
+  it('renders and supports filtering reminders by status', async () => {
+    render(<RemindersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+
+    // Wait for mock reminders to load
+    await waitFor(() => {
+      expect(screen.getByText('Database clean up')).toBeInTheDocument()
+      expect(screen.getByText('Review user keys')).toBeInTheDocument()
+    })
+
+    // Click on PENDING status filter button
+    const pendingFilterBtn = screen.getByRole('button', { name: /^PENDING$/i })
+    fireEvent.click(pendingFilterBtn)
+
+    // Verify list is filtered
+    await waitFor(() => {
+      expect(screen.getByText('Database clean up')).toBeInTheDocument()
+      expect(screen.queryByText('Review user keys')).not.toBeInTheDocument()
+    })
+
+    // Click on ALL filter button to restore
+    const allFilterBtn = screen.getByRole('button', { name: /^ALL$/i })
+    fireEvent.click(allFilterBtn)
+
+    // Verify all show up again
+    await waitFor(() => {
+      expect(screen.getByText('Database clean up')).toBeInTheDocument()
+      expect(screen.getByText('Review user keys')).toBeInTheDocument()
+    })
+  })
+
+  it('renders and supports filtering reminders by user', async () => {
+    render(<RemindersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+
+    // Wait for mock reminders to load
+    await waitFor(() => {
+      expect(screen.getByText('Database clean up')).toBeInTheDocument()
+      expect(screen.getByText('Review user keys')).toBeInTheDocument()
+    })
+
+    // Verify user badges exist
+    expect(screen.getByText('AHMED')).toBeInTheDocument()
+    expect(screen.getByText('LEX')).toBeInTheDocument()
+
+    // Find user filter select
+    const userSelect = screen.getByLabelText(/Filter by user/i) as HTMLSelectElement
+    expect(userSelect).toBeInTheDocument()
+
+    // Filter by 'ahmed'
+    fireEvent.change(userSelect, { target: { value: 'ahmed' } })
+
+    await waitFor(() => {
+      expect(screen.getByText('Database clean up')).toBeInTheDocument()
+      expect(screen.queryByText('Review user keys')).not.toBeInTheDocument()
+    })
+
+    // Filter by 'lex'
+    fireEvent.change(userSelect, { target: { value: 'lex' } })
+
+    await waitFor(() => {
+      expect(screen.queryByText('Database clean up')).not.toBeInTheDocument()
+      expect(screen.getByText('Review user keys')).toBeInTheDocument()
+    })
+
+    // Reset filter
+    fireEvent.change(userSelect, { target: { value: 'all' } })
+
+    await waitFor(() => {
+      expect(screen.getByText('Database clean up')).toBeInTheDocument()
+      expect(screen.getByText('Review user keys')).toBeInTheDocument()
+    })
   })
 })

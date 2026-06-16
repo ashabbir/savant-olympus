@@ -592,6 +592,31 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
                   </div>
                   <input ref={directoryInputRef} type="file" onChange={handleDirectorySelect} className="hidden" {...({ webkitdirectory: "", directory: "" } as any)} />
                 </div>
+
+                <div className="pt-2">
+                  <label style={labelStyle} className="block text-xs mb-2 opacity-70">Active AI Model</label>
+                  <select
+                    value={providerChain[0] ? `${providerChain[0].provider}/${providerChain[0].model}` : "gemini/3.5"}
+                    onChange={(e) => {
+                      const [provider, model] = e.target.value.split("/");
+                      setProviderChain([{ id: "p1", provider, model }]);
+                    }}
+                    style={{ ...inputStyle, width: "100%", outline: "none", border: "1px solid var(--cp-border)", borderRadius: "4px" }}
+                    className="px-3 py-2 text-xs cursor-pointer"
+                  >
+                    {selectedProviderOptions.flatMap(p => 
+                      p.models.map(m => ({
+                        provider: p.id,
+                        model: m,
+                        label: `${p.label || p.id.toUpperCase()}: ${m}`
+                      }))
+                    ).map((opt, i) => (
+                      <option key={i} value={`${opt.provider}/${opt.model}`} className="bg-[var(--cp-bg-3)]">
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             )}
 

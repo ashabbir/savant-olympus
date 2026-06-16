@@ -13,6 +13,8 @@ import { ToolsView } from "./components/tabs/ToolsView";
 import { SkillsView } from "./components/tabs/SkillsView";
 import { AbilitiesView } from "./components/tabs/AbilitiesView";
 import { UsersView } from "./components/tabs/UsersView";
+import { RemindersView } from "./components/tabs/RemindersView";
+import { Toaster } from "sonner";
 
 export interface Thinking {
   id: string;
@@ -35,6 +37,8 @@ export default function App() {
 
   const serverUrl = settings["server:config"]?.url || "http://127.0.0.1:8090";
   const apiKey = settings["user:apiKey"] || getStoredApiKey() || "";
+  const providerChain = settings["provider:chain"] || [];
+  const activeModel = providerChain[0] || { provider: "gemini", model: "3.5" };
 
   const addThinking = (agent: string, thought: string, type: Thinking["type"] = "thought") => {
     setThinking(prev => [{
@@ -101,7 +105,7 @@ export default function App() {
 
   useEffect(() => {
     const init = async () => {
-      setStartupProgress("AUTHENTICATING_OPERATOR");
+      setStartupProgress("AUTHENTICATING_USER");
       setStartupSubtext("Checking local Savant credential...");
 
       const loadedSettings = await window.system.getSettings();
@@ -118,6 +122,10 @@ export default function App() {
 
       try {
         const auth = await validateSavantApiKey(effectiveApiKey, loadedSettings);
+        if (auth?.user_id) {
+          loadedSettings["user:id"] = auth.user_id;
+          await window.system.saveSetting("user:id", auth.user_id);
+        }
         if (auth?.name && !loadedSettings["user:name"]) {
           loadedSettings["user:name"] = auth.name;
           await window.system.saveSetting("user:name", auth.name);
@@ -125,7 +133,9 @@ export default function App() {
       } catch (_e) {
         clearStoredApiKey();
         await window.system.saveSetting("user:apiKey", "");
-        setSettings({ ...loadedSettings, "user:apiKey": "" });
+        await window.system.saveSetting("user:id", "");
+        await window.system.saveSetting("user:name", "");
+        setSettings({ ...loadedSettings, "user:apiKey": "", "user:id": "", "user:name": "" });
         setIsAuthenticated(false);
         setIsInitializing(false);
         return;
@@ -148,6 +158,10 @@ export default function App() {
     const auth = await validateSavantApiKey(trimmed, loadedSettings);
     setStoredApiKey(trimmed);
     await window.system.saveSetting("user:apiKey", trimmed);
+    if (auth?.user_id) {
+      await window.system.saveSetting("user:id", auth.user_id);
+      loadedSettings["user:id"] = auth.user_id;
+    }
     if (auth?.name) {
       await window.system.saveSetting("user:name", auth.name);
       loadedSettings["user:name"] = auth.name;
@@ -160,13 +174,26 @@ export default function App() {
   const handleLogout = async () => {
     clearStoredApiKey();
     await window.system.saveSetting("user:apiKey", "");
+    await window.system.saveSetting("user:id", "");
+    await window.system.saveSetting("user:name", "");
     setIsAuthenticated(false);
     setIsInitializing(false);
-    setSettings(prev => ({ ...prev, "user:apiKey": "" }));
+    setSettings(prev => ({ ...prev, "user:apiKey": "", "user:id": "", "user:name": "" }));
     setThinking([]);
     setSelectedProject(null);
     setStatusText("IDLE");
   };
+
+  useEffect(() => {
+    const handleSwitch = (e: Event) => {
+      const tab = (e as CustomEvent).detail;
+      if (tab) {
+        setActiveTab(tab);
+      }
+    };
+    window.addEventListener("switch-tab", handleSwitch);
+    return () => window.removeEventListener("switch-tab", handleSwitch);
+  }, []);
 
   if (isInitializing) {
     return <StartupScreen progress={startupProgress} subtext={startupSubtext} />;
@@ -204,15 +231,17 @@ export default function App() {
           ) : activeTab === "Knowledge" ? (
             <KnowledgeView serverUrl={serverUrl} apiKey={apiKey} />
           ) : activeTab === "Context" ? (
-            <ContextView serverUrl={serverUrl} apiKey={apiKey} selectedProject={selectedProject} onSelectProject={setSelectedProject} />
+            <ContextView serverUrl={serverUrl} apiKey={apiKey} selectedProject={selectedProject} onSelectProject={setSelectedProject} activeModel={activeModel} />
           ) : activeTab === "Tools" ? (
             <ToolsView serverUrl={serverUrl} apiKey={apiKey} />
           ) : activeTab === "Skills" ? (
-            <SkillsView serverUrl={serverUrl} apiKey={apiKey} />
+            <SkillsView serverUrl={serverUrl} apiKey={apiKey} activeModel={activeModel} />
           ) : activeTab === "Abilities" ? (
             <AbilitiesView serverUrl={serverUrl} apiKey={apiKey} />
           ) : activeTab === "Users" ? (
-            <UsersView serverUrl={serverUrl} apiKey={apiKey} />
+            <UsersView serverUrl={serverUrl} apiKey={apiKey} activeUserId={settings["user:id"] || ""} onSettingsChanged={handleSettingsChanged} />
+          ) : activeTab === "Reminders" ? (
+            <RemindersView serverUrl={serverUrl} apiKey={apiKey} />
           ) : (
             <WorkspaceView serverUrl={serverUrl} apiKey={apiKey} sessionId={null} />
           )}
@@ -229,6 +258,7 @@ export default function App() {
       </div>
 
       <BottomBar />
+      <Toaster position="top-right" richColors theme="dark" toastOptions={{ style: { fontFamily: "'Rajdhani', monospace", fontSize: "12px" } }} />
     </div>
   );
 }

@@ -43,23 +43,33 @@ describe('KnowledgeView', () => {
     expect(await screen.findByText('// Knowledge Network')).toBeInTheDocument()
     await waitFor(() => expect(window.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/knowledge/graph'), expect.objectContaining({ headers: { 'X-API-Key': 'sk-test' } })))
 
+    expect(screen.queryByText('// Node Details')).not.toBeInTheDocument()
+
     fireEvent.change(screen.getByPlaceholderText('Find knowledge node...'), { target: { value: 'Auth' } })
     const searchHits = await screen.findAllByText('Auth Service')
     fireEvent.click(searchHits[0])
 
     await waitFor(() => expect(screen.getByText('// Node Details')).toBeInTheDocument())
+    const connectionsSection = screen.getByText('// CONNECTIONS').parentElement as HTMLElement
+    expect(connectionsSection).toBeTruthy()
+    expect(connectionsSection).toHaveTextContent('uses')
+    expect(connectionsSection).toHaveTextContent('Postgres')
     expect(screen.getByText('Handles auth')).toBeInTheDocument()
     expect(screen.getByText('test')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /collapse/i }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /open node details/i })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /open node details/i }))
+    await waitFor(() => expect(screen.getByText('// Node Details')).toBeInTheDocument())
   })
 
   it('creates a new knowledge node and reloads the graph', async () => {
     render(<KnowledgeView serverUrl="http://savant.local" apiKey="sk-test" />)
 
-    await screen.findByText('// Add Node')
+    await screen.findByText('// Knowledge Network')
+    fireEvent.click(screen.getByTitle('Add Node'))
     const titleInput = screen.getByText('Node Title').parentElement?.querySelector('input') as HTMLInputElement
     const contentInput = screen.getByText('Content').parentElement?.querySelector('textarea') as HTMLTextAreaElement
-    expect(titleInput).toBeTruthy()
-    expect(contentInput).toBeTruthy()
     fireEvent.change(titleInput, { target: { value: 'New Insight' } })
     fireEvent.change(contentInput, { target: { value: 'New content' } })
     fireEvent.click(screen.getByRole('button', { name: /create_node/i }))

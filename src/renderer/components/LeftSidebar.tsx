@@ -1,6 +1,6 @@
 import {
   Settings, User, LogOut, UserCog,
-  Briefcase, Network, Search, Wrench, Award, Cpu, Users
+  Briefcase, Network, Search, Wrench, Award, Cpu, Users, Bell
 } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -67,6 +67,7 @@ const TAB_ITEMS = [
   { id: "Skills", label: "Skills", icon: <Award size={16} /> },
   { id: "Abilities", label: "Abilities", icon: <Cpu size={16} /> },
   { id: "Users", label: "Users", icon: <Users size={16} /> },
+  { id: "Reminders", label: "Reminders", icon: <Bell size={16} /> },
 ];
 
 export function LeftSidebar({ onSettingsChanged, onLogout, activeTab, onChangeTab }: LeftSidebarProps) {
@@ -107,7 +108,7 @@ export function LeftSidebar({ onSettingsChanged, onLogout, activeTab, onChangeTa
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
               <button
-                title="operator"
+                title="user"
                 style={{ color: "var(--cp-cyan)", opacity: 0.45 }}
                 className="w-10 h-10 flex items-center justify-center hover:opacity-100 transition-all cursor-pointer"
               >

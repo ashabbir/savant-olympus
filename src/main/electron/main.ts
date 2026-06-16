@@ -2,13 +2,14 @@ import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog } from 'el
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import os from 'node:os'
+import { pathToFileURL } from 'node:url'
 
 // Persistence configuration
 const SAVANT_DIR = path.join(os.homedir(), '.savant')
-const QUORUM_DB_PATH = path.join(SAVANT_DIR, 'quorum.db')
+const OLYMPUS_DB_PATH = path.join(SAVANT_DIR, 'olympus.db')
 const GATEWAY_URL = 'http://127.0.0.1:3100'
 
-const LOG_FILE = path.join(SAVANT_DIR, 'quorum.log');
+const LOG_FILE = path.join(SAVANT_DIR, 'olympus.log');
 function writeLog(level: string, ...args: any[]) {
   const msg = `[${new Date().toISOString()}] [${level}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}\n`;
   fs.appendFile(LOG_FILE, msg).catch(() => {}); // Fire and forget
@@ -27,7 +28,7 @@ async function initDb() {
   try {
     await fs.mkdir(SAVANT_DIR, { recursive: true })
     const Database = require('better-sqlite3')
-    db = new Database(QUORUM_DB_PATH)
+    db = new Database(OLYMPUS_DB_PATH)
     
     db.exec(`
       CREATE TABLE IF NOT EXISTS settings (
@@ -35,9 +36,9 @@ async function initDb() {
         value TEXT
       );
     `)
-    console.log('[QUORUM] SQLite engine initialized.')
+    console.log('[OLYMPUS] SQLite engine initialized.')
   } catch (e) {
-    console.error('Failed to initialize Savant Quorum database:', e)
+    console.error('Failed to initialize Savant Olympus database:', e)
   }
 }
 
@@ -119,7 +120,7 @@ process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(__dirname, '../../renderer/public')
 
 let win: BrowserWindow | null
-const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
+const VITE_DEV_SERVER_URL = app.isPackaged ? undefined : process.env['VITE_DEV_SERVER_URL']
 
 function resolveAsset(name: string): string {
   // In packaged builds, assets live under process.resourcesPath/public (extraResources).
@@ -131,12 +132,13 @@ function resolveAsset(name: string): string {
 
 function createWindow() {
   win = new BrowserWindow({
-    icon: resolveAsset('main.svg'),
+    icon: resolveAsset('main1.svg'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: true,
       contextIsolation: true,
-      sandbox: false
+      sandbox: false,
+      webSecurity: false
     },
     width: 1200,
     height: 800,
@@ -145,37 +147,30 @@ function createWindow() {
 
   // Add load failure logging
   win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
-    console.error(`[QUORUM] Failed to load URL: ${validatedURL}`)
-    console.error(`[QUORUM] Error: ${errorDescription} (${errorCode})`)
+    console.error(`[OLYMPUS] Failed to load URL: ${validatedURL}`)
+    console.error(`[OLYMPUS] Error: ${errorDescription} (${errorCode})`)
   })
 
   if (VITE_DEV_SERVER_URL) {
-    console.log(`[QUORUM] Loading Dev Server: ${VITE_DEV_SERVER_URL}`)
+    console.log(`[OLYMPUS] Loading Dev Server: ${VITE_DEV_SERVER_URL}`)
     win.loadURL(VITE_DEV_SERVER_URL)
   } else {
     // In built app, index.html is in the dist folder
-    // When running from root (dev/build), dist-electron and dist are siblings
-    const indexPath = app.isPackaged 
-      ? path.join(process.resourcesPath, 'app', 'dist', 'index.html')
+    // Packaged apps load from app.asar; dev loads from the local dist folder.
+    const indexPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'app.asar', 'dist', 'index.html')
       : path.join(__dirname, '..', 'dist', 'index.html')
     
-    console.log(`[QUORUM] Loading production file: ${indexPath}`)
-    win.loadFile(indexPath).catch(err => {
-      console.error('[QUORUM] win.loadFile failed:', err)
+    console.log(`[OLYMPUS] Loading production file: ${indexPath}`)
+    win.loadURL(pathToFileURL(indexPath).href).catch(err => {
+      console.error('[OLYMPUS] win.loadFile failed:', err)
     })
   }
 }
 
 function createTray() {
-  // Prefer the macOS Template PNG (auto-inverts for dark/light menu bar);
-  // fall back to the SVG when the PNG is unavailable.
-  const pngPath = resolveAsset('trayTemplate.png')
-  const svgPath = resolveAsset('tray.svg')
-
-  let icon = nativeImage.createFromPath(pngPath)
-  if (icon.isEmpty()) {
-    icon = nativeImage.createFromPath(svgPath).resize({ width: 16, height: 16 })
-  }
+  const iconPath = resolveAsset('trayTemplate.png')
+  const icon = nativeImage.createFromPath(iconPath)
   if (process.platform === 'darwin') {
     icon.setTemplateImage(true)
   }
@@ -251,9 +246,14 @@ ipcMain.handle('run-agent', async (_event, { provider, model, prompt }) => {
       const run = await pollRes.json();
       
       if (run.status === 'complete') {
-        const responseText = run.result?.response || '';
-        // If the gateway CLI execution succeeded but the output is actually a critical error/warning
-        if (/ModelNotFoundError|An unexpected critical error occurred|Error when talking to API/i.test(responseText) || responseText.trim().startsWith('Warning:')) {
+        const rawResponse = run.result?.response || '';
+        // Split response into lines and filter out any lines starting with "Warning:" (case-insensitive)
+        const lines = rawResponse.split(/\r?\n/);
+        const cleanLines = lines.filter((line: string) => !line.trim().toLowerCase().startsWith('warning:'));
+        const responseText = cleanLines.join('\n').trim();
+
+        // If the gateway CLI execution succeeded but the output is actually a critical error
+        if (/ModelNotFoundError|An unexpected critical error occurred|Error when talking to API/i.test(responseText)) {
            return `Error: Gateway execution failed - ${responseText.substring(0, 100)}`;
         }
         return responseText;

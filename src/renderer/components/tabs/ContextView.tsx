@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Search, Folder, RefreshCw, Trash2, Cpu, FileCode, CheckCircle, Database, AlertTriangle, Layers, Play, Square, Trash, Zap, Clock } from "lucide-react";
-import { ContextVisualizations } from "./ContextVisualizations";
+import { ContextVisualizations, analyzeProjectSource } from "./ContextVisualizations";
 import { FileBrowserModal } from "../FileBrowserModal";
+import { toast } from "sonner";
 
 interface Repo {
 
@@ -22,34 +23,12 @@ interface ContextViewProps {
   apiKey: string;
   onSelectProject: (projName: string | null) => void;
   selectedProject: string | null;
+  activeModel?: { provider: string; model: string };
 }
 
-function analyzeProjectSource(nodes: any[], docs: Array<{ path: string; language: string; content: string }>) {
-  const languages = docs.reduce<Record<string, number>>((acc, doc) => {
-    const key = doc.language || doc.path.split(".").pop() || "unknown";
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
 
-  const nodeTypes = nodes.reduce<Record<string, number>>((acc, node) => {
-    const key = node.type || node.kind || node.node_type || "unknown";
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
 
-  return {
-    filesAnalyzed: docs.length,
-    astNodes: nodes.length,
-    languages,
-    nodeTypes,
-    entrypoints: docs
-      .map(doc => doc.path)
-      .filter(path => /(^|\/)(main|index|app|server)\.(ts|tsx|js|jsx|py|rb|go|rs)$/.test(path))
-      .slice(0, 20),
-  };
-}
-
-export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProject }: ContextViewProps) {
+export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProject, activeModel }: ContextViewProps) {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [newRepoName, setNewRepoName] = useState("");
   const [newRepoPath, setNewRepoPath] = useState("");
@@ -255,6 +234,49 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     }
   };
 
+  // Poll for job completion and fire toast
+  const jobPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const pollForJobCompletion = useCallback((repoName: string, jobLabel: string) => {
+    // Clear any existing poll
+    if (jobPollRef.current) clearInterval(jobPollRef.current);
+
+    jobPollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`${baseUrl}/api/context/repos/indexing-status`, {
+          headers: { "X-API-Key": apiKey },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const status = (data.status || {})[repoName] || {};
+        const activeStatus = status.status || "idle";
+        setIndexingStatus(data.status || {});
+
+        if (activeStatus !== "indexing" && activeStatus !== "running" && activeStatus !== "queued" && activeStatus !== "processing") {
+          if (jobPollRef.current) clearInterval(jobPollRef.current);
+          jobPollRef.current = null;
+          toast.success(`${jobLabel} completed for "${repoName}"`, {
+            description: "Refreshing project data...",
+            duration: 5000,
+          });
+          fetchRepos();
+          if (selectedProject === repoName) {
+            fetchAstAndAnalyze(repoName);
+          }
+        }
+      } catch (e) {
+        // Silently continue polling
+      }
+    }, 3000);
+  }, [baseUrl, apiKey, selectedProject]);
+
+  // Cleanup poll on unmount
+  useEffect(() => {
+    return () => {
+      if (jobPollRef.current) clearInterval(jobPollRef.current);
+    };
+  }, []);
+
   const handleStartIndexing = async (repoName: string) => {
     try {
       const res = await fetch(`${baseUrl}/api/context/repos/index`, {
@@ -266,9 +288,14 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         body: JSON.stringify({ name: repoName }),
       });
       if (!res.ok) throw new Error("Failed to start indexing");
+      toast.info(`Indexing job queued for "${repoName}"`, {
+        description: "You will be notified when the job completes.",
+        duration: 4000,
+      });
       fetchIndexingStatus();
+      pollForJobCompletion(repoName, "Index generation");
     } catch (e: any) {
-      alert(e.message);
+      toast.error("Failed to queue indexing job", { description: e.message });
     }
   };
 
@@ -283,9 +310,14 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         body: JSON.stringify({ name: repoName }),
       });
       if (!res.ok) throw new Error("Failed to start AST generation");
+      toast.info(`AST generation queued for "${repoName}"`, {
+        description: "You will be notified when the job completes.",
+        duration: 4000,
+      });
       fetchIndexingStatus();
+      pollForJobCompletion(repoName, "AST generation");
     } catch (e: any) {
-      alert(e.message);
+      toast.error("Failed to queue AST generation", { description: e.message });
     }
   };
 
@@ -629,7 +661,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   </div>
                 </>
               ) : (
-                <ContextVisualizations nodes={astNodes} repoName={selectedRepo.name} analysis={analysisResults} />
+                <ContextVisualizations nodes={astNodes} repoName={selectedRepo.name} analysis={analysisResults} activeModel={activeModel} />
               )}
             </div>
           ) : (
@@ -705,7 +737,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         className="w-full bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5 focus:outline-none"
                         required
                       />
-                      {window.electronAPI?.listDirectory && (
+                      {sources?.directory && (
                         <button
                           type="button"
                           onClick={handleBrowseDirectory}
@@ -775,6 +807,8 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         onSelect={(path) => setDirPath(path)}
         initialPath={dirPath ? (sources?.directory?.base_host_dir + "/" + dirPath).replace(/\/+$/, "") : sources?.directory?.base_host_dir}
         basePath={sources?.directory?.base_host_dir || ""}
+        serverUrl={serverUrl}
+        apiKey={apiKey}
       />
     </div>
   );

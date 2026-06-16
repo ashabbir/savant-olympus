@@ -11,4 +11,11 @@ Read order for new agents:
 6. `testing-and-quality.md` — current verification commands, coverage, and known quality issues.
 7. `agent-playbook.md` — safe workflow for future agents.
 
+Current product state:
+- App name and package metadata are Savant Olympus.
+- The renderer uses `main1.svg` and `tray1.svg` from `src/renderer/public/`.
+- Packaged macOS builds must load the bundled `app.asar` renderer, not the dev server.
+- KnowledgeView now includes full-height graph layout, grouped node search, and connection details.
+- App shell tests cover login and tab switching, and the build path is expected to pass after packaging fixes.
+
 Regenerate/update these notes whenever architecture, API contracts, runtime scripts, or product boundaries change.

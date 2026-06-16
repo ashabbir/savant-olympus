@@ -13,9 +13,11 @@ interface FileBrowserModalProps {
   onSelect: (path: string) => void;
   initialPath: string;
   basePath: string;
+  serverUrl: string;
+  apiKey: string;
 }
 
-export function FileBrowserModal({ isOpen, onClose, onSelect, initialPath, basePath }: FileBrowserModalProps) {
+export function FileBrowserModal({ isOpen, onClose, onSelect, initialPath, basePath, serverUrl, apiKey }: FileBrowserModalProps) {
   const [currentPath, setCurrentPath] = useState(initialPath || basePath);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -28,18 +30,22 @@ export function FileBrowserModal({ isOpen, onClose, onSelect, initialPath, baseP
   }, [isOpen, currentPath]);
 
   const loadDirectory = async (path: string) => {
-    if (!window.electronAPI?.listDirectory) {
-      setError("Directory listing is only available in the desktop app.");
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
     try {
-      const results = await window.electronAPI.listDirectory(path);
-      setEntries(results || []);
+      const baseUrl = serverUrl.replace(/\/+$/, "");
+      const res = await fetch(`${baseUrl}/api/context/repos/browse?path=${encodeURIComponent(path)}`, {
+        headers: { "X-API-Key": apiKey },
+      });
+      if (res.ok) {
+        const results = await res.json();
+        setEntries(results || []);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || `Failed to load directory: ${res.status} ${res.statusText}`);
+      }
     } catch (e: any) {
-      setError(e.message || "Failed to load directory");
+      setError(e.message || "Failed to load directory from server");
     } finally {
       setIsLoading(false);
     }

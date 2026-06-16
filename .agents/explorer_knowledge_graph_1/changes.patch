@@ -1,0 +1,222 @@
+diff --git a/src/renderer/components/tabs/KnowledgeView.tsx b/src/renderer/components/tabs/KnowledgeView.tsx
+--- a/src/renderer/components/tabs/KnowledgeView.tsx
++++ b/src/renderer/components/tabs/KnowledgeView.tsx
+@@ -43,4 +43,6 @@
+   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
++  const [isCollapsed, setIsCollapsed] = useState(false);
++  const hasSelection = selectedNode !== null || selectedNodes.size > 0;
+ 
+   // Add node form state
+@@ -279,7 +281,7 @@
+         const path = domainHullG.append("path")
+           .attr("fill", area.color)
+-          .attr("fill-opacity", 0.12)
++          .attr("fill-opacity", 0.28)
+           .attr("stroke", area.color)
+-          .attr("stroke-opacity", 0.6)
++          .attr("stroke-opacity", 0.85)
+           .attr("stroke-width", 1.5)
+           .attr("stroke-dasharray", "6,4")
+@@ -465,4 +467,10 @@
+   }
+ }, [exploreDepth, isExploreActive, focalNodes, rawNodes, rawEdges, selectedNodes, selectedNode]);
++
++useEffect(() => {
++  if (selectedNode || selectedNodes.size > 0) {
++    setIsCollapsed(false);
++  }
++}, [selectedNode, selectedNodes.size]);
+ 
+ const handleMergeSubmit = async (e: React.FormEvent) => {
+@@ -584,5 +592,6 @@
+     if (res.ok) {
+       const created = await res.json();
+       setNewNodeTitle(""); setNewNodeContent("");
++      setIsAddModalOpen(false);
+       await loadGraph();
+       setSelectedNode(created);
+@@ -674,5 +683,5 @@
+   return (
+-    <div className="flex-1 flex flex-col overflow-hidden bg-[var(--cp-bg-0)] p-4 space-y-4">
++    <div className="flex-1 flex flex-col overflow-hidden bg-[var(--cp-bg-0)] p-4 space-y-4">
+       <div className="flex justify-between items-center bg-[var(--cp-bg-1)] border border-[var(--cp-border)] p-3 shrink-0">
+         <div className="flex items-center gap-3">
+@@ -717,4 +726,5 @@
+         <div className="flex items-center gap-1 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-0.5">
++          <button onClick={() => setIsAddModalOpen(true)} title="Add Node" className="p-1 text-muted-foreground hover:text-[var(--cp-cyan)] transition-all cursor-pointer"><Plus size={14} /></button>
+           <button onClick={triggerUpload} title="Upload" className="p-1 text-muted-foreground hover:text-[var(--cp-cyan)] transition-all cursor-pointer"><Upload size={14} /></button>
+           <button onClick={triggerDownload} title="Download" className="p-1 text-muted-foreground hover:text-[var(--cp-cyan)] transition-all cursor-pointer"><Download size={14} /></button>
+           <button onClick={loadGraph} title="Reload" className="p-1 text-muted-foreground hover:text-[var(--cp-cyan)] transition-all cursor-pointer"><RefreshCw size={14} className={isLoading ? "animate-spin" : ""} /></button>
+@@ -734,14 +744,24 @@
+       </div>
+       <div className="flex-1 flex gap-4 overflow-hidden relative min-h-0">
+-        <div ref={containerRef} className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-0)] relative overflow-hidden">
++        <div ref={containerRef} className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] relative overflow-hidden">
+           {isLoading && <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10 text-xs font-mono text-[var(--cp-cyan)] animate-pulse">SYNCING_VECTORS...</div>}
+           <svg ref={svgRef} id="kb-graph-svg" className="w-full h-full cursor-grab active:cursor-grabbing" />
++          {hasSelection && isCollapsed && (
++            <button
++              onClick={() => setIsCollapsed(false)}
++              title="Expand Details"
++              className="absolute right-0 top-1/2 -translate-y-1/2 bg-[var(--cp-bg-1)] border-l border-y border-[var(--cp-border)] p-2 hover:text-[var(--cp-cyan)] transition-all z-20 cursor-pointer rounded-l"
++            >
++              <ArrowLeft size={16} />
++            </button>
++          )}
+           {isExploreActive && (
+@@ -747,74 +767,50 @@
+         </div>
+-        <div className="w-80 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex flex-col overflow-hidden" style={{ animation: "slideInRight 0.2s ease-out" }}>
+-
+-          <div className="flex border-b border-[var(--cp-border)] shrink-0 bg-[var(--cp-bg-2)] px-4 py-3 items-center justify-between">
+-            <span className="text-xs font-mono tracking-widest uppercase font-bold text-[var(--cp-cyan)]">
+-              {selectedNodes.size >= 2 ? `// Merge ${selectedNodes.size} Nodes` : selectedNode ? "// Node Details" : "// Add Node"}
+-            </span>
+-            {(selectedNode || selectedNodes.size > 0) && (
+-              <button onClick={() => { setSelectedNode(null); setSelectedNodes(new Map()); }} className="text-muted-foreground hover:text-foreground text-xs font-mono cursor-pointer">✕</button>
+-            )}
+-          </div>
+-          <div className="flex-1 p-4 overflow-y-auto">
+-            {selectedNodes.size >= 2 ? (
+-              <div className="space-y-4 font-mono text-xs">
++        {hasSelection && (
++          <div className={`w-80 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex flex-col overflow-hidden transition-all duration-300 ${isCollapsed ? "w-0 border-none hidden" : ""}`} style={{ animation: "slideInRight 0.2s ease-out" }}>
++            <div className="flex border-b border-[var(--cp-border)] shrink-0 bg-[var(--cp-bg-2)] px-4 py-3 items-center justify-between">
++              <span className="text-xs font-mono tracking-widest uppercase font-bold text-[var(--cp-cyan)]">
++                {selectedNodes.size >= 2 ? `// Merge ${selectedNodes.size} Nodes` : selectedNode ? "// Node Details" : ""}
++              </span>
++              <div className="flex items-center gap-2">
++                <button
++                  onClick={() => setIsCollapsed(true)}
++                  title="Collapse Panel"
++                  className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
++                >
++                  <ArrowRight size={14} />
++                </button>
++                <button
++                  onClick={() => { setSelectedNode(null); setSelectedNodes(new Map()); }}
++                  title="Close Selection"
++                  className="text-muted-foreground hover:text-foreground text-xs font-mono cursor-pointer"
++                >
++                  ✕
++                </button>
++              </div>
++            </div>
++            <div className="flex-1 p-4 overflow-y-auto">
++              {selectedNodes.size >= 2 ? (
++                <div className="space-y-4 font-mono text-xs">
++                  <div className="text-[10px] text-muted-foreground">⌘/Ctrl+Click to multiselect. First node is survivor.</div>
++                  <div className="space-y-1 bg-[var(--cp-bg-2)] p-2 border border-[var(--cp-border)] max-h-48 overflow-y-auto">
++                    {Array.from(selectedNodes.values()).map((n, i) => (
++                      <div key={n.node_id} className="flex justify-between items-center gap-2 border-b border-[var(--cp-border)]/30 py-1 last:border-b-0">
++                        <span className="truncate flex-1 text-foreground/80">{n.title || n.id}</span>
++                        {i === 0 ? <span className="text-[8px] text-[var(--cp-cyan)] uppercase border border-[var(--cp-cyan)]/30 px-1 rounded">Survivor</span> : (
++                          <button onClick={() => { setSelectedNodes((prev) => { const next = new Map(prev); next.delete(n.node_id); if(next.size===1) setSelectedNode(Array.from(next.values())[0]); return next; }); }} className="text-red-400 text-[9px]">✕</button>
++                        )}
++                      </div>
++                    ))}
++                  </div>
++                  <form onSubmit={handleMergeSubmit} className="space-y-3 pt-2 border-t border-[var(--cp-border)]/30">
++                    <h4 className="text-[10px] text-muted-foreground uppercase font-bold">// TARGET TYPE</h4>
++                    <select value={mergeNodeType} onChange={(e) => setMergeNodeType(e.target.value)} className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono text-xs">
++                      {["insight", "client", "domain", "service", "library", "technology", "project", "concept", "repo", "session"].map((t) => <option key={t} value={t}>{t}</option>)}
++                    </select>
++                    <button type="submit" className="w-full py-1.5 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase hover:opacity-90 flex items-center justify-center gap-1"><GitFork size={12} />Merge Nodes</button>
++                  </form>
++                  <div className="space-y-3 pt-4 border-t border-[var(--cp-border)]/30">
++                    <h4 className="text-[10px] text-muted-foreground uppercase font-bold">// BULK CONNECT</h4>
++                    <select value={bulkEdgeType} onChange={(e) => setBulkEdgeType(e.target.value)} className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 font-mono text-xs">
++                      {["relates_to", "learned_from", "uses", "depends_on", "built_with"].map((et) => <option key={et} value={et}>{et.replace(/_/g, " ")}</option>)}
++                    </select>
++                    <button onClick={handleBulkConnect} className="w-full py-1.5 bg-[var(--cp-cyan)]/20 border border-[var(--cp-cyan)]/40 text-[var(--cp-cyan)] font-bold text-xs uppercase hover:bg-[var(--cp-cyan)]/30 flex items-center justify-center gap-1"><Plus size={12} />Connect All</button>
++                  </div>
++                  <div className="pt-2"><button onClick={handleBulkDelete} className="w-full py-1.5 bg-red-950/20 border border-red-500/30 text-red-400 font-bold text-xs uppercase hover:bg-red-950/40 flex items-center justify-center gap-1"><Trash2 size={12} />Delete Selected</button></div>
++                </div>
++              ) : selectedNode ? (
++                <div className="space-y-4">
++                  <div className="border-b border-[var(--cp-border)] pb-2 flex items-center justify-between">
++                    <span className="text-[10px] font-mono text-[var(--cp-cyan)] uppercase bg-[rgba(0,229,255,0.06)] px-1.5 py-0.5 border border-[var(--cp-cyan)]/20 rounded">{selectedNode.node_type}</span>
++                    {selectedNode.status === "staged" ? <span className="text-[9px] font-mono text-yellow-500 uppercase bg-yellow-950/20 px-1 border border-yellow-500/20 rounded">staged</span> : <span className="text-[9px] font-mono text-green-500 uppercase bg-green-950/20 px-1 border border-green-500/20 rounded">committed</span>}
++                  </div>
++                  <div><h3 className="text-md font-bold text-foreground mt-2">{selectedNode.title || selectedNode.id}</h3></div>
++                  {selectedNode.content && (
++                    <div>
++                      <h4 className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">// CONTENT</h4>
++                      <pre className="text-xs text-foreground/80 whitespace-pre-wrap leading-relaxed bg-[var(--cp-bg-2)] p-2 border border-[var(--cp-border)] max-h-96 overflow-y-auto">{selectedNode.content}</pre>
++                    </div>
++                  )}
++                  {selectedNode.metadata?.source && (<div><h4 className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">// SOURCE</h4><p className="text-xs text-foreground/70">{selectedNode.metadata.source}</p></div>)}
++                  <div className="pt-2">
++                    <button onClick={() => { setConnectTargetId(""); setIsConnectModalOpen(true); }} className="w-full py-2 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase hover:opacity-90 flex items-center justify-center gap-1.5"><GitFork size={14} />CONNECT_NODE</button>
++                  </div>
++                </div>
++              ) : null}
++            </div>
++            <div className="p-4 border-t border-[var(--cp-border)] shrink-0 bg-[var(--cp-bg-2)]">
++              <button onClick={handleDeleteSelected} disabled={!selectedNode} title="Delete" className="w-full py-2 border border-red-500/30 text-red-500 disabled:opacity-40 transition-all cursor-pointer flex items-center justify-center gap-1.5 font-mono text-[10px] uppercase hover:bg-red-950/20"><Trash2 size={14} />DELETE_NODE</button>
++            </div>
+           </div>
+-          <div className="p-4 border-t border-[var(--cp-border)] shrink-0 bg-[var(--cp-bg-2)]">
+-            <button onClick={handleDeleteSelected} disabled={!selectedNode} title="Delete" className="w-full py-2 border border-red-500/30 text-red-500 disabled:opacity-40 transition-all cursor-pointer flex items-center justify-center gap-1.5 font-mono text-[10px] uppercase hover:bg-red-950/20"><Trash2 size={14} />DELETE_NODE</button>
+-          </div>
+-        </div>
++        )}
+       </div>
++      {isAddModalOpen && (
++        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
++          <div className="bg-[var(--cp-bg-1)] border border-[var(--cp-border)] w-full max-w-md p-6 rounded shadow-2xl space-y-4">
++            <div className="flex justify-between items-center border-b border-[var(--cp-border)] pb-2">
++              <h3 className="text-sm font-mono text-[var(--cp-cyan)] tracking-wider font-bold">// ADD NODE</h3>
++              <button onClick={() => setIsAddModalOpen(false)} className="text-muted-foreground hover:text-foreground text-xs font-mono">✕</button>
++            </div>
++            <form onSubmit={handleAddNode} className="space-y-4">
++              <div>
++                <label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1">Node Title</label>
++                <input
++                  type="text"
++                  required
++                  value={newNodeTitle}
++                  onChange={(e) => setNewNodeTitle(e.target.value)}
++                  className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono text-xs"
++                />
++              </div>
++              <div>
++                <label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1">Node Type</label>
++                <select
++                  value={newNodeType}
++                  onChange={(e) => setNewNodeType(e.target.value)}
++                  className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono text-xs"
++                >
++                  {["domain", "service", "library", "technology", "concept", "session"].map(t => <option key={t} value={t}>{t}</option>)}
++                </select>
++              </div>
++              <div>
++                <label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1">Content</label>
++                <textarea
++                  rows={4}
++                  value={newNodeContent}
++                  onChange={(e) => setNewNodeContent(e.target.value)}
++                  className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] resize-none font-mono text-xs"
++                />
++              </div>
++              <div className="flex gap-2 justify-end pt-2">
++                <button type="button" onClick={() => setIsAddModalOpen(false)} className="px-4 py-2 border border-[var(--cp-border)] text-xs uppercase font-mono">Cancel</button>
++                <button type="submit" disabled={isSubmittingNode} className="px-4 py-2 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase flex items-center gap-1.5">
++                  <Plus size={14} />
++                  {isSubmittingNode ? "CREATING..." : "CREATE_NODE"}
++                </button>
++              </div>
++            </form>
++          </div>
++        </div>
++      )}
+       {isConnectModalOpen && selectedNode && (
+diff --git a/src/renderer/test/KnowledgeView.test.tsx b/src/renderer/test/KnowledgeView.test.tsx
+--- a/src/renderer/test/KnowledgeView.test.tsx
++++ b/src/renderer/test/KnowledgeView.test.tsx
+@@ -57,4 +57,5 @@
+ 
++    // Open the Add Node modal first
++    fireEvent.click(screen.getByTitle('Add Node'))
+     await screen.findByText('// Add Node')

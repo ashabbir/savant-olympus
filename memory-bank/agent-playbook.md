@@ -28,7 +28,7 @@
 - Knowledge graph UI: `KnowledgeView.tsx`.
 - Context repo/indexing/analysis: `ContextView.tsx`, `ContextVisualizations.tsx`, `FileBrowserModal.tsx`.
 - Abilities: `AbilitiesView.tsx` plus RightPanel custom event triggers.
-- Tools/skills/operators: `ToolsView.tsx`, `SkillsView.tsx`, `UsersView.tsx`.
+- Tools/skills/users: `ToolsView.tsx`, `SkillsView.tsx`, `UsersView.tsx`.
 - Electron local capabilities: `src/main/electron/main.ts`, `preload.ts`.
 - Dev startup: `scripts/start-electron-dev.mjs`.
 

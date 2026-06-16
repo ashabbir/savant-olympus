@@ -645,8 +645,8 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
                     <div className="flex-1 overflow-y-auto font-mono text-[11px] leading-relaxed text-foreground/80 space-y-2 p-1">
                       <p className="text-[10px] text-muted-foreground uppercase tracking-widest border-b border-[var(--cp-border)] pb-1">// SESSION_OVERVIEW</p>
                       <div className="space-y-1 bg-[var(--cp-bg-2)] p-2 border border-[var(--cp-border)]">
-                        <div>WORKSPACE_ID: quorum</div>
-                        <div>OPERATOR: ahmed</div>
+                        <div>WORKSPACE_ID: olympus</div>
+                        <div>USER: ahmed</div>
                         <div>SESSION_PORT: 5174</div>
                         <div>STATUS: ACTIVE</div>
                       </div>

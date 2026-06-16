@@ -16,6 +16,7 @@ State propagated to tabs:
 - `serverUrl`: `settings["server:config"].url` or `http://127.0.0.1:8090`.
 - `apiKey`: `settings["user:apiKey"]` or localStorage key.
 - `selectedProject`: shared by Context and RightPanel.
+- `App.tsx` now uses a startup screen plus login gate, then shows the shell after auth.
 
 ## Navigation tabs
 
@@ -44,6 +45,11 @@ Important behavior:
 Source: `src/renderer/components/tabs/KnowledgeView.tsx`.
 
 Purpose: D3 graph UI over knowledge nodes and edges.
+
+Recent UI behavior:
+- Desktop graph takes most of the page height.
+- Node details show linked nodes, relation direction, and edge type.
+- The link-node popup has search and grouped results by node type.
 
 Important endpoints:
 - `GET /api/knowledge/graph?limit=150&slim=true`
@@ -109,14 +115,21 @@ Important endpoints:
 
 Source: `src/renderer/components/tabs/UsersView.tsx`.
 
-Purpose: operators and credentials view. Current edit behavior is local UI state, not guaranteed persistent server mutation.
-Endpoint: `GET /api/auth/operators`.
+Purpose: Users and credentials management view. Features a flat index of users with search and filter dropdowns.
+End-to-end CRUD REST integrations are used to interact with the backend server:
+- `GET /api/users?include_inactive=true` to fetch users.
+- `POST /api/users` to create a user profile.
+- `PUT /api/users/:id` to edit active/inactive status and profile details.
+- `DELETE /api/users/:id` to delete/deactivate a user.
+- `POST /api/users/:id/api-key` to regenerate a user's API authorization key.
+At the time of user creation or key regeneration, the API key is displayed in a copyable modal overlay, and it is hidden (no show/hide toggle) at all other times.
 
 ## RightPanel
 
 Source: `src/renderer/components/RightPanel.tsx`.
 
 Purpose: context-sensitive secondary drawer. For Context it can search semantic context, list/read memory resources, and list/read indexed code files.
+The node details area also surfaces connection context for the selected graph item.
 
 Important endpoints:
 - `GET /api/context/search?q=...&repo=...`

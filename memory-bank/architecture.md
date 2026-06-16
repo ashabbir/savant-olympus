@@ -8,7 +8,7 @@ Savant Olympus is a desktop control surface for Savant. It packages a React rend
 
 1. Electron main process
    - Source: `src/main/electron/main.ts`.
-   - Initializes a local SQLite settings store under `~/.savant/quorum.db`.
+   - Initializes a local SQLite settings store under `~/.savant/olympus.db`.
    - Creates the BrowserWindow and tray.
    - Exposes IPC handlers for local settings, provider discovery, local directory browsing, and gateway agent run forwarding.
 

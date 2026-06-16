@@ -17,7 +17,9 @@ interface McpTool {
 }
 
 const MCP_WORKSPACES_TOOLS: McpTool[] = [
-  { name: "get_current_workspace", desc: "Auto-detect workspace for this session", icon: "🧭", params: [] },
+  { name: "get_current_workspace", desc: "Auto-detect workspace for this session", icon: "🧭", params: [
+    { key: "session_id", label: "Session ID", default: "" }
+  ]},
   { name: "list_workspaces", desc: "List all workspaces (open/closed/all)", icon: "📋", params: [
     { key: "status", label: "Status", default: "open", type: "select", options: ["open", "closed", "all"] }
   ]},
@@ -59,9 +61,12 @@ const MCP_WORKSPACES_TOOLS: McpTool[] = [
     { key: "status", label: "Status", default: "" }
   ]},
   { name: "create_session_note", desc: "Add a note to current session", icon: "📝", params: [
-    { key: "text", label: "Note text", default: "" }
+    { key: "text", label: "Note text", default: "" },
+    { key: "session_id", label: "Session ID", default: "" }
   ]},
-  { name: "list_session_notes", desc: "List notes for current session", icon: "📋", params: [] },
+  { name: "list_session_notes", desc: "List notes for current session", icon: "📋", params: [
+    { key: "session_id", label: "Session ID", default: "" }
+  ]},
   { name: "list_jira_tickets", desc: "List Jira tickets in workspace", icon: "🎫", params: [
     { key: "workspace_id", label: "Workspace ID", default: "" },
     { key: "status", label: "Status", default: "" }

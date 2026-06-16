@@ -45,6 +45,7 @@ Vitest runs from Vite root `src/renderer`. Test setup is `src/renderer/test/setu
 - `src/renderer/test/AuthAndShell.test.tsx` — auth storage, LoginScreen, ProfileModal, SettingsModal, BottomBar.
 - `src/renderer/test/ContextAnalysis.test.tsx` — AST complexity and source analysis helpers.
 - `src/renderer/test/KnowledgeView.test.tsx` — knowledge graph loading, node creation, layer/maintenance actions.
+- `src/renderer/test/KnowledgeView.test.tsx` now also covers connection summaries and graph interaction updates.
 
 ## Known quality issues
 
@@ -52,6 +53,7 @@ Vitest runs from Vite root `src/renderer`. Test setup is `src/renderer/test/setu
 - Production renderer bundle is large (~993 kB before gzip in recent builds). Consider dynamic imports/code splitting for D3-heavy Knowledge and Context visualization modules.
 - `npm audit` reports Electron 31.0.0 advisories. npm suggests a semver-major Electron upgrade path.
 - Several tabs contain fallback/demo data for API failure states. Tests may pass on fallback data; integration behavior should be validated against the Savant server where possible.
+- Packaged builds now load the bundled renderer from `app.asar`; black-screen regressions should be checked against the packaged app, not only dev mode.
 
 ## Coverage posture
 

@@ -4,13 +4,19 @@
 
 `src/main/electron/main.ts` owns:
 - Local directory `~/.savant` creation.
-- SQLite database `~/.savant/quorum.db` via `better-sqlite3`.
+- SQLite database `~/.savant/olympus.db` via `better-sqlite3`.
 - `settings` table: `key TEXT PRIMARY KEY, value TEXT`.
-- Log file `~/.savant/quorum.log` through console wrappers.
+- Log file `~/.savant/olympus.log` through console wrappers.
 - BrowserWindow creation and tray menu.
+- Packaged builds load `app.asar/dist/index.html` via a `file://` URL; dev builds continue to use `VITE_DEV_SERVER_URL`.
 - Gateway provider discovery by probing known endpoints: `/models`, `/health`, `/providers`, `/api/providers`, `/v1/providers`, `/models/providers`.
 - Gateway run forwarding through `/runs` and `/runs/:id`.
 - Directory picker/listing used by Context repo registration.
+
+Icon/runtime notes:
+- BrowserWindow icon uses `main1.svg`.
+- Tray icon uses `tray1.svg`.
+- The macOS `.icns` file in `build/` must be valid or the app icon can appear blank in packaged builds.
 
 ## Preload bridge
 

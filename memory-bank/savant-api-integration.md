@@ -89,3 +89,14 @@ It performs client-side D3 layout, layer filtering, search, focus/explore mode, 
 ## Abilities integration
 
 AbilitiesView expects assets grouped by type from `/api/abilities/assets`. Asset IDs use forms like `persona.engineer`, `rule.coding_style`, repo overlays, policies, and styles. Prompt resolution is delegated to `/api/abilities/resolve` with `{ persona, tags, repo_id }`.
+
+## Context Visualizations AI Chat Integration (v5.0)
+
+Contextual refactoring chat is integrated directly inside the visualizer drawer (`DetailDrawer` in `src/renderer/components/tabs/ContextVisualizations.tsx`).
+
+1. **Preload & IPC Bridge**: The renderer calls `window.ipcRenderer.invoke('run-agent', ...)` to interact with the gateway's run execution endpoint `/runs`.
+2. **Dynamic Model Discovery**: On tab mount, the drawer executes `window.system.listProviders(...)` which maps models and providers returned dynamically from the Savant Gateway. If the gateway is offline, it falls back to sqlite settings (`provider:chain`).
+3. **Structured Context Prompting**: Before sending the user query, a highly structured context prompt is assembled combining the selected visualizer node context (complexity scores, McCabe grade, target path, line span, and target goal), static analysis findings, previous conversation history, and the new message payload.
+4. **Terminal Warning Filtering**: The IPC handler in `main.ts` intercepts the response text and strips any lines starting with `Warning:` (case-insensitive) to clean terminal environment warnings (like 256-color support notices) from AI outputs.
+5. **Adjustable UI Panel**: The drawer is built as a column flexbox with a `col-resize` mouse handler on its left edge. Independent scrolling is applied to Details and Messages containers while locking the header, tabs, and input form on screen.
+
