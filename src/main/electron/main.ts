@@ -35,6 +35,11 @@ async function initDb() {
         key TEXT PRIMARY KEY,
         value TEXT
       );
+      CREATE TABLE IF NOT EXISTS chat_history (
+        target_id TEXT PRIMARY KEY,
+        messages TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `)
     console.log('[OLYMPUS] SQLite engine initialized.')
   } catch (e) {
@@ -267,6 +272,43 @@ ipcMain.handle('run-agent', async (_event, { provider, model, prompt }) => {
   }
 })
 
+ipcMain.handle('save-chat-history', async (_event, { target_id, messages }) => {
+  if (!db) return false
+  try {
+    const val = typeof messages === 'string' ? messages : JSON.stringify(messages)
+    db.prepare(`
+      INSERT INTO chat_history (target_id, messages, updated_at) 
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(target_id) DO UPDATE SET messages=excluded.messages, updated_at=CURRENT_TIMESTAMP
+    `).run(target_id, val)
+    return true
+  } catch (e) {
+    console.error('Failed to save chat history:', target_id, e)
+    return false
+  }
+})
+
+ipcMain.handle('get-chat-history', async (_event, target_id) => {
+  if (!db) return []
+  try {
+    const row = db.prepare('SELECT messages FROM chat_history WHERE target_id = ?').get(target_id)
+    if (!row) return []
+    return JSON.parse(row.messages)
+  } catch (e) {
+    return []
+  }
+})
+
+ipcMain.handle('clear-chat-history', async (_event, target_id) => {
+  if (!db) return false
+  try {
+    db.prepare('DELETE FROM chat_history WHERE target_id = ?').run(target_id)
+    return true
+  } catch (e) {
+    return false
+  }
+})
+
 ipcMain.handle('get-user', async () => {
   try {
     return os.userInfo().username
@@ -365,3 +407,14 @@ ipcMain.handle('list-directory', async (_event, dirPath) => {
     return []
   }
 })
+
+ipcMain.handle('read-graphify-json', async (_event, repoPath) => {
+  try {
+    const filePath = path.join(repoPath, 'graphify-out', 'graph.json')
+    const content = await fs.readFile(filePath, 'utf8')
+    return JSON.parse(content)
+  } catch (e) {
+    return null
+  }
+})
+

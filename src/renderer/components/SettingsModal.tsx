@@ -594,7 +594,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
                 </div>
 
                 <div className="pt-2">
-                  <label style={labelStyle} className="block text-xs mb-2 opacity-70">Active AI Model</label>
+                  <label style={labelStyle} className="block text-xs mb-2 opacity-70">ATHENA Mental Mode</label>
                   <select
                     value={providerChain[0] ? `${providerChain[0].provider}/${providerChain[0].model}` : "gemini/3.5"}
                     onChange={(e) => {

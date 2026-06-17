@@ -27,6 +27,10 @@ const mockSystem = {
   saveSetting: vi.fn().mockResolvedValue(true),
   listProviders: vi.fn().mockResolvedValue({ source: 'gateway', providers: [] }),
   getDbStatus: vi.fn().mockResolvedValue('connected'),
+  getChatHistory: vi.fn().mockResolvedValue([]),
+  saveChatHistory: vi.fn().mockResolvedValue(true),
+  clearChatHistory: vi.fn().mockResolvedValue(true),
+  readGraphifyJson: vi.fn().mockResolvedValue(null),
 }
 
 const localStorageMock = (() => {

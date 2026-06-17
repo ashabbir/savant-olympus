@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Search, Folder, RefreshCw, Trash2, Cpu, FileCode, CheckCircle, Database, AlertTriangle, Layers, Play, Square, Trash, Zap, Clock } from "lucide-react";
+import { Search, Folder, RefreshCw, Trash2, Cpu, FileCode, CheckCircle, Database, AlertTriangle, Layers, Play, Square, Trash, Zap, Clock, Upload } from "lucide-react";
 import { ContextVisualizations, analyzeProjectSource } from "./ContextVisualizations";
+import { GraphifyVisualizer } from "./GraphifyVisualizer";
 import { FileBrowserModal } from "../FileBrowserModal";
 import { toast } from "sonner";
 
@@ -77,7 +78,196 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
   const [astNodes, setAstNodes] = useState<any[]>([]);
   const [analysisResults, setAnalysisResults] = useState<any | null>(null);
-  const [detailsTab, setDetailsTab] = useState<"overview" | "visuals">("overview");
+  const [detailsTab, setDetailsTab] = useState<"overview" | "visuals" | "graphify">("overview");
+
+  const [graphifyJson, setGraphifyJson] = useState<any | null>(null);
+  const [graphifyStats, setGraphifyStats] = useState<any | null>(null);
+  const [isUploadingGraphify, setIsUploadingGraphify] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  const [graphVersion, setGraphVersion] = useState(0);
+
+  const fetchGraphifyStats = async (projectName: string) => {
+    try {
+      const res = await fetch(`${baseUrl}/api/graphify/stats?workspace_id=${encodeURIComponent(projectName)}`, {
+        headers: { "X-API-Key": apiKey }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setGraphifyStats(data);
+        if ((!data || data.total === 0) && detailsTab === "graphify") {
+          setDetailsTab("overview");
+        }
+      } else {
+        setGraphifyStats(null);
+        if (detailsTab === "graphify") {
+          setDetailsTab("overview");
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      setGraphifyStats(null);
+      if (detailsTab === "graphify") {
+        setDetailsTab("overview");
+      }
+    }
+  };
+
+  const handleUploadGraphify = async () => {
+    if (!selectedRepo) return;
+    setIsUploadingGraphify(true);
+    setUploadSuccess(null);
+    try {
+      let graphData = graphifyJson;
+      if (typeof window.system?.readGraphifyJson === 'function') {
+        const freshJson = await window.system.readGraphifyJson(selectedRepo.path);
+        if (freshJson) {
+          graphData = freshJson;
+          setGraphifyJson(freshJson);
+        } else {
+          throw new Error("Could not read local graphify-out/graph.json. Please generate it first.");
+        }
+      } else if (!graphData) {
+        throw new Error("Local graphify-out/graph.json is not loaded and filesystem is not accessible in this context.");
+      }
+
+      const res = await fetch(`${baseUrl}/api/graphify/import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": apiKey
+        },
+        body: JSON.stringify({
+          workspace_id: selectedRepo.name,
+          graph: graphData
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUploadSuccess(`Successfully uploaded Graphify KG! Imported ${data.nodes_imported} nodes and ${data.edges_imported} edges.`);
+        fetchGraphifyStats(selectedRepo.name);
+        setGraphVersion((prev) => prev + 1);
+      } else {
+        const err = await res.json();
+        setUploadSuccess(`Upload failed: ${err.error || "unknown error"}`);
+      }
+    } catch (e: any) {
+      setUploadSuccess(`Upload failed: ${e.message}`);
+    } finally {
+      setIsUploadingGraphify(false);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!selectedRepo) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploadingGraphify(true);
+    setUploadSuccess(null);
+
+    const jsonFiles = Array.from(files).filter((file) => file.name.toLowerCase().endsWith(".json"));
+    if (jsonFiles.length === 0) {
+      setUploadSuccess("No JSON files found in the selected directory.");
+      setIsUploadingGraphify(false);
+      e.target.value = "";
+      return;
+    }
+
+    const promises = jsonFiles.map((file) => {
+      return new Promise<{ name: string; content: any }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          try {
+            const text = evt.target?.result;
+            if (typeof text !== "string") throw new Error("Could not read file");
+            const json = JSON.parse(text);
+            resolve({ name: file.name, content: json });
+          } catch (err) {
+            reject(err);
+          }
+        };
+        reader.readAsText(file);
+      });
+    });
+
+    Promise.all(promises)
+      .then(async (results) => {
+        let graphJson: any = null;
+        let metaJson: any = null;
+
+        results.forEach((item) => {
+          if (item.content.nodes || item.content.edges || item.content.vertices) {
+            graphJson = item.content;
+          } else {
+            metaJson = item.content;
+          }
+        });
+
+        // Fallback if only 1 file is selected
+        if (!graphJson && results.length === 1) {
+          graphJson = results[0].content;
+        }
+
+        if (!graphJson) {
+          throw new Error("Could not find a valid graph JSON file containing nodes/edges in the selected directory.");
+        }
+
+        const res = await fetch(`${baseUrl}/api/graphify/import`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": apiKey
+          },
+          body: JSON.stringify({
+            workspace_id: selectedRepo.name,
+            graph: graphJson,
+            meta: metaJson
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setUploadSuccess(`Successfully uploaded Graphify KG! Imported ${data.nodes_imported} nodes and ${data.edges_imported} edges.`);
+          fetchGraphifyStats(selectedRepo.name);
+          setGraphVersion((prev) => prev + 1);
+        } else {
+          const err = await res.json();
+          setUploadSuccess(`Upload failed: ${err.error || "unknown error"}`);
+        }
+      })
+      .catch((err: any) => {
+        setUploadSuccess(`Upload failed: ${err.message}`);
+      })
+      .finally(() => {
+        setIsUploadingGraphify(false);
+        e.target.value = "";
+      });
+  };
+
+  const selectedRepo = repos.find((r) => r.name === selectedProject);
+
+  useEffect(() => {
+    if (selectedRepo?.path) {
+      setGraphifyJson(null);
+      setUploadSuccess(null);
+      if (typeof window.system?.readGraphifyJson === 'function') {
+        window.system.readGraphifyJson(selectedRepo.path)
+          .then((json) => {
+            if (json) {
+              setGraphifyJson(json);
+            }
+          })
+          .catch((err) => {
+            console.error("Failed to read graphify json on mount:", err);
+          });
+      }
+      fetchGraphifyStats(selectedRepo.name);
+    } else {
+      setGraphifyJson(null);
+      setGraphifyStats(null);
+      setUploadSuccess(null);
+    }
+  }, [selectedRepo?.path, selectedRepo?.name, baseUrl, apiKey]);
 
   const fetchAstAndAnalyze = async (projectName: string) => {
     try {
@@ -174,12 +364,6 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   };
 
   const handleBrowseDirectory = async () => {
-    const dirCfg = sources?.directory;
-    const baseHostDir = dirCfg?.base_host_dir || "";
-    if (!baseHostDir) {
-      alert("Server is missing BASE_CODE_HOST_DIR. Enter a relative path manually.");
-      return;
-    }
     setIsFileBrowserOpen(true);
   };
 
@@ -372,7 +556,6 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     }
   };
 
-  const selectedRepo = repos.find((r) => r.name === selectedProject);
   const statusInfo = selectedProject ? indexingStatus[selectedProject] || {} : {};
   const liveStatus = (statusInfo.status || selectedRepo?.status || "ready").toLowerCase();
   const isCurrentlyIndexing = liveStatus === "indexing" || liveStatus === "running" || liveStatus === "queued" || liveStatus === "processing";
@@ -524,6 +707,18 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                 >
                   Visualizations & Heuristics
                 </button>
+                {graphifyStats && graphifyStats.total > 0 && (
+                  <button
+                    onClick={() => setDetailsTab("graphify")}
+                    className={`px-3 py-1 text-xs uppercase border ${
+                      detailsTab === "graphify"
+                        ? "border-[var(--cp-cyan)] text-[var(--cp-cyan)] bg-[rgba(0,229,255,0.06)]"
+                        : "border-[var(--cp-border)] text-muted-foreground hover:text-foreground"
+                    } cursor-pointer`}
+                  >
+                    Codebase Graph (Graphify)
+                  </button>
+                )}
               </div>
 
               {detailsTab === "overview" ? (
@@ -565,7 +760,62 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     >
                       <Trash2 size={12} /> DELETE PROJECT
                     </button>
+                    <button
+                      onClick={() => document.getElementById("graphify-file-input")?.click()}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-cyan-950 text-[var(--cp-cyan)] border border-cyan-900 hover:bg-cyan-900 cursor-pointer font-mono font-bold"
+                      disabled={isUploadingGraphify}
+                    >
+                      <Upload size={12} /> {isUploadingGraphify ? "UPLOADING..." : "SELECT GRAPHIFY DIR"}
+                    </button>
+                    <input
+                      type="file"
+                      id="graphify-file-input"
+                      {...({
+                        webkitdirectory: "",
+                        directory: "",
+                      } as any)}
+                      style={{ display: "none" }}
+                      onChange={handleFileChange}
+                    />
                   </div>
+
+                  {/* Graphify Upload/Sync Banner */}
+                  {graphifyJson && (() => {
+                    const serverTotal = graphifyStats?.total || 0;
+                    const localTotal = graphifyJson.nodes?.length || 0;
+                    const needsSync = serverTotal > 0 && serverTotal !== localTotal;
+                    
+                    if (serverTotal === 0 || needsSync) {
+                      return (
+                        <div className="bg-cyan-950/20 border border-[var(--cp-cyan)]/30 p-4 rounded flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs font-mono backdrop-blur-md">
+                          <div>
+                            <h5 className="text-[var(--cp-cyan)] font-bold uppercase tracking-wider mb-1">
+                              {needsSync ? "// Graphify Update Available" : "// Graphify Data Detected"}
+                            </h5>
+                            <p className="text-muted-foreground">
+                              {needsSync 
+                                ? `Your local codebase Graphify is updated. (Local: ${localTotal} nodes, Server: ${serverTotal} nodes). Do you want to sync it with the server?`
+                                : `Found graphify-out/graph.json with ${localTotal} nodes and ${(graphifyJson.links?.length || graphifyJson.edges?.length || 0)} edges.`}
+                            </p>
+                          </div>
+                          <button
+                            onClick={handleUploadGraphify}
+                            disabled={isUploadingGraphify}
+                            className="px-4 py-2 bg-cyan-950 text-[var(--cp-cyan)] border border-cyan-900 hover:bg-cyan-900 cursor-pointer font-bold tracking-wider uppercase text-[10px] self-start md:self-auto shrink-0 transition-all duration-300"
+                          >
+                            {isUploadingGraphify ? "Uploading..." : needsSync ? "Sync Graphify" : "Upload Graphify JSON"}
+                          </button>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+
+                  {uploadSuccess && (
+                    <div className="bg-stone-900/50 border border-stone-800 text-foreground p-3 text-xs font-mono rounded">
+                      {uploadSuccess}
+                    </div>
+                  )}
 
                   {/* Progress Section */}
                   {isCurrentlyIndexing && (
@@ -618,6 +868,25 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     </div>
                   </div>
 
+                  {/* Graphify Stats */}
+                  {graphifyStats && graphifyStats.total > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="text-[11px] uppercase font-mono text-[var(--cp-cyan)] tracking-wider">// Graphify Stats</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {Object.entries(graphifyStats.stats || {}).map(([type, count]) => (
+                          <div key={type} className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded">
+                            <span className="block text-[10px] font-mono text-muted-foreground uppercase">{type} Nodes</span>
+                            <span className="text-lg font-bold text-foreground">{count as number}</span>
+                          </div>
+                        ))}
+                        <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded">
+                          <span className="block text-[10px] font-mono text-muted-foreground uppercase">Total Graphify Nodes</span>
+                          <span className="text-lg font-bold text-foreground">{graphifyStats.total}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Languages Distribution */}
                   {selectedRepo.languages && Object.keys(selectedRepo.languages).length > 0 && (
                     <div className="space-y-2">
@@ -660,8 +929,69 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     </div>
                   </div>
                 </>
+              ) : detailsTab === "visuals" ? (
+                <ContextVisualizations nodes={astNodes} repoName={selectedRepo.name} analysis={analysisResults} activeModel={activeModel} serverUrl={serverUrl} apiKey={apiKey} />
               ) : (
-                <ContextVisualizations nodes={astNodes} repoName={selectedRepo.name} analysis={analysisResults} activeModel={activeModel} />
+                <div className="flex flex-col h-full gap-3">
+                  <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded flex items-center justify-between gap-3 text-xs font-mono">
+                    <div className="flex items-center gap-4">
+                      <span className="text-muted-foreground">
+                        SERVER DB: <strong className="text-foreground">{graphifyStats?.total || 0} nodes</strong>
+                      </span>
+                      {graphifyJson && (
+                        <>
+                          <span className="text-muted-foreground">|</span>
+                          <span className="text-muted-foreground">
+                            LOCAL JSON: <strong className="text-foreground">{graphifyJson.nodes?.length || 0} nodes</strong>
+                          </span>
+                          {graphifyStats?.total !== graphifyJson.nodes?.length ? (
+                            <span className="px-1.5 py-0.5 bg-yellow-950/40 border border-yellow-500/50 text-yellow-500 rounded text-[9px] uppercase font-bold">
+                              Out of Sync
+                            </span>
+                          ) : (
+                            <span className="px-1.5 py-0.5 bg-green-950/40 border border-green-500/50 text-green-500 rounded text-[9px] uppercase font-bold">
+                              Synced
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    {typeof window.system?.readGraphifyJson === 'function' && (
+                      <button
+                        onClick={handleUploadGraphify}
+                        disabled={isUploadingGraphify}
+                        className="px-3 py-1 bg-cyan-950 text-[var(--cp-cyan)] border border-cyan-900 hover:bg-cyan-900 cursor-pointer font-bold uppercase text-[9px] transition-all duration-300"
+                      >
+                        {isUploadingGraphify ? "Pushing..." : "Push Local Graph to Server DB"}
+                      </button>
+                    )}
+                  </div>
+
+                  {graphifyStats && graphifyStats.total > 0 ? (
+                    <GraphifyVisualizer
+                      key={`${selectedRepo.name}-${graphVersion}`}
+                      repoName={selectedRepo.name}
+                      baseUrl={serverUrl}
+                      apiKey={apiKey}
+                      activeModel={activeModel}
+                    />
+                  ) : (
+                    <div className="flex-1 min-h-[350px] bg-[var(--cp-bg-2)] border border-[var(--cp-border)] rounded flex flex-col items-center justify-center text-center p-6">
+                      <p className="text-xs font-mono text-muted-foreground max-w-md mb-4 leading-relaxed uppercase">
+                        No Graphify data stored on the server for this repository. Please run graphify locally and push it to the PostgreSQL database.
+                      </p>
+                      {typeof window.system?.readGraphifyJson === 'function' && (
+                        <button
+                          onClick={handleUploadGraphify}
+                          disabled={isUploadingGraphify}
+                          className="px-4 py-2 bg-cyan-950 text-[var(--cp-cyan)] border border-cyan-900 hover:bg-cyan-900 cursor-pointer font-bold tracking-wider uppercase text-[10px] transition-all duration-300"
+                        >
+                          {isUploadingGraphify ? "Pushing Graphify Data..." : "Push Local Graph to Server DB"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           ) : (
@@ -805,8 +1135,8 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         isOpen={isFileBrowserOpen}
         onClose={() => setIsFileBrowserOpen(false)}
         onSelect={(path) => setDirPath(path)}
-        initialPath={dirPath ? (sources?.directory?.base_host_dir + "/" + dirPath).replace(/\/+$/, "") : sources?.directory?.base_host_dir}
-        basePath={sources?.directory?.base_host_dir || ""}
+        initialPath={dirPath}
+        basePath=""
         serverUrl={serverUrl}
         apiKey={apiKey}
       />

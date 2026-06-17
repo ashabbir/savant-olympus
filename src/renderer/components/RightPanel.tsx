@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Activity, GitBranch, FileText, Upload, Sparkles, Search, ListChecks, Terminal, RefreshCcw, Timer, Cpu, Zap, FileCode, Database, Trash2, Download } from "lucide-react";
+import { Activity, GitBranch, FileText, Upload, Sparkles, Search, ListChecks, Terminal, RefreshCcw, Timer, Cpu, Zap, FileCode, Database, Trash2, Download, Plus, Check } from "lucide-react";
 import { AreaChart, Area, LineChart, Line, ResponsiveContainer } from "recharts";
 import { motion, AnimatePresence } from "motion/react";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -328,9 +328,19 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
         className="h-full shrink-0 flex flex-col justify-start items-center py-4 gap-4 z-20"
       >
         <NavIcon
+          icon={<Plus size={16} />}
+          label="Add Node"
+          onClick={() => window.dispatchEvent(new CustomEvent("knowledge-add-node"))}
+        />
+        <NavIcon
           icon={<RefreshCcw size={16} />}
           label="Reload Graph"
           onClick={() => window.dispatchEvent(new CustomEvent("knowledge-reload"))}
+        />
+        <NavIcon
+          icon={<Check size={16} />}
+          label="Commit All"
+          onClick={() => window.dispatchEvent(new CustomEvent("knowledge-commit-all"))}
         />
         <NavIcon
           icon={<Trash2 size={16} style={{ color: "var(--cp-magenta)" }} />}

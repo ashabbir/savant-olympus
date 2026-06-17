@@ -31,6 +31,10 @@ if (!window.system) {
       })),
     }),
     getDbStatus: async () => 'connected',
+    getChatHistory: async (_target_id: string) => [],
+    saveChatHistory: async (_target_id: string, _messages: any[]) => true,
+    clearChatHistory: async (_target_id: string) => true,
+    readGraphifyJson: async (_repoPath: string) => null,
   }
 }
 

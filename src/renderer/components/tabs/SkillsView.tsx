@@ -3,8 +3,9 @@ import JSZip from "jszip";
 import { 
   Award, ShieldCheck, Trash2, Plus, Search, Bot, Send, 
   Download, Code, FileText, Check, Sparkles, AlertTriangle, 
-  Play, RefreshCcw, Save, HelpCircle, ChevronRight, X
+  Play, RefreshCcw, Save, HelpCircle, ChevronRight, X, Copy
 } from "lucide-react";
+import { buildAthenaPromptSections, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits } from "@/lib/athenaContext";
 
 interface Skill {
   id: string;
@@ -33,6 +34,9 @@ interface ChatMessage {
   timestamp: string;
   suggestedSkill?: Partial<Skill>;
 }
+
+const ATHENA_CHAT_HISTORY_KEY = "savant_athena_chat_history";
+const ATHENA_SKILLS_SCOPE = "skills";
 
 const DEFAULT_SKILLS: Skill[] = [
   {
@@ -239,25 +243,65 @@ export function SkillsView({ serverUrl, apiKey, activeModel }: SkillsViewProps) 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
+  const readSharedAthenaHistory = () => {
+    try {
+      const stored = localStorage.getItem(ATHENA_CHAT_HISTORY_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  };
+  const writeSharedAthenaHistory = (messages: any[]) => {
+    localStorage.setItem(ATHENA_CHAT_HISTORY_KEY, JSON.stringify(messages));
+  };
+  const formatAthenaHistory = (messages: any[]) =>
+    messages.length > 0
+      ? messages.map(msg => `[${msg.scope || "general"}] ${msg.sender.toUpperCase()}: ${msg.text}`).join("\n")
+      : "No previous messages in this conversation.";
+  const handleCopyMessage = (text: string) => navigator.clipboard.writeText(text);
+  const handleDeleteMessage = (id: string) => {
+    const nextMessages = chatMessages.filter(msg => msg.id !== id);
+    setChatMessages(nextMessages);
+    writeSharedAthenaHistory(readSharedAthenaHistory().filter((msg: any) => msg.id !== id));
+  };
+  const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
+    const [codeHits, knowledgeHits, tools] = await Promise.all([
+      fetchAthenaCodeContext(baseUrl, apiKey, query),
+      fetchAthenaKnowledgeContext(baseUrl, apiKey, query),
+      fetchAthenaMcpTools(baseUrl, apiKey),
+    ]);
+
+    return buildAthenaPromptSections([
+      ["BASE PROMPT", basePrompt],
+      ["RETRIEVED CODE CONTEXT", formatAthenaContextHits(codeHits)],
+      ["RETRIEVED KNOWLEDGE CONTEXT", formatAthenaContextHits(knowledgeHits)],
+      ["AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools available."],
+    ]);
+  };
 
   // Load initial skills
   useEffect(() => {
     fetchSkills();
   }, [baseUrl]);
 
-  // Listen for the redirect event to open AI Chat
+  // Listen for the redirect event to open Ask ATHENA
   useEffect(() => {
     const handleOpenAiChat = () => {
       setIsAiMode(true);
       if (chatMessages.length === 0) {
-        setChatMessages([
-          {
-            id: "welcome",
-            sender: "assistant",
-            text: "Hi! I am the Savant AI Skill Assistant. Tell me what capability or skill you'd like to build, and I will generate the complete configuration, parameter schema, and implementation code for you!",
-            timestamp: new Date().toISOString()
-          }
-        ]);
+        const sharedHistory = readSharedAthenaHistory().filter((msg: any) => msg.scope === ATHENA_SKILLS_SCOPE || !msg.scope);
+        setChatMessages(
+          sharedHistory.length > 0
+            ? sharedHistory
+            : [
+                {
+                  id: "welcome",
+                  sender: "assistant",
+                  text: "Hi! I am the Savant AI Skill Assistant. Tell me what capability or skill you'd like to build, and I will generate the complete configuration, parameter schema, and implementation code for you!",
+                  timestamp: new Date().toISOString()
+                }
+              ]
+        );
       }
     };
     window.addEventListener("open-skill-ai-chat", handleOpenAiChat);
@@ -490,7 +534,7 @@ Please output the FULL updated contents of the file. Do NOT include markdown sty
       const response = await window.ipcRenderer.invoke("run-agent", {
         provider: activeModel?.provider || "gemini",
         model: activeModel?.model || "3.5",
-        prompt: promptPayload
+        prompt: await buildAthenaAugmentedPrompt(promptPayload, `${selectedSkill.name} ${selectedSkill.description || ""} ${refinePrompt} ${editorContent.slice(0, 500)}`)
       });
 
       if (response && !response.startsWith("Error:")) {
@@ -534,6 +578,7 @@ Please output the FULL updated contents of the file. Do NOT include markdown sty
       const promptPayload = `You are a helpful AI Skill Architect designing a new Savant skill module based on user input.
 
 Here is the conversation history so far:
+${formatAthenaHistory(readSharedAthenaHistory())}
 ${chatHistory}
 
 You MUST respond with a valid JSON object. Do not include any markdown wrap, extra explanation, or conversational text outside of the JSON.
@@ -565,7 +610,7 @@ If you have a decent understanding of the core behavior and are ready to generat
       const res = await window.ipcRenderer.invoke("run-agent", {
         provider: activeModel?.provider || "gemini",
         model: activeModel?.model || "3.5",
-        prompt: promptPayload
+        prompt: await buildAthenaAugmentedPrompt(promptPayload, `${chatInput} ${chatHistory}`)
       });
 
       let cleanRes = res || "";
@@ -597,12 +642,16 @@ If you have a decent understanding of the core behavior and are ready to generat
       try {
         const parsed = parseJsonSafely(cleanRes);
         if (parsed.status === "clarifying" && parsed.question) {
-          setChatMessages(prev => [...prev, {
+          const assistantMsg = {
             id: Math.random().toString(),
-            sender: "assistant",
+            sender: "assistant" as const,
             text: parsed.question,
             timestamp: new Date().toISOString()
+          };
+          setChatMessages(prev => [...prev, {
+            ...assistantMsg
           }]);
+          writeSharedAthenaHistory([...readSharedAthenaHistory(), { ...assistantMsg, scope: ATHENA_SKILLS_SCOPE }]);
         } else if (parsed.status === "ready" && parsed.name && parsed.files) {
           const newSkill: Skill = {
             id: `skill-${Date.now()}`,
@@ -623,40 +672,46 @@ If you have a decent understanding of the core behavior and are ready to generat
           setSelectedSkill(newSkill);
           handleSaveLocalSkills(nextSkills);
 
-          setChatMessages(prev => [...prev, {
+          const assistantMsg = {
             id: Math.random().toString(),
-            sender: "assistant",
+            sender: "assistant" as const,
             text: `Awesome! After our interview, I generated the **${newSkill.name}** skill successfully. I have loaded it into your environment and saved it! You can view and edit its files in the editor now.`,
             timestamp: new Date().toISOString(),
             suggestedSkill: newSkill
-          }]);
+          };
+          setChatMessages(prev => [...prev, assistantMsg]);
+          writeSharedAthenaHistory([...readSharedAthenaHistory(), { ...assistantMsg, scope: ATHENA_SKILLS_SCOPE }]);
 
           setIsAiMode(false);
         } else {
           throw new Error("Missing status properties.");
         }
       } catch (parseErr) {
-        setChatMessages(prev => [...prev, {
+        const assistantMsg = {
           id: Math.random().toString(),
-          sender: "assistant",
+          sender: "assistant" as const,
           text: cleanRes,
           timestamp: new Date().toISOString()
-        }]);
+        };
+        setChatMessages(prev => [...prev, assistantMsg]);
+        writeSharedAthenaHistory([...readSharedAthenaHistory(), { ...assistantMsg, scope: ATHENA_SKILLS_SCOPE }]);
       }
     } catch (e: any) {
       console.error(e);
-      setChatMessages(prev => [...prev, {
+      const assistantMsg = {
         id: Math.random().toString(),
-        sender: "assistant",
+        sender: "assistant" as const,
         text: `Error contacting the AI model: ${e.message || "Unknown error"}. Make sure your Savant Gateway is running.`,
         timestamp: new Date().toISOString()
-      }]);
+      };
+      setChatMessages(prev => [...prev, assistantMsg]);
+      writeSharedAthenaHistory([...readSharedAthenaHistory(), { ...assistantMsg, scope: ATHENA_SKILLS_SCOPE }]);
     } finally {
       setIsAiChatLoading(false);
     }
   };
 
-  // AI chat to build a new skill
+  // ATHENA to build a new skill
   const handleSendAiChatMessage = async () => {
     if (!chatInput.trim() || isAiChatLoading) return;
 
@@ -669,7 +724,7 @@ If you have a decent understanding of the core behavior and are ready to generat
 
     const nextMessages = [...chatMessages, userMsg];
     setChatMessages(nextMessages);
-    const promptToSend = chatInput;
+    writeSharedAthenaHistory([...readSharedAthenaHistory(), { ...userMsg, scope: ATHENA_SKILLS_SCOPE }]);
     setChatInput("");
     setIsAiChatLoading(true);
 
@@ -681,6 +736,7 @@ If you have a decent understanding of the core behavior and are ready to generat
       const promptPayload = `You are a helpful AI Skill Architect designing a new Savant skill module based on user input.
 
 Here is the conversation history so far:
+${formatAthenaHistory(readSharedAthenaHistory())}
 ${chatHistory}
 
 You MUST respond with a valid JSON object. Do not include any markdown wrap, extra explanation, or conversational text outside of the JSON.
@@ -859,7 +915,7 @@ If you have a decent understanding of the core behavior and are ready to generat
                 }`}
               >
                 <Sparkles size={10} />
-                {isAiMode ? "VIEW EDITOR" : "CREATE WITH AI"}
+                {isAiMode ? "VIEW EDITOR" : "CREATE WITH ATHENA"}
               </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
@@ -955,15 +1011,35 @@ If you have a decent understanding of the core behavior and are ready to generat
                     <div className={`p-1 border rounded shrink-0 ${msg.sender === "user" ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.1)] text-[var(--cp-cyan)]" : "border-pink-500/30 bg-pink-950/10 text-pink-400"}`}>
                       {msg.sender === "user" ? <HelpCircle size={14} /> : <Bot size={14} />}
                     </div>
-                    <div className={`p-3 border text-xs leading-relaxed font-mono ${
-                      msg.sender === "user" 
-                        ? "bg-[var(--cp-bg-2)] border-[var(--cp-border)] text-foreground"
-                        : "bg-[var(--cp-bg-1)] border-pink-500/15 text-pink-50/90"
-                    }`}>
-                      <p className="whitespace-pre-wrap">{msg.text}</p>
-                      <span className="block mt-1.5 text-[9px] text-muted-foreground opacity-50 text-right">
-                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
+                    <div className="relative group">
+                      <div className={`p-3 border text-xs leading-relaxed font-mono ${
+                        msg.sender === "user" 
+                          ? "bg-[var(--cp-bg-2)] border-[var(--cp-border)] text-foreground"
+                          : "bg-[var(--cp-bg-1)] border-pink-500/15 text-pink-50/90"
+                      }`}>
+                        <div className="absolute -top-2 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyMessage(msg.text)}
+                            title="Copy message text"
+                            className="p-1 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground hover:text-[var(--cp-cyan)]"
+                          >
+                            <Copy size={9} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMessage(msg.id)}
+                            title="Delete message"
+                            className="p-1 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground hover:text-red-400"
+                          >
+                            <Trash2 size={9} />
+                          </button>
+                        </div>
+                        <p className="whitespace-pre-wrap">{msg.text}</p>
+                        <span className="block mt-1.5 text-[9px] text-muted-foreground opacity-50 text-right">
+                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ))}

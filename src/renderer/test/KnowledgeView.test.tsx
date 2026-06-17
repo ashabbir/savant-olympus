@@ -24,6 +24,14 @@ describe('KnowledgeView', () => {
       if (u.includes('/api/knowledge/graph')) {
         return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(graphPayload) } as Response)
       }
+      if (u.includes('/api/knowledge/nodes/n1') && (init as RequestInit | undefined)?.method === 'PUT') {
+        const body = JSON.parse(String((init as RequestInit | undefined)?.body || '{}'))
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ ...graphPayload.nodes[0], ...body }),
+        } as Response)
+      }
       if (u.includes('/api/knowledge/nodes/n1')) {
         return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(graphPayload.nodes[0]) } as Response)
       }
@@ -67,7 +75,8 @@ describe('KnowledgeView', () => {
     render(<KnowledgeView serverUrl="http://savant.local" apiKey="sk-test" />)
 
     await screen.findByText('// Knowledge Network')
-    fireEvent.click(screen.getByTitle('Add Node'))
+    await waitFor(() => window.dispatchEvent(new CustomEvent('knowledge-add-node')))
+    await waitFor(() => expect(screen.getByText('Node Title')).toBeInTheDocument())
     const titleInput = screen.getByText('Node Title').parentElement?.querySelector('input') as HTMLInputElement
     const contentInput = screen.getByText('Content').parentElement?.querySelector('textarea') as HTMLTextAreaElement
     fireEvent.change(titleInput, { target: { value: 'New Insight' } })
@@ -88,9 +97,34 @@ describe('KnowledgeView', () => {
     await screen.findByText('// Knowledge Network')
 
     fireEvent.click(screen.getByRole('button', { name: 'service' }))
-    fireEvent.click(screen.getByTitle('Reload'))
-    fireEvent.click(screen.getByTitle('Purge'))
+    window.dispatchEvent(new CustomEvent('knowledge-reload'))
+    window.dispatchEvent(new CustomEvent('knowledge-purge'))
 
     await waitFor(() => expect(window.fetch).toHaveBeenCalledWith('http://savant.local/api/knowledge/purge-workspace', expect.objectContaining({ method: 'POST' })))
+  })
+
+  it('allows editing a node title and type', async () => {
+    render(<KnowledgeView serverUrl="http://savant.local" apiKey="sk-test" />)
+    await screen.findByText('// Knowledge Network')
+
+    fireEvent.change(screen.getByPlaceholderText('Find knowledge node...'), { target: { value: 'Auth' } })
+    fireEvent.click((await screen.findAllByText('Auth Service'))[0])
+
+    const titleInput = screen.getByPlaceholderText('Node title') as HTMLInputElement
+    const typeSelect = screen.getByDisplayValue('service') as HTMLSelectElement
+    fireEvent.change(titleInput, { target: { value: 'Auth Gateway' } })
+    fireEvent.change(typeSelect, { target: { value: 'domain' } })
+    fireEvent.click(screen.getByRole('button', { name: /update/i }))
+
+    await waitFor(() => {
+      expect(window.fetch).toHaveBeenCalledWith(
+        'http://savant.local/api/knowledge/nodes/n1',
+        expect.objectContaining({
+          method: 'PUT',
+          headers: expect.objectContaining({ 'Content-Type': 'application/json', 'X-API-Key': 'sk-test' }),
+          body: JSON.stringify({ title: 'Auth Gateway', node_type: 'domain' }),
+        })
+      )
+    })
   })
 })

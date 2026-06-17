@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { DetailDrawer } from '../components/tabs/ContextVisualizations'
 
-describe('DetailDrawer Component AI Chat Integration', () => {
+describe('DetailDrawer Component ATHENA Integration', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     
@@ -17,10 +17,17 @@ describe('DetailDrawer Component AI Chat Integration', () => {
     // Mock run-agent invoke
     window.ipcRenderer.invoke = vi.fn().mockImplementation((channel) => {
       if (channel === 'run-agent') {
-        return Promise.resolve('This is a simulated AI refactoring advice response.')
+        return Promise.resolve('This is a simulated ATHENA refactoring advice response.')
       }
       return Promise.resolve()
     })
+
+    // Mock fetch for context API calls
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve([]),
+    }))
   })
 
   const mockNode = {
@@ -52,7 +59,7 @@ describe('DetailDrawer Component AI Chat Integration', () => {
     expect(screen.getAllByText('12')[0]).toBeInTheDocument() // complexity score
   })
 
-  it('switches to AI Chat tab when CHAT WITH AI button is clicked', async () => {
+  it('allows switching to Ask ATHENA tab', async () => {
     render(
       <DetailDrawer
         selectedNode={mockNode}
@@ -64,15 +71,15 @@ describe('DetailDrawer Component AI Chat Integration', () => {
       />
     )
 
-    const chatBtn = screen.getByText('CHAT WITH AI')
-    fireEvent.click(chatBtn)
+    const chatTabBtn = screen.getByText('Ask ATHENA')
+    fireEvent.click(chatTabBtn)
 
     await waitFor(() => {
-      expect(screen.getByText('Gateway AI Chat')).toBeInTheDocument()
+      expect(screen.getByText('ATHENA')).toBeInTheDocument()
     })
   })
 
-  it('allows sending a chat message and displays the AI response', async () => {
+  it('allows sending a chat message and displays the ATHENA response', async () => {
     render(
       <DetailDrawer
         selectedNode={mockNode}
@@ -85,27 +92,25 @@ describe('DetailDrawer Component AI Chat Integration', () => {
     )
 
     // Switch to Chat tab
-    const chatTabBtn = screen.getByText('AI Chat')
+    const chatTabBtn = screen.getByText('Ask ATHENA')
     fireEvent.click(chatTabBtn)
 
     // Type and send message
-    const input = screen.getByPlaceholderText('Ask a question about this code...')
+    const input = screen.getByPlaceholderText('Ask ATHENA about this code...')
     fireEvent.change(input, { target: { value: 'How can I fix this?' } })
 
-    const sendBtn = input.nextElementSibling;
-    expect(sendBtn).toBeInTheDocument();
-    if (sendBtn) {
-      fireEvent.click(sendBtn);
-    }
+    const sendBtn = screen.getByText('ASK')
+    expect(sendBtn).toBeInTheDocument()
+    fireEvent.click(sendBtn)
 
     // Wait for the message bubble to be displayed
     await waitFor(() => {
       expect(screen.getByText('How can I fix this?')).toBeInTheDocument()
     })
 
-    // Wait for AI response to load
+    // Wait for response to load
     await waitFor(() => {
-      expect(screen.getByText('This is a simulated AI refactoring advice response.')).toBeInTheDocument()
+      expect(screen.getByText('This is a simulated ATHENA refactoring advice response.')).toBeInTheDocument()
     })
 
     // Verify IPC call

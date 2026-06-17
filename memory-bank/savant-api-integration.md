@@ -90,7 +90,7 @@ It performs client-side D3 layout, layer filtering, search, focus/explore mode, 
 
 AbilitiesView expects assets grouped by type from `/api/abilities/assets`. Asset IDs use forms like `persona.engineer`, `rule.coding_style`, repo overlays, policies, and styles. Prompt resolution is delegated to `/api/abilities/resolve` with `{ persona, tags, repo_id }`.
 
-## Context Visualizations AI Chat Integration (v5.0)
+## Context Visualizations Ask ATHENA Integration (v5.0)
 
 Contextual refactoring chat is integrated directly inside the visualizer drawer (`DetailDrawer` in `src/renderer/components/tabs/ContextVisualizations.tsx`).
 

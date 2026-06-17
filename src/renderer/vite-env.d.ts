@@ -25,6 +25,10 @@ interface Window {
       }>
     }>
     getDbStatus: () => Promise<string>
+    getChatHistory: (target_id: string) => Promise<any[]>
+    saveChatHistory: (target_id: string, messages: any[]) => Promise<boolean>
+    clearChatHistory: (target_id: string) => Promise<boolean>
+    readGraphifyJson: (repoPath: string) => Promise<any | null>
   }
   electronAPI?: {
     pickDirectory: (defaultPath?: string) => Promise<string | null>;

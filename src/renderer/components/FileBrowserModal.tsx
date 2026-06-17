@@ -58,21 +58,17 @@ export function FileBrowserModal({ isOpen, onClose, onSelect, initialPath, baseP
   };
 
   const handleGoBack = () => {
-    if (currentPath === basePath) return;
+    if (currentPath === "" || currentPath === basePath) return;
     const parts = currentPath.split(/[/\\]/);
-    if (parts.length > 1) {
+    if (parts.length > 0) {
       parts.pop();
       setCurrentPath(parts.join("/"));
     }
   };
 
   const handleConfirm = () => {
-    // Return relative path to basePath
-    let relative = currentPath;
-    if (currentPath.startsWith(basePath)) {
-      relative = currentPath.slice(basePath.length).replace(/^[/\\]+/, "");
-    }
-    onSelect(relative);
+    // Return relative path (currentPath is already relative to BASE_CODE_DIR)
+    onSelect(currentPath);
     onClose();
   };
 
@@ -86,7 +82,7 @@ export function FileBrowserModal({ isOpen, onClose, onSelect, initialPath, baseP
           <div className="flex items-center gap-2">
             <Folder size={16} className="text-[var(--cp-cyan)]" />
             <span className="text-xs font-bold text-[var(--cp-cyan)] tracking-wider">
-              // BROWSE SERVER DIRECTORY
+              // BROWSE SERVER (BASE_CODE_DIR)
             </span>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
@@ -98,13 +94,13 @@ export function FileBrowserModal({ isOpen, onClose, onSelect, initialPath, baseP
         <div className="flex items-center gap-2 p-2 bg-[var(--cp-bg-3)] border-b border-[var(--cp-border)] text-[10px]">
           <button 
             onClick={handleGoBack}
-            disabled={currentPath === basePath}
+            disabled={currentPath === "" || currentPath === basePath}
             className="p-1 hover:bg-[var(--cp-bg-4)] disabled:opacity-30 disabled:cursor-not-allowed"
           >
             <ChevronLeft size={14} />
           </button>
           <div className="flex-1 truncate opacity-70">
-            {currentPath}
+            BASE_CODE_DIR / {currentPath || ""}
           </div>
         </div>
 

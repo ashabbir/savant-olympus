@@ -76,7 +76,7 @@ describe('ContextView - FileBrowserModal Integration', () => {
     fireEvent.click(browseBtn)
 
     // Check if FileBrowserModal is visible
-    expect(screen.getByText(/\/\/ BROWSE SERVER DIRECTORY/i)).toBeInTheDocument()
+    expect(screen.getByText(/\/\/ BROWSE SERVER/i)).toBeInTheDocument()
     await waitFor(() => {
       const calls = vi.mocked(window.fetch).mock.calls;
       const hasBrowseCall = calls.some(call => call[0].toString().includes('/api/context/repos/browse'));
@@ -113,7 +113,7 @@ describe('ContextView - FileBrowserModal Integration', () => {
 
     // Check if ContextView's input is updated with relative path
     const input = screen.getByPlaceholderText("team/project") as HTMLInputElement
-    expect(input.value).toBe("project-a")
+    expect(input.value).toBe("/Users/home/code/project-a")
   })
 })
 

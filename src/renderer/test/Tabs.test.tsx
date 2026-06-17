@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ToolsView } from '../components/tabs/ToolsView'
 import { SkillsView } from '../components/tabs/SkillsView'
 import { WorkspaceView } from '../components/tabs/WorkspaceView'
+import { KnowledgeView } from '../components/tabs/KnowledgeView'
 import { RightPanel } from '../components/RightPanel'
 import { RemindersView } from '../components/tabs/RemindersView'
 
@@ -538,6 +539,51 @@ describe('WorkspaceView Component', () => {
 })
 
 describe('RightPanel & KnowledgeView Events', () => {
+  beforeEach(() => {
+    vi.spyOn(window, 'fetch').mockImplementation((url) => {
+      const u = url.toString()
+      if (u.includes('/api/knowledge/graph')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ nodes: [], edges: [] })
+        } as Response)
+      }
+      if (u.includes('/api/knowledge/export')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ nodes: [], edges: [] })
+        } as Response)
+      }
+      if (u.includes('/api/knowledge/purge-workspace')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ ok: true })
+        } as Response)
+      }
+      if (u.includes('/api/knowledge/purge-workspace-preview')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({
+            workspace_id: 'olympus',
+            to_delete: 2,
+            to_unlink: 1,
+            delete_node_ids: ['node-1', 'node-2'],
+            unlink_node_ids: ['node-3'],
+          })
+        } as Response)
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ valid: true })
+      } as Response)
+    })
+  })
+
   it('dispatches knowledge custom events from RightPanel', async () => {
     const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
     dispatchSpy.mockClear()
@@ -557,6 +603,20 @@ describe('RightPanel & KnowledgeView Events', () => {
     const reloadBtn = screen.getByTitle("Reload Graph")
     fireEvent.click(reloadBtn)
     expect(dispatchSpy).toHaveBeenCalled()
+  })
+
+  it('opens the knowledge add modal when the right rail add icon is clicked', async () => {
+    render(<KnowledgeView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+
+    await waitFor(() => {
+      expect(screen.queryByText(/CREATE_NODE/i)).not.toBeInTheDocument()
+    })
+
+    window.dispatchEvent(new CustomEvent("knowledge-add-node"))
+
+    await waitFor(() => {
+      expect(screen.getByText(/CREATE_NODE/i)).toBeInTheDocument()
+    })
   })
 
   it('dispatches abilities custom events from RightPanel', async () => {
@@ -589,6 +649,98 @@ describe('RightPanel & KnowledgeView Events', () => {
     const bootstrapBtn = screen.getByTitle("Bootstrap Assets")
     fireEvent.click(bootstrapBtn)
     expect(dispatchSpy.mock.calls[2][0].type).toBe("abilities-bootstrap")
+  })
+
+  it('exports knowledge with workspace_id included', async () => {
+    const fetchSpy = vi.spyOn(window, 'fetch')
+    fetchSpy.mockImplementation((url) => {
+      const u = url.toString()
+      if (u.includes('/api/knowledge/export?workspace_id=olympus')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ nodes: [], edges: [] })
+        } as Response)
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ nodes: [], edges: [] })
+      } as Response)
+    })
+
+    render(<KnowledgeView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+
+    window.dispatchEvent(new CustomEvent("knowledge-download"))
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.stringContaining('/api/knowledge/export?workspace_id=olympus'),
+        expect.any(Object)
+      )
+    })
+  })
+
+  it('previews purge before deleting workspace knowledge', async () => {
+    const fetchSpy = vi.spyOn(window, 'fetch')
+    fetchSpy.mockImplementation((url) => {
+      const u = url.toString()
+      if (u.includes('/api/knowledge/purge-workspace-preview')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({
+            workspace_id: 'olympus',
+            to_delete: 2,
+            to_unlink: 1,
+            delete_node_ids: ['node-1', 'node-2'],
+            unlink_node_ids: ['node-3'],
+          })
+        } as Response)
+      }
+      if (u.includes('/api/knowledge/graph')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({
+            nodes: [],
+            edges: [
+              { edge_id: 'edge-1', source_id: 'node-1', target_id: 'node-x', edge_type: 'relates_to' },
+              { edge_id: 'edge-2', source_id: 'node-2', target_id: 'node-y', edge_type: 'uses' },
+            ]
+          })
+        } as Response)
+      }
+      if (u.includes('/api/knowledge/purge-workspace')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ purged: true })
+        } as Response)
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ nodes: [], edges: [] })
+      } as Response)
+    })
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<KnowledgeView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+
+    window.dispatchEvent(new CustomEvent("knowledge-purge"))
+
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('purge 2 nodes and 2 edges'))
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.stringContaining('/api/knowledge/purge-workspace-preview'),
+        expect.any(Object)
+      )
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.stringContaining('/api/knowledge/purge-workspace'),
+        expect.any(Object)
+      )
+    })
   })
 })
 

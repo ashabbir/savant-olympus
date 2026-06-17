@@ -38,3 +38,6 @@ dist-electron
 
 # CLI
 .antigravitycli/
+
+# Graphify
+graphify-out/

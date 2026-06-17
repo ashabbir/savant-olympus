@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
-import { GitFork, Network, Layers, RefreshCw, ZoomIn, ZoomOut, Maximize, Plus, Trash2, Search, ArrowRight, ArrowLeft, Download, Upload, Info, Check } from "lucide-react";
+import { GitFork, Network, Layers, RefreshCw, ZoomIn, ZoomOut, Maximize, Plus, Trash2, Search, ArrowRight, ArrowLeft, Download, Upload, Info, Check, Copy } from "lucide-react";
+import * as Tooltip from "@radix-ui/react-tooltip";
+import { buildAthenaPromptSections, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits } from "@/lib/athenaContext";
 
 interface Node extends d3.SimulationNodeDatum {
   id: string;
@@ -28,10 +30,27 @@ interface Edge extends d3.SimulationLinkDatum<Node> {
 }
 
 interface ChatMessage {
+  id: string;
   sender: "user" | "assistant";
   text: string;
   timestamp: string;
 }
+
+const ATHENA_CHAT_HISTORY_KEY = "savant_athena_chat_history";
+const ATHENA_KNOWLEDGE_SCOPE = "knowledge";
+const KNOWLEDGE_NODE_TYPES = [
+  "insight",
+  "client",
+  "domain",
+  "service",
+  "library",
+  "technology",
+  "project",
+  "concept",
+  "repo",
+  "session",
+  "issue",
+];
 
 
 interface KnowledgeViewProps {
@@ -50,6 +69,10 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
+  const [editedNodeTitle, setEditedNodeTitle] = useState("");
+  const [editedNodeType, setEditedNodeType] = useState("");
+  const [isSavingNodeType, setIsSavingNodeType] = useState(false);
+  const [isSavingNodeTitle, setIsSavingNodeTitle] = useState(false);
 
   // Add node form state
   const [newNodeTitle, setNewNodeTitle] = useState("");
@@ -70,6 +93,42 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
   const [isExploreActive, setIsExploreActive] = useState(false);
   const [rawNodes, setRawNodes] = useState<any[]>([]);
   const [rawEdges, setRawEdges] = useState<any[]>([]);
+  const readSharedAthenaHistory = () => {
+    try {
+      const stored = localStorage.getItem(ATHENA_CHAT_HISTORY_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  };
+  const writeSharedAthenaHistory = (messages: any[]) => {
+    localStorage.setItem(ATHENA_CHAT_HISTORY_KEY, JSON.stringify(messages));
+  };
+  const formatAthenaHistory = (messages: any[]) =>
+    messages.length > 0
+      ? messages.map(msg => `[${msg.scope || "general"}] ${msg.sender.toUpperCase()}: ${msg.text}`).join("\n")
+      : "No previous messages in this conversation.";
+  const handleCopyMessage = (text: string) => navigator.clipboard.writeText(text);
+  const handleDeleteMessage = (id: string) => {
+    const next = chatMessages.filter(msg => msg.id !== id);
+    saveChatMessages(next);
+    writeSharedAthenaHistory(readSharedAthenaHistory().filter((msg: any) => msg.id !== id));
+  };
+  const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
+    const baseUrl = serverUrl.replace(/\/+$/, "");
+    const [codeHits, knowledgeHits, tools] = await Promise.all([
+      fetchAthenaCodeContext(baseUrl, apiKey, query),
+      fetchAthenaKnowledgeContext(baseUrl, apiKey, query),
+      fetchAthenaMcpTools(baseUrl, apiKey),
+    ]);
+
+    return buildAthenaPromptSections([
+      ["BASE PROMPT", basePrompt],
+      ["RETRIEVED CODE CONTEXT", formatAthenaContextHits(codeHits)],
+      ["RETRIEVED KNOWLEDGE CONTEXT", formatAthenaContextHits(knowledgeHits)],
+      ["AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools available."],
+    ]);
+  };
 
   // Connect Node State
   const [connectType, setConnectType] = useState("relates_to");
@@ -81,7 +140,7 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
   const [bulkEdgeType, setBulkEdgeType] = useState<string>("relates_to");
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
-  const layers = ["all", "domain", "service", "library", "technology", "concept", "session"];
+  const layers = ["all", ...KNOWLEDGE_NODE_TYPES];
 
   const bfs = (focals: Set<string>, depth: number, adj: Record<string, string[]>) => {
     const distances = new Map<string, number>();
@@ -687,6 +746,40 @@ const handleCommitNode = async (nodeId: string) => {
   }
 };
 
+const handleUpdateNodeMeta = async () => {
+  if (!selectedNode) return;
+  const nodeId = selectedNode.node_id || selectedNode.id;
+  const nextTitle = editedNodeTitle.trim();
+  const nextType = editedNodeType.trim();
+  const payload: Record<string, string> = {};
+  if (nextTitle && nextTitle !== (selectedNode.title || "")) payload.title = nextTitle;
+  if (nextType && nextType !== selectedNode.node_type) payload.node_type = nextType;
+  if (Object.keys(payload).length === 0) return;
+
+  setIsSavingNodeTitle(true);
+  setIsSavingNodeType(true);
+  try {
+    const res = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || "Failed to update node");
+      return;
+    }
+    const updated = await res.json();
+    setSelectedNode(updated);
+    await loadGraph();
+  } catch (err: any) {
+    alert(`Failed to update node: ${err.message || String(err)}`);
+  } finally {
+    setIsSavingNodeTitle(false);
+    setIsSavingNodeType(false);
+  }
+};
+
 const handleCommitAll = async () => {
   if (!confirm("Are you sure you want to commit all staged nodes in this workspace?")) return;
   setIsLoading(true);
@@ -746,7 +839,38 @@ const handleAddNode = async (e: React.FormEvent) => {
 };
 
 const handlePurgeGraph = async () => {
-  if (!confirm("Are you sure you want to purge Olympus workspace knowledge nodes?")) return;
+  setIsLoading(true);
+  try {
+    const previewRes = await fetch(`${baseUrl}/api/knowledge/purge-workspace-preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      body: JSON.stringify({ workspace_id: "olympus" }),
+    });
+    if (!previewRes.ok) {
+      alert("Failed to preview purge.");
+      return;
+    }
+    const preview = await previewRes.json();
+    const deleteNodeIds: string[] = preview.delete_node_ids || [];
+    const graphRes = await fetch(`${baseUrl}/api/knowledge/graph?workspace_id=olympus&slim=true&include_staged=true`, {
+      headers: { "X-API-Key": apiKey },
+    });
+    const graph = graphRes.ok ? await graphRes.json() : { edges: [] };
+    const edgeIds = new Set(
+      (graph.edges || [])
+        .filter((edge: any) => deleteNodeIds.includes(edge.source_id) || deleteNodeIds.includes(edge.target_id))
+        .map((edge: any) => edge.edge_id || `${edge.source_id}:${edge.target_id}:${edge.edge_type || "relates_to"}`)
+    );
+    const purgeMessage = `I’m going to purge ${preview.to_delete || 0} nodes and ${edgeIds.size} edges.\n\n` +
+      `This will delete exclusive nodes and unlink shared nodes for workspace "olympus".\n` +
+      `Nodes without edges remain committed. Orphaned edges are not part of this purge.`;
+    if (!confirm(purgeMessage)) return;
+  } catch (err: any) {
+    alert(`Failed to prepare purge: ${err.message || String(err)}`);
+    return;
+  } finally {
+    setIsLoading(false);
+  }
   setIsLoading(true);
   try {
     await fetch(`${baseUrl}/api/knowledge/purge-workspace`, {
@@ -832,9 +956,11 @@ const triggerUpload = () => {
   input.click();
 };
 
-const triggerDownload = async () => {
+  const triggerDownload = async () => {
   try {
-    const res = await fetch(`${baseUrl}/api/knowledge/export`, { headers: { "X-API-Key": apiKey } });
+    const res = await fetch(`${baseUrl}/api/knowledge/export?workspace_id=olympus`, {
+      headers: { "X-API-Key": apiKey },
+    });
     if (res.ok) {
       const data = await res.json();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -860,29 +986,140 @@ const triggerDownload = async () => {
   };
 
   useEffect(() => {
+    const handleReload = () => {
+      void loadGraph();
+    };
+    const handleAddNode = () => {
+      setIsAddModalOpen(true);
+    };
+    const handleCommitAllEvent = () => {
+      void handleCommitAll();
+    };
+    const handlePurge = () => {
+      void handlePurgeGraph();
+    };
+    const handleUpload = () => {
+      triggerUpload();
+    };
+    const handleDownload = () => {
+      void triggerDownload();
+    };
+
+    window.addEventListener("knowledge-reload", handleReload);
+    window.addEventListener("knowledge-add-node", handleAddNode);
+    window.addEventListener("knowledge-commit-all", handleCommitAllEvent);
+    window.addEventListener("knowledge-purge", handlePurge);
+    window.addEventListener("knowledge-upload", handleUpload);
+    window.addEventListener("knowledge-download", handleDownload);
+
+    return () => {
+      window.removeEventListener("knowledge-reload", handleReload);
+      window.removeEventListener("knowledge-add-node", handleAddNode);
+      window.removeEventListener("knowledge-commit-all", handleCommitAllEvent);
+      window.removeEventListener("knowledge-purge", handlePurge);
+      window.removeEventListener("knowledge-upload", handleUpload);
+      window.removeEventListener("knowledge-download", handleDownload);
+    };
+  }, [apiKey, baseUrl]);
+
+  const ToolbarButton = ({
+    title,
+    label,
+    onClick,
+    children,
+    disabled = false,
+    className = "",
+  }: {
+    title: string;
+    label: string;
+    onClick: () => void;
+    children: React.ReactNode;
+    disabled?: boolean;
+    className?: string;
+  }) => (
+    <Tooltip.Provider delayDuration={200}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <button
+            type="button"
+            onClick={onClick}
+            disabled={disabled}
+            title={title}
+            className={`p-1 text-muted-foreground hover:text-[var(--cp-cyan)] disabled:opacity-40 transition-all cursor-pointer disabled:cursor-not-allowed ${className}`}
+          >
+            {children}
+          </button>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content side="bottom" className="px-2 py-1 text-xs z-50 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-[var(--cp-cyan)] font-mono">
+            {label}
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  );
+
+  useEffect(() => {
     setDrawerTab("info");
+    setEditedNodeTitle(selectedNode?.title || "");
+    setEditedNodeType(selectedNode?.node_type || "");
   }, [selectedNode?.node_id, selectedNode?.id]);
 
   useEffect(() => {
     if (!selectedNode) return;
-    const key = `savant_knowledge_chat_history_${selectedNode.node_id || selectedNode.id}`;
-    const stored = localStorage.getItem(key);
-    if (stored) {
-      try {
-        setChatMessages(JSON.parse(stored));
-      } catch (e) {
+    const nodeId = selectedNode.node_id || selectedNode.id;
+    let active = true;
+
+    window.system.getChatHistory(nodeId).then((history) => {
+      if (!active) return;
+      if (history && history.length > 0) {
+        setChatMessages(history);
+      } else {
+        // Fallback to localStorage and migrate to database
+        const key = `savant_knowledge_chat_history_${nodeId}`;
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            setChatMessages(parsed);
+            window.system.saveChatHistory(nodeId, parsed).catch(console.error);
+          } catch (e) {
+            setChatMessages([]);
+          }
+        } else {
+          setChatMessages([]);
+        }
+      }
+    }).catch((err) => {
+      console.error("Failed to load chat history from DB:", err);
+      if (!active) return;
+      const key = `savant_knowledge_chat_history_${nodeId}`;
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        try {
+          setChatMessages(JSON.parse(stored));
+        } catch (e) {
+          setChatMessages([]);
+        }
+      } else {
         setChatMessages([]);
       }
-    } else {
-      setChatMessages([]);
-    }
+    });
+
+    return () => {
+      active = false;
+    };
   }, [selectedNode?.node_id, selectedNode?.id]);
 
   const saveChatMessages = (newMessages: ChatMessage[]) => {
     setChatMessages(newMessages);
     if (selectedNode) {
-      const key = `savant_knowledge_chat_history_${selectedNode.node_id || selectedNode.id}`;
+      const nodeId = selectedNode.node_id || selectedNode.id;
+      const key = `savant_knowledge_chat_history_${nodeId}`;
       localStorage.setItem(key, JSON.stringify(newMessages));
+      window.system.saveChatHistory(nodeId, newMessages).catch((err) => {
+        console.error("Failed to save chat history to database:", err);
+      });
     }
   };
 
@@ -896,13 +1133,35 @@ const triggerDownload = async () => {
     e.preventDefault();
     if (!chatInput.trim() || isAiLoading || !selectedNode) return;
 
+    const activeNode = selectedNode;
+    const activeNodeId = activeNode.node_id || activeNode.id;
     const userText = chatInput;
     setChatInput("");
+
+    const key = `savant_knowledge_chat_history_${activeNodeId}`;
+    let currentMessages: ChatMessage[] = chatMessages;
+    try {
+      const dbHistory = await window.system.getChatHistory(activeNodeId);
+      if (dbHistory && dbHistory.length > 0) {
+        currentMessages = dbHistory;
+      } else {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          currentMessages = JSON.parse(stored);
+        }
+      }
+    } catch (err) {}
+
     const updatedMessages: ChatMessage[] = [
-      ...chatMessages,
-      { sender: "user", text: userText, timestamp: new Date().toISOString() }
+      ...currentMessages,
+      { id: Math.random().toString(), sender: "user", text: userText, timestamp: new Date().toISOString() }
     ];
-    saveChatMessages(updatedMessages);
+
+    if (selectedNode && (selectedNode.node_id || selectedNode.id) === activeNodeId) {
+      setChatMessages(updatedMessages);
+    }
+    localStorage.setItem(key, JSON.stringify(updatedMessages));
+    window.system.saveChatHistory(activeNodeId, updatedMessages).catch(console.error);
     setIsAiLoading(true);
 
     try {
@@ -928,10 +1187,9 @@ const triggerDownload = async () => {
       });
 
       // Get neighbors and edges within exploreDepth
-      const selectedId = selectedNode.node_id || selectedNode.id;
-      const distances = bfs(new Set([selectedId]), exploreDepth, adj);
+      const distances = bfs(new Set([activeNodeId]), exploreDepth, adj);
 
-      const neighborNodes = rawNodes.filter(n => n.node_id !== selectedId && distances.has(n.node_id));
+      const neighborNodes = rawNodes.filter(n => n.node_id !== activeNodeId && distances.has(n.node_id));
       const neighborEdges = rawEdges.filter(e => distances.has(e.source_id) && distances.has(e.target_id));
 
       const neighborsText = neighborNodes.map(n => {
@@ -952,11 +1210,11 @@ The user is asking questions about a node in the Knowledge Graph and its neighbo
 - Do NOT talk about the layout, visual structure, node IDs, edge weights, or graph theory terminology unless explicitly requested. Speak in terms of actual code architecture, functionalities, and logical concepts.
 
 [SELECTED NODE]
-- ID: ${selectedId}
-- Type: ${(selectedNode.node_type || "unknown").toUpperCase()}
-- Title: ${selectedNode.title || "Untitled"}
-- Status: ${selectedNode.status || "unknown"}
-- Content: ${selectedNode.content || "No content available."}
+- ID: ${activeNodeId}
+- Type: ${(activeNode.node_type || "unknown").toUpperCase()}
+- Title: ${activeNode.title || "Untitled"}
+- Status: ${activeNode.status || "unknown"}
+- Content: ${activeNode.content || "No content available."}
 
 [NEIGHBORHOOD SETTINGS]
 - Neighborhood Depth (Hops): ${exploreDepth}
@@ -970,8 +1228,8 @@ ${neighborsText || "No adjacent neighbors found within this depth."}
 ${edgesText || "No connection edges found within this depth."}
 
 [CONVERSATION HISTORY]
-${chatMessages.length > 0 ? 
-  chatMessages.map(msg => `${msg.sender === "user" ? "User" : "AI"}: ${msg.text}`).join("\n")
+${updatedMessages.length > 0 ? 
+  updatedMessages.map(msg => `${msg.sender === "user" ? "User" : "AI"}: ${msg.text}`).join("\n")
   : "No previous messages in this conversation."
 }
 
@@ -983,19 +1241,51 @@ Please analyze the node information, the neighboring nodes, and the connection e
       const responseText = await window.ipcRenderer.invoke("run-agent", {
         provider,
         model,
-        prompt: promptPayload
+        prompt: await buildAthenaAugmentedPrompt(promptPayload, `${activeNode.title || ""} ${userText} ${activeNode.content || ""}`)
       });
 
-      saveChatMessages([
-        ...updatedMessages,
-        { sender: "assistant", text: responseText || "No response received from the gateway.", timestamp: new Date().toISOString() }
-      ]);
+      const latestStored = localStorage.getItem(key);
+      let latestMessages: ChatMessage[] = updatedMessages;
+      try {
+        const dbHistory = await window.system.getChatHistory(activeNodeId);
+        if (dbHistory && dbHistory.length > 0) {
+          latestMessages = dbHistory;
+        } else if (latestStored) {
+          latestMessages = JSON.parse(latestStored);
+        }
+      } catch (e) {}
+
+      const finalMessages: ChatMessage[] = [
+        ...latestMessages,
+        { id: Math.random().toString(), sender: "assistant", text: responseText || "No response received from the gateway.", timestamp: new Date().toISOString() }
+      ];
+
+      localStorage.setItem(key, JSON.stringify(finalMessages));
+      window.system.saveChatHistory(activeNodeId, finalMessages).catch(console.error);
+      if (selectedNode && (selectedNode.node_id || selectedNode.id) === activeNodeId) {
+        setChatMessages(finalMessages);
+      }
     } catch (err: any) {
       console.error("AI run-agent failed:", err);
-      saveChatMessages([
-        ...updatedMessages,
-        { sender: "assistant", text: `Error: ${err.message || "Failed to communicate with AI agent."}`, timestamp: new Date().toISOString() }
-      ]);
+      const latestStored = localStorage.getItem(key);
+      let latestMessages: ChatMessage[] = updatedMessages;
+      try {
+        const dbHistory = await window.system.getChatHistory(activeNodeId);
+        if (dbHistory && dbHistory.length > 0) {
+          latestMessages = dbHistory;
+        } else if (latestStored) {
+          latestMessages = JSON.parse(latestStored);
+        }
+      } catch (e) {}
+      const errorMessages: ChatMessage[] = [
+        ...latestMessages,
+        { id: Math.random().toString(), sender: "assistant", text: `Error: ${err.message || "Failed to communicate with AI agent."}`, timestamp: new Date().toISOString() }
+      ];
+      localStorage.setItem(key, JSON.stringify(errorMessages));
+      window.system.saveChatHistory(activeNodeId, errorMessages).catch(console.error);
+      if (selectedNode && (selectedNode.node_id || selectedNode.id) === activeNodeId) {
+        setChatMessages(errorMessages);
+      }
     } finally {
       setIsAiLoading(false);
     }
@@ -1073,12 +1363,6 @@ return (
       </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-0.5">
-          <button onClick={() => setIsAddModalOpen(true)} title="Add Node" className="p-1 text-muted-foreground hover:text-[var(--cp-cyan)] transition-all cursor-pointer"><Plus size={14} /></button>
-          <button onClick={triggerUpload} title="Upload" className="p-1 text-muted-foreground hover:text-[var(--cp-cyan)] transition-all cursor-pointer"><Upload size={14} /></button>
-          <button onClick={triggerDownload} title="Download" className="p-1 text-muted-foreground hover:text-[var(--cp-cyan)] transition-all cursor-pointer"><Download size={14} /></button>
-          <button onClick={loadGraph} title="Reload" className="p-1 text-muted-foreground hover:text-[var(--cp-cyan)] transition-all cursor-pointer"><RefreshCw size={14} className={isLoading ? "animate-spin" : ""} /></button>
-          <button onClick={handleCommitAll} disabled={rawNodes.filter(n => n.status === "staged").length === 0} title="Commit All" className="p-1 text-green-500 hover:text-green-400 disabled:opacity-40 transition-all cursor-pointer"><Check size={14} /></button>
-          <button onClick={handlePurgeGraph} title="Purge" className="p-1 text-red-400 hover:text-red-300 transition-all cursor-pointer"><Trash2 size={14} /></button>
         </div>
         <div className="flex items-center gap-1.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-1">
           {layers.map((layer) => (
@@ -1138,7 +1422,7 @@ return (
                   drawerTab === "ai" ? "bg-[var(--cp-bg-1)] text-[var(--cp-cyan)] border-b-2 border-b-[var(--cp-cyan)]" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                // Ask Athena
+                // Ask ATHENA
               </button>
             </div>
           )}
@@ -1159,7 +1443,7 @@ return (
                 <form onSubmit={handleMergeSubmit} className="space-y-3 pt-2 border-t border-[var(--cp-border)]/30">
                   <h4 className="text-[10px] text-muted-foreground uppercase font-bold">// TARGET TYPE</h4>
                   <select value={mergeNodeType} onChange={(e) => setMergeNodeType(e.target.value)} className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono text-xs">
-                    {["insight", "client", "domain", "service", "library", "technology", "project", "concept", "repo", "session"].map((t) => <option key={t} value={t}>{t}</option>)}
+                    {KNOWLEDGE_NODE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
                   <button type="submit" className="w-full py-1.5 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase hover:opacity-90 flex items-center justify-center gap-1"><GitFork size={12} />Merge Nodes</button>
                 </form>
@@ -1182,7 +1466,41 @@ return (
                     <span className="text-[10px] font-mono text-[var(--cp-cyan)] uppercase bg-[rgba(0,229,255,0.06)] px-1.5 py-0.5 border border-[var(--cp-cyan)]/20 rounded">{selectedNode!.node_type}</span>
                     {selectedNode!.status === "staged" ? <span className="text-[9px] font-mono text-yellow-500 uppercase bg-yellow-950/20 px-1 border border-yellow-500/20 rounded">staged</span> : <span className="text-[9px] font-mono text-green-500 uppercase bg-green-950/20 px-1 border border-green-500/20 rounded">committed</span>}
                   </div>
-                  <div><h3 className="text-md font-bold text-foreground mt-2">{selectedNode!.title || selectedNode!.id}</h3></div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">// NODE TITLE</label>
+                    <input
+                      value={editedNodeTitle}
+                      onChange={(e) => setEditedNodeTitle(e.target.value)}
+                      className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono"
+                      placeholder="Node title"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">// NODE TYPE</label>
+                    <div className="flex gap-2">
+                      <select
+                        value={editedNodeType}
+                        onChange={(e) => setEditedNodeType(e.target.value)}
+                        className="flex-1 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono"
+                      >
+                        {KNOWLEDGE_NODE_TYPES.map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleUpdateNodeMeta}
+                        disabled={
+                          (!editedNodeTitle.trim() || editedNodeTitle.trim() === (selectedNode!.title || "")) &&
+                          (!editedNodeType.trim() || editedNodeType.trim() === selectedNode!.node_type) ||
+                          isSavingNodeTitle || isSavingNodeType
+                        }
+                        className="px-3 py-1.5 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-[10px] uppercase hover:opacity-90 disabled:opacity-50 font-mono"
+                      >
+                        {(isSavingNodeTitle || isSavingNodeType) ? "Saving..." : "Update"}
+                      </button>
+                    </div>
+                  </div>
                   <div>
                     <h4 className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">// CONNECTIONS</h4>
                     {selectedConnections.length ? (
@@ -1251,27 +1569,37 @@ return (
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                   {chatMessages.length === 0 ? (
                     <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground p-8 text-center leading-relaxed">
-                      Ask questions about this knowledge node and its 1-hop neighborhood. The AI will look at its connections and metadata to answer.
+                      Ask questions about this knowledge node and its 1-hop neighborhood. ATHENA will look at its connections and metadata to answer.
                     </div>
                   ) : (
                     chatMessages.map((msg, i) => (
                       <div key={i} className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}>
-                        <div className={`max-w-[85%] rounded px-3 py-2 text-xs font-mono border ${
-                          msg.sender === "user" 
-                            ? "bg-[var(--cp-cyan)]/10 border-[var(--cp-cyan)]/25 text-foreground" 
-                            : "bg-[var(--cp-bg-2)] border-[var(--cp-border)] text-foreground/90"
-                        }`}>
-                          <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                        <div className="relative group max-w-[85%]">
+                          <div className={`rounded px-3 py-2 text-xs font-mono border ${
+                            msg.sender === "user" 
+                              ? "bg-[var(--cp-cyan)]/10 border-[var(--cp-cyan)]/25 text-foreground" 
+                              : "bg-[var(--cp-bg-2)] border-[var(--cp-border)] text-foreground/90"
+                          }`}>
+                            <div className="absolute -top-2 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button type="button" onClick={() => handleCopyMessage(msg.text)} title="Copy message text" className="p-1 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground hover:text-[var(--cp-cyan)]">
+                                <Copy size={9} />
+                              </button>
+                              <button type="button" onClick={() => handleDeleteMessage(msg.id)} title="Delete message" className="p-1 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground hover:text-red-400">
+                                <Trash2 size={9} />
+                              </button>
+                            </div>
+                            <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                          </div>
                         </div>
                         <span className="text-[8px] text-muted-foreground mt-1 px-1 font-mono uppercase">
-                          {msg.sender === "user" ? "USER" : "AI"} • {new Date(msg.timestamp).toLocaleTimeString()}
+                          {msg.sender === "user" ? "USER" : "ATHENA"} • {new Date(msg.timestamp).toLocaleTimeString()}
                         </span>
                       </div>
                     ))
                   )}
                   {isAiLoading && (
                     <div className="flex items-center gap-2 text-xs font-mono text-[var(--cp-cyan)] px-1">
-                      <span className="animate-pulse">THINKING...</span>
+                      <span className="animate-pulse">ATHENA IS THINKING...</span>
                     </div>
                   )}
                   <div ref={chatEndRef} />
@@ -1286,7 +1614,7 @@ return (
                         handleSendChatMessage(e);
                       }
                     }}
-                    placeholder="Ask Athena about this node..."
+                    placeholder="Ask ATHENA about this node..."
                     rows={1}
                     className="flex-1 bg-[var(--cp-bg-0)] border border-[var(--cp-border)] px-3 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:border-[var(--cp-cyan)] resize-none min-h-[32px] max-h-[120px] overflow-y-auto"
                   />
@@ -1392,7 +1720,7 @@ return (
             <div>
               <label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1">Node Type</label>
               <select value={newNodeType} onChange={(e) => setNewNodeType(e.target.value)} className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono text-xs">
-                {["domain", "service", "library", "technology", "concept", "session"].map(t => <option key={t} value={t}>{t}</option>)}
+                {KNOWLEDGE_NODE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
             <div>

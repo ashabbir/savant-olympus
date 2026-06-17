@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 import { Folder, FileCode, CheckCircle, Database, AlertTriangle, Square, Trash, Zap, Clock, Info, ShieldAlert, FileText, ChevronRight, ChevronDown, Layers, HelpCircle, MessageSquare, Send, Sparkles, Trash2, Loader2, Copy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { buildAthenaPromptSections, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits } from "@/lib/athenaContext";
 
 export interface ASTNode {
   name: string;
@@ -599,10 +600,368 @@ interface VisualizerProps {
   repoName: string;
   analysis: AnalysisResults | null;
   activeModel?: { provider: string; model: string };
+  serverUrl: string;
+  apiKey: string;
 }
 
-export function ContextVisualizations({ nodes, repoName, analysis }: VisualizerProps) {
+interface ChatMessage {
+  id?: string;
+  sender: "user" | "assistant";
+  text: string;
+  timestamp: string;
+}
+
+function AnalysisChatPanel({
+  analysis,
+  repoName,
+  onClose,
+  activeModel,
+  serverUrl,
+  apiKey,
+  filePath // Optional scope
+}: {
+  analysis: AnalysisResults;
+  repoName: string;
+  onClose: () => void;
+  activeModel?: { provider: string; model: string };
+  serverUrl: string;
+  apiKey: string;
+  filePath?: string;
+}) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [inputValue, setInputValue] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Resizing state
+  const [width, setWidth] = useState(384); 
+  const [isResizing, setIsResizing] = useState(false);
+
+  const startResizing = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = window.innerWidth - e.clientX;
+      if (newWidth > 250 && newWidth < window.innerWidth * 0.8) {
+        setWidth(newWidth);
+      }
+    };
+    const handleMouseUp = () => setIsResizing(false);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing]);
+
+  const getStorageKey = () => filePath 
+    ? `savant_analysis_chat_${repoName}_file_${filePath.replace(/\//g, '_')}`
+    : `savant_analysis_chat_${repoName}`;
+
+  useEffect(() => {
+    async function load() {
+      const stored = await window.system.getChatHistory(getStorageKey());
+      if (stored) setMessages(stored);
+      else setMessages([]);
+    }
+    load();
+  }, [repoName, filePath]);
+
+  const saveMessages = (newMsgs: ChatMessage[]) => {
+    setMessages(newMsgs);
+    window.system.saveChatHistory(getStorageKey(), newMsgs);
+  };
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isLoading]);
+
+  const handleSend = async (textOverride?: string) => {
+    const textToSend = (textOverride || inputValue).trim();
+    if (!textToSend || isLoading) return;
+
+    const userMsg: ChatMessage = {
+      id: Math.random().toString(),
+      sender: "user",
+      text: textToSend,
+      timestamp: new Date().toISOString(),
+    };
+
+    const updated = [...messages, userMsg];
+    saveMessages(updated);
+    setInputValue("");
+    setIsLoading(true);
+
+    try {
+      const s = await window.system.getSettings();
+      const chain = s["provider:chain"] || [];
+      const provider = activeModel?.provider || chain[0]?.provider || "gemini";
+      const model = activeModel?.model || chain[0]?.model || "3.5";
+
+      const baseUrl = serverUrl.replace(/\/+$/, "");
+
+      const analysisSummary = `
+ANALYSIS OVERVIEW for ${repoName}:
+- Files Analyzed: ${analysis.summary.filesAnalyzed}
+- Total Findings: ${analysis.summary.totalFindings}
+- Severity Breakdown: High: ${analysis.summary.by_severity.high}, Medium: ${analysis.summary.by_severity.medium}, Low: ${analysis.summary.by_severity.low}
+- Category Breakdown: ${Object.entries(analysis.summary.by_category).map(([c, count]) => `${c}: ${count}`).join(", ")}
+
+DETAILED FINDINGS (Truncated to first 100):
+${analysis.findings.slice(0, 100).map((f, i) => `${i + 1}. [${f.severity.toUpperCase()}] ${f.title} in ${f.path}:${f.line} - ${f.detail}`).join("\n")}
+      `;
+
+      const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
+        const [codeHits, knowledgeHits, tools] = await Promise.all([
+          fetchAthenaCodeContext(baseUrl, apiKey, query, repoName),
+          fetchAthenaKnowledgeContext(baseUrl, apiKey, query),
+          fetchAthenaMcpTools(baseUrl, apiKey),
+        ]);
+
+        return buildAthenaPromptSections([
+          ["BASE PROMPT", basePrompt],
+          ["RETRIEVED CODE CONTEXT", formatAthenaContextHits(codeHits)],
+          ["RETRIEVED KNOWLEDGE CONTEXT", formatAthenaContextHits(knowledgeHits)],
+          ["AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools available."],
+        ]);
+      };
+
+      const prompt = `You are ATHENA, an expert software architect and security auditor integrated into the Savant Olympus dashboard.
+The user is investigating static analysis results for the repository "${repoName}".
+
+[FULL ANALYSIS DATA]
+${analysisSummary}
+
+[CHAT HISTORY]
+${updated.map(m => `${m.sender === "user" ? "USER" : "ATHENA"}: ${m.text}`).join("\n")}
+
+[TASK]
+Respond to the user's latest query using the provided analysis data. 
+Provide deep technical insights, prioritize the most dangerous or structural issues, and suggest concrete refactoring plans.
+Maintain a professional, helpful, and highly technical tone.
+
+[INSTRUCTIONS FOR MCP USAGE]
+You have access to a variety of Savant MCP tools. Use them to investigate code, query knowledge, or perform actions as needed. 
+Always prefer using a tool if it can provide more accurate or deep information.
+`;
+
+      const response = await window.ipcRenderer.invoke("run-agent", {
+        provider,
+        model,
+        prompt: await buildAthenaAugmentedPrompt(prompt, `${repoName} ${textToSend} ${analysisSummary}`),
+      });
+
+      const aiMsg: ChatMessage = {
+        id: Math.random().toString(),
+        sender: "assistant",
+        text: response || "No response from ATHENA.",
+        timestamp: new Date().toISOString(),
+      };
+      saveMessages([...updated, aiMsg]);
+    } catch (error: any) {
+      console.error("Analysis Chat Error:", error);
+      const errorMsg: ChatMessage = {
+        id: Math.random().toString(),
+        sender: "assistant",
+        text: `Error calling ATHENA agent: ${error.message || "Unknown error"}`,
+        timestamp: new Date().toISOString(),
+      };
+      saveMessages([...updated, errorMsg]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div 
+      className={`relative flex flex-col border-l border-[var(--cp-border)] bg-[var(--cp-bg-3)] p-4 overflow-hidden max-h-full shrink-0 space-y-4 text-xs font-mono text-foreground ${
+        isResizing ? "select-none" : ""
+      }`}
+      style={{ width: `${width}px` }}
+    >
+      {/* Resize Handle */}
+      <div
+        onMouseDown={startResizing}
+        className={`absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-50 transition-colors ${
+          isResizing ? "bg-[var(--cp-cyan)]" : "bg-transparent hover:bg-[var(--cp-cyan)]/30"
+        }`}
+      />
+
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-[var(--cp-border)] pb-2">
+        <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold font-mono">Analysis Discussion</span>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground cursor-pointer text-[10px] transition-colors font-mono uppercase">
+          ‹ CLOSE
+        </button>
+      </div>
+
+      {/* Settings / Model Info (Read-Only) */}
+      <div className="flex items-center gap-2 justify-between bg-[var(--cp-bg-2)] p-2 border border-[var(--cp-border)] rounded shrink-0">
+        <div className="flex flex-col flex-1 min-w-0">
+          <span className="text-[8px] text-muted-foreground uppercase font-bold tracking-wider">ATHENA Mode</span>
+          <span className="text-[10px] font-bold text-[var(--cp-cyan)] uppercase truncate">
+            {activeModel ? `${activeModel.provider.toUpperCase()}: ${activeModel.model}` : "GEMINI: 3.5"}
+          </span>
+        </div>
+        <button
+          onClick={() => { if(confirm("Clear analysis chat history?")) saveMessages([]); }}
+          title="Clear Chat History"
+          className="p-1 hover:bg-red-500/10 hover:text-red-400 text-muted-foreground rounded transition-colors cursor-pointer shrink-0"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+
+      {/* Messages Area */}
+      <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2 space-y-3 min-h-0 flex flex-col pr-1">
+        {messages.length === 0 ? (
+          <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-4 my-auto">
+            <Sparkles className="w-8 h-8 text-[var(--cp-cyan)] animate-pulse" />
+            <div className="space-y-1">
+              <h4 className="text-[11px] font-bold text-foreground uppercase tracking-wider font-mono">ATHENA</h4>
+              <p className="text-[9px] text-muted-foreground max-w-[200px] leading-relaxed font-sans">
+                Ask ATHENA to explain analysis findings, identify the highest priority refactoring targets, or suggest architectural improvements across the whole project.
+              </p>
+            </div>
+
+            {/* Quick actions */}
+            <div className="w-full flex flex-col gap-1.5 pt-2">
+              <button
+                onClick={() => handleSend("Which of these security findings is the most critical to fix first?")}
+                className="w-full text-left py-1.5 px-2 bg-[var(--cp-bg-3)] hover:bg-[var(--cp-border)] border border-[var(--cp-border)] text-muted-foreground hover:text-foreground rounded transition-all text-[9px] cursor-pointer"
+              >
+                🔒 What are the top security priorities?
+              </button>
+              <button
+                onClick={() => handleSend("Give me a refactoring plan to improve the overall health score of this project.")}
+                className="w-full text-left py-1.5 px-2 bg-[var(--cp-bg-3)] hover:bg-[var(--cp-border)] border border-[var(--cp-border)] text-muted-foreground hover:text-foreground rounded transition-all text-[9px] cursor-pointer"
+              >
+                🛠️ Refactoring plan for project health
+              </button>
+              <button
+                onClick={() => handleSend("Summarize the structural issues across this project.")}
+                className="w-full text-left py-1.5 px-2 bg-[var(--cp-bg-3)] hover:bg-[var(--cp-border)] border border-[var(--cp-border)] text-muted-foreground hover:text-foreground rounded transition-all text-[9px] cursor-pointer"
+              >
+                🏗️ Summarize structural issues
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3 flex-1">
+            {messages.map((msg, i) => (
+              <div
+                key={i}
+                className={`flex flex-col space-y-1 group relative ${
+                  msg.sender === "user" ? "items-end" : "items-start"
+                }`}
+              >
+                <div className="flex items-center gap-2 text-[8px] text-muted-foreground opacity-60">
+                  <span>{msg.sender === "user" ? "USER" : "ATHENA"}</span>
+                  <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => navigator.clipboard.writeText(msg.text)}
+                      title="Copy message text"
+                      className="hover:text-[var(--cp-cyan)] cursor-pointer"
+                    >
+                      <Copy size={9} />
+                    </button>
+                    <button
+                      onClick={() => {
+                        const newMessages = messages.filter((_, idx) => idx !== i);
+                        saveMessages(newMessages);
+                      }}
+                      title="Delete message"
+                      className="hover:text-red-400 cursor-pointer"
+                    >
+                      <Trash size={9} />
+                    </button>
+                  </div>
+                </div>
+                <div
+                  className={`p-2 rounded border max-w-full overflow-hidden font-mono text-[10px] leading-relaxed break-words text-foreground ${
+                    msg.sender === "user"
+                      ? "bg-[rgba(0,229,255,0.06)] border-[rgba(0,229,255,0.25)] text-right"
+                      : "bg-[rgba(167,139,250,0.06)] border-[rgba(167,139,250,0.2)] text-left"
+                  }`}
+                >
+                  {msg.sender === "user" ? (
+                    <span className="whitespace-pre-wrap">{msg.text}</span>
+                  ) : (
+                    <div className="prose prose-invert max-w-none text-[10px] leading-relaxed [&>p]:mb-2 [&>p:last-child]:mb-0 [&>pre]:bg-[var(--cp-bg-1)] [&>pre]:p-1.5 [&>pre]:rounded [&>pre]:my-1.5 [&>pre]:border [&>pre]:border-[var(--cp-border)] [&>pre>code]:text-[9px] [&>pre]:overflow-x-auto [&>pre]:max-w-full [&>ul]:list-disc [&>ul]:pl-4 [&>ul]:mb-2 [&>ol]:list-decimal [&>ol]:pl-4 [&>ol]:mb-2 [&_code]:break-all [&_code]:whitespace-pre-wrap font-sans">
+                      <ReactMarkdown>{msg.text}</ReactMarkdown>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {isLoading && (
+              <div className="flex flex-col space-y-1 items-start">
+                <span className="text-[8px] text-[var(--cp-cyan)] uppercase tracking-wider animate-pulse">ATHENA IS THINKING...</span>
+                <div className="p-2 rounded border border-[var(--cp-border)] bg-[var(--cp-bg-3)] flex items-center gap-2">
+                  <Loader2 size={12} className="animate-spin text-[var(--cp-cyan)]" />
+                  <span className="text-muted-foreground text-[10px] font-sans">Synthesizing findings...</span>
+                </div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+        )}
+      </div>
+
+      {/* Input Form */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleSend();
+        }}
+        className="flex gap-2 shrink-0"
+      >
+        <textarea
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              if (inputValue.trim() && !isLoading) {
+                handleSend();
+              }
+            }
+          }}
+          placeholder="Ask ATHENA about the analysis..."
+          disabled={isLoading}
+          rows={1}
+          className="flex-1 bg-[var(--cp-bg-0)] border border-[var(--cp-border)] px-3 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:border-[var(--cp-cyan)] resize-none min-h-[32px] max-h-[120px] overflow-y-auto"
+        />
+        <button
+          type="submit"
+          disabled={isLoading || !inputValue.trim()}
+          className="px-4 py-1.5 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase hover:opacity-90 disabled:opacity-50 font-mono"
+        >
+          ASK
+        </button>
+        {messages.length > 0 && (
+          <button
+            type="button"
+            onClick={() => { if(confirm("Clear analysis chat history?")) saveMessages([]); }}
+            className="px-2 py-1.5 border border-red-500/20 text-red-400 hover:bg-red-950/20 text-xs font-mono"
+          >
+            CLEAR
+          </button>
+        )}
+      </form>
+    </div>
+  );
+}
+
+export function ContextVisualizations({ nodes, repoName, analysis, activeModel, serverUrl, apiKey }: VisualizerProps) {
   const [activeSubTab, setActiveSubTab] = useState<"analysis" | "heatmap" | "tree" | "radial" | "cluster">("analysis");
+  const [isAnalysisChatOpen, setIsAnalysisChatOpen] = useState(false);
+  const [isHeatmapChatOpen, setIsHeatmapChatOpen] = useState(false);
   const [complexityFiles, setComplexityFiles] = useState<ComplexityFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<ComplexityFile | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -903,20 +1262,39 @@ export function ContextVisualizations({ nodes, repoName, analysis }: VisualizerP
     <div className="flex-1 flex flex-col min-height-0 overflow-hidden font-mono space-y-3">
       {/* Sub Tabs + Search */}
       <div className="flex justify-between items-center border-b border-[var(--cp-border)] pb-2 shrink-0">
-        <div className="flex gap-1.5">
-          {(["analysis", "heatmap", "tree", "radial", "cluster"] as const).map((tab) => (
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1.5">
+            {(["analysis", "heatmap", "tree", "radial", "cluster"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveSubTab(tab)}
+                className={`px-3 py-1 text-xs uppercase border ${
+                  activeSubTab === tab
+                    ? "border-[var(--cp-cyan)] text-[var(--cp-cyan)] bg-[rgba(0,229,255,0.06)]"
+                    : "border-[var(--cp-border)] text-muted-foreground hover:text-foreground hover:border-[rgba(0,229,255,0.2)]"
+                } cursor-pointer transition-colors`}
+              >
+                {tab === "heatmap" ? "complexity heatmap" : tab}
+              </button>
+            ))}
+          </div>
+
+          {(activeSubTab === "analysis" || activeSubTab === "heatmap") && analysis && (
             <button
-              key={tab}
-              onClick={() => setActiveSubTab(tab)}
-              className={`px-3 py-1 text-xs uppercase border ${
-                activeSubTab === tab
-                  ? "border-[var(--cp-cyan)] text-[var(--cp-cyan)] bg-[rgba(0,229,255,0.06)]"
-                  : "border-[var(--cp-border)] text-muted-foreground hover:text-foreground hover:border-[rgba(0,229,255,0.2)]"
-              } cursor-pointer transition-colors`}
+              onClick={() => {
+                if (activeSubTab === "analysis") setIsAnalysisChatOpen(!isAnalysisChatOpen);
+                else setIsHeatmapChatOpen(!isHeatmapChatOpen);
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1 text-[10px] font-bold uppercase border transition-all cursor-pointer ${
+                (activeSubTab === "analysis" ? isAnalysisChatOpen : isHeatmapChatOpen)
+                  ? "bg-[var(--cp-cyan)] text-[var(--cp-bg-1)] border-[var(--cp-cyan)] shadow-[0_0_10px_rgba(0,229,255,0.3)]"
+                  : "bg-[rgba(0,229,255,0.06)] text-[var(--cp-cyan)] border-[var(--cp-cyan)]/40 hover:border-[var(--cp-cyan)] hover:bg-[var(--cp-cyan)]/10"
+              }`}
             >
-              {tab === "heatmap" ? "complexity heatmap" : tab}
+              <MessageSquare size={12} />
+              {(activeSubTab === "analysis" ? isAnalysisChatOpen : isHeatmapChatOpen) ? "CLOSE CHAT" : "ASK ATHENA"}
             </button>
-          ))}
+          )}
         </div>
 
         {/* Sanctum Parity Search box */}
@@ -969,8 +1347,9 @@ export function ContextVisualizations({ nodes, repoName, analysis }: VisualizerP
       {/* Visualizer Areas */}
       <div className="flex-1 min-h-0 overflow-hidden bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3">
         {activeSubTab === "analysis" && (
-          <div className="h-full overflow-y-auto space-y-4 pr-1">
-            {analysis ? (() => {
+          <div className="h-full flex overflow-hidden">
+            <div className={`flex-1 overflow-y-auto space-y-4 pr-1 ${isAnalysisChatOpen ? "mr-3" : ""}`}>
+              {analysis ? (() => {
               const total = analysis.summary?.totalFindings || 0;
               const high = analysis.summary?.by_severity?.high || 0;
               const med = analysis.summary?.by_severity?.medium || 0;
@@ -1083,6 +1462,17 @@ export function ContextVisualizations({ nodes, repoName, analysis }: VisualizerP
                   Analyzing repository source code AST metrics and structural rules...
                 </p>
               </div>
+            )}
+            </div>
+            {isAnalysisChatOpen && analysis && (
+              <AnalysisChatPanel 
+                analysis={analysis} 
+                repoName={repoName} 
+                onClose={() => setIsAnalysisChatOpen(false)} 
+                activeModel={activeModel}
+                serverUrl={serverUrl}
+                apiKey={apiKey}
+              />
             )}
           </div>
         )}
@@ -1287,20 +1677,31 @@ export function ContextVisualizations({ nodes, repoName, analysis }: VisualizerP
                 </div>
               )}
             </div>
+            {isHeatmapChatOpen && analysis && selectedFile && (
+              <AnalysisChatPanel 
+                analysis={analysis} 
+                repoName={repoName} 
+                onClose={() => setIsHeatmapChatOpen(false)} 
+                activeModel={activeModel}
+                serverUrl={serverUrl}
+                apiKey={apiKey}
+                filePath={selectedFile.path}
+              />
+            )}
           </div>
         )}
 
 
         {activeSubTab === "tree" && (
-          <TreeVisualizer nodes={nodes} repoName={repoName} showLabels={showTreeLabels} setShowLabels={setShowTreeLabels} findings={analysis?.findings} />
+          <TreeVisualizer nodes={nodes} repoName={repoName} showLabels={showTreeLabels} setShowLabels={setShowTreeLabels} findings={analysis?.findings} serverUrl={serverUrl} apiKey={apiKey} />
         )}
 
         {activeSubTab === "radial" && (
-          <RadialVisualizer nodes={nodes} repoName={repoName} findings={analysis?.findings} />
+          <RadialVisualizer nodes={nodes} repoName={repoName} findings={analysis?.findings} serverUrl={serverUrl} apiKey={apiKey} />
         )}
 
         {activeSubTab === "cluster" && (
-          <ClusterVisualizer nodes={nodes} repoName={repoName} findings={analysis?.findings} />
+          <ClusterVisualizer nodes={nodes} repoName={repoName} findings={analysis?.findings} serverUrl={serverUrl} apiKey={apiKey} />
         )}
       </div>
     </div>
@@ -1308,7 +1709,7 @@ export function ContextVisualizations({ nodes, repoName, analysis }: VisualizerP
 }
 
 // ── Tree Visualizer Component ──
-function TreeVisualizer({ nodes, repoName, showLabels, setShowLabels, findings = [] }: { nodes: ASTNode[]; repoName: string; showLabels: boolean; setShowLabels: any; findings?: Finding[] }) {
+function TreeVisualizer({ nodes, repoName, showLabels, setShowLabels, findings = [], serverUrl, apiKey }: { nodes: ASTNode[]; repoName: string; showLabels: boolean; setShowLabels: any; findings?: Finding[]; serverUrl: string; apiKey: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<any>(null);
@@ -1523,14 +1924,14 @@ function TreeVisualizer({ nodes, repoName, showLabels, setShowLabels, findings =
 
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
         <div ref={containerRef} className="flex-1 h-full w-full overflow-hidden" />
-        <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={handleToggleCollapse} findings={findings} repoName={repoName} />
+        <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={handleToggleCollapse} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} />
       </div>
     </div>
   );
 }
 
 // ── Radial Visualizer Component ──
-function RadialVisualizer({ nodes, repoName, findings = [] }: { nodes: ASTNode[]; repoName: string; findings?: Finding[] }) {
+function RadialVisualizer({ nodes, repoName, findings = [], serverUrl, apiKey }: { nodes: ASTNode[]; repoName: string; findings?: Finding[]; serverUrl: string; apiKey: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -1640,13 +2041,13 @@ function RadialVisualizer({ nodes, repoName, findings = [] }: { nodes: ASTNode[]
   return (
     <div className="h-full w-full flex min-h-0 overflow-hidden relative">
       <div ref={containerRef} className="flex-1 h-full w-full overflow-hidden flex items-center justify-center bg-[rgba(0,0,0,0.12)]" />
-      <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={() => {}} findings={findings} repoName={repoName} />
+      <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={() => {}} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} />
     </div>
   );
 }
 
 // ── Cluster Visualizer Component ──
-function ClusterVisualizer({ nodes, repoName, findings = [] }: { nodes: ASTNode[]; repoName: string; findings?: Finding[] }) {
+function ClusterVisualizer({ nodes, repoName, findings = [], serverUrl, apiKey }: { nodes: ASTNode[]; repoName: string; findings?: Finding[]; serverUrl: string; apiKey: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<any>(null);
@@ -1823,7 +2224,7 @@ function ClusterVisualizer({ nodes, repoName, findings = [] }: { nodes: ASTNode[
 
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
         <div ref={containerRef} className="flex-1 h-full w-full overflow-hidden flex items-center justify-center" />
-        <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={handleToggleCollapse} findings={findings} repoName={repoName} />
+        <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={handleToggleCollapse} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} />
       </div>
     </div>
   );
@@ -1837,6 +2238,8 @@ export function DetailDrawer({
   onToggleCollapse,
   findings = [],
   repoName,
+  serverUrl = "http://127.0.0.1:3100",
+  apiKey = ""
 }: {
   selectedNode: any;
   isOpen: boolean;
@@ -1844,6 +2247,8 @@ export function DetailDrawer({
   onToggleCollapse: (id: string, isCollapsed: boolean) => void;
   findings?: Finding[];
   repoName: string;
+  serverUrl?: string;
+  apiKey?: string;
 }) {
   if (!isOpen || !selectedNode) return null;
 
@@ -1916,13 +2321,7 @@ Please provide suggestions to reduce complexity and address the identified issue
     curr = curr.parent;
   }
 
-  interface ChatMessage {
-    sender: "user" | "assistant";
-    text: string;
-    timestamp: string;
-  }
-
-  // AI Chat states
+  // Ask ATHENA states
   const [activeTab, setActiveTab] = useState<"details" | "chat">("details");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
@@ -1969,20 +2368,19 @@ Please provide suggestions to reduce complexity and address the identified issue
     setActiveTab("details");
   }, [id]);
 
-  // Load chat history from localStorage
+  // Load chat history from SQLite
   const getStorageKey = () => `savant_chat_history_${repoName}_${id}`;
   useEffect(() => {
-    const key = getStorageKey();
-    const stored = localStorage.getItem(key);
-    if (stored) {
-      try {
-        setMessages(JSON.parse(stored));
-      } catch (e) {
+    async function load() {
+      const key = getStorageKey();
+      const stored = await window.system.getChatHistory(key);
+      if (stored) {
+        setMessages(stored);
+      } else {
         setMessages([]);
       }
-    } else {
-      setMessages([]);
     }
+    load();
   }, [id, repoName]);
 
   // Load settings once and fetch models from gateway
@@ -2020,7 +2418,23 @@ Please provide suggestions to reduce complexity and address the identified issue
 
   const saveMessages = (newMessages: ChatMessage[]) => {
     setMessages(newMessages);
-    localStorage.setItem(getStorageKey(), JSON.stringify(newMessages));
+    window.system.saveChatHistory(getStorageKey(), newMessages);
+  };
+
+  const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
+    const baseUrl = serverUrl.replace(/\/+$/, "");
+    const [codeHits, knowledgeHits, tools] = await Promise.all([
+      fetchAthenaCodeContext(baseUrl, apiKey, query, repoName),
+      fetchAthenaKnowledgeContext(baseUrl, apiKey, query),
+      fetchAthenaMcpTools(baseUrl, apiKey),
+    ]);
+
+    return buildAthenaPromptSections([
+      ["BASE PROMPT", basePrompt],
+      ["RETRIEVED CODE CONTEXT", formatAthenaContextHits(codeHits)],
+      ["RETRIEVED KNOWLEDGE CONTEXT", formatAthenaContextHits(knowledgeHits)],
+      ["AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools available."],
+    ]);
   };
 
   const handleClearHistory = () => {
@@ -2031,6 +2445,7 @@ Please provide suggestions to reduce complexity and address the identified issue
     if (!textToSend.trim() || isLoading) return;
 
     const newUserMessage: ChatMessage = {
+      id: Math.random().toString(),
       sender: "user",
       text: textToSend,
       timestamp: new Date().toISOString(),
@@ -2056,7 +2471,7 @@ Please provide suggestions to reduce complexity and address the identified issue
         }
       }
 
-      const contextPrompt = `You are an AI assistant integrated into the Savant Olympus app.
+      const contextPrompt = `You are ATHENA, an AI assistant integrated into the Savant Olympus app.
 The user is having a conversation with you regarding code refactoring and planning.
 
 [USER CONTEXT]
@@ -2077,7 +2492,7 @@ ${nodeFindings.length > 0 ?
 
 [CONVERSATION HISTORY]
 ${messages.length > 0 ? 
-  messages.map(msg => `${msg.sender === "user" ? "User" : "AI"}: ${msg.text}`).join("\n")
+  messages.map(msg => `${msg.sender === "user" ? "User" : "ATHENA"}: ${msg.text}`).join("\n")
   : "No previous messages in this conversation."
 }
 
@@ -2085,15 +2500,20 @@ ${messages.length > 0 ?
 ${textToSend}
 
 Please analyze the code context and the history, then respond to the user's message. Explain why the section is red if they ask (red/orange signifies high complexity or analysis findings). Suggest refactoring strategies and code changes to help them plan and execute their refactoring goal.
+
+[INSTRUCTIONS FOR MCP USAGE]
+You have access to a variety of Savant MCP tools. Use them to investigate code, query knowledge, or perform actions as needed. 
+Always prefer using a tool if it can provide more accurate or deep information.
 `;
 
       const responseText = await window.ipcRenderer.invoke("run-agent", {
         provider,
         model,
-        prompt: contextPrompt,
+        prompt: await buildAthenaAugmentedPrompt(contextPrompt, `${name} ${textToSend} ${filePath || ""}`),
       });
 
       const newAiMessage: ChatMessage = {
+        id: Math.random().toString(),
         sender: "assistant",
         text: responseText || "No response received from the gateway.",
         timestamp: new Date().toISOString(),
@@ -2101,10 +2521,10 @@ Please analyze the code context and the history, then respond to the user's mess
 
       saveMessages([...updatedMessages, newAiMessage]);
     } catch (error: any) {
-      console.error("Error calling gateway agent:", error);
       const errorMsg: ChatMessage = {
+        id: Math.random().toString(),
         sender: "assistant",
-        text: `Error calling AI agent: ${error.message || "Unknown error"}. Make sure Savant Gateway is running.`,
+        text: `Error calling ATHENA agent: ${error.message || "Unknown error"}. Make sure Savant Gateway is running.`,
         timestamp: new Date().toISOString(),
       };
       saveMessages([...updatedMessages, errorMsg]);
@@ -2156,7 +2576,7 @@ Please analyze the code context and the history, then respond to the user's mess
               : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
-          AI Chat
+          Ask ATHENA
         </button>
       </div>
 
@@ -2198,16 +2618,7 @@ Please analyze the code context and the history, then respond to the user's mess
             )}
           </div>
 
-          {/* Action Buttons */}
-          <div className="grid grid-cols-1 gap-2 pt-2">
-            <button
-              onClick={() => setActiveTab("chat")}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-[var(--cp-cyan)] hover:bg-[var(--cp-cyan)]/90 text-[var(--cp-bg-1)] font-bold rounded transition-colors cursor-pointer"
-            >
-              <MessageSquare size={14} />
-              <span>CHAT WITH AI</span>
-            </button>
-          </div>
+
 
           {/* Metrics Grid */}
           {complexity > 0 && (
@@ -2341,9 +2752,9 @@ Please analyze the code context and the history, then respond to the user's mess
               <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-4 my-auto">
                 <Sparkles className="w-8 h-8 text-[var(--cp-cyan)] animate-pulse" />
                 <div className="space-y-1">
-                  <h4 className="text-[11px] font-bold text-foreground uppercase tracking-wider font-mono">Gateway AI Chat</h4>
+                  <h4 className="text-[11px] font-bold text-foreground uppercase tracking-wider font-mono">ATHENA</h4>
                   <p className="text-[9px] text-muted-foreground max-w-[200px] leading-relaxed font-sans">
-                    Ask questions about this code section. The Gateway AI has full context of this node.
+                    Ask ATHENA questions about this code section. ATHENA has full context of this node.
                   </p>
                 </div>
 
@@ -2381,7 +2792,7 @@ Please analyze the code context and the history, then respond to the user's mess
                     }`}
                   >
                     <div className="flex items-center gap-2 text-[8px] text-muted-foreground opacity-60">
-                      <span>{msg.sender === "user" ? "USER" : "AI"}</span>
+                      <span>{msg.sender === "user" ? "USER" : "ATHENA"}</span>
                       {/* Copy & Delete action buttons */}
                       <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
@@ -2422,7 +2833,7 @@ Please analyze the code context and the history, then respond to the user's mess
                 ))}
                 {isLoading && (
                   <div className="flex flex-col space-y-1 items-start">
-                    <span className="text-[8px] text-[var(--cp-cyan)] uppercase tracking-wider animate-pulse">AI is thinking...</span>
+                    <span className="text-[8px] text-[var(--cp-cyan)] uppercase tracking-wider animate-pulse">ATHENA IS THINKING...</span>
                     <div className="p-2 rounded border border-[var(--cp-border)] bg-[var(--cp-bg-3)] flex items-center gap-2">
                       <Loader2 size={12} className="animate-spin text-[var(--cp-cyan)]" />
                       <span className="text-muted-foreground text-[10px] font-sans">Consulting Savant Gateway...</span>
@@ -2453,7 +2864,7 @@ Please analyze the code context and the history, then respond to the user's mess
                   }
                 }
               }}
-              placeholder="Ask a question about this code..."
+              placeholder="Ask ATHENA about this code..."
               disabled={isLoading}
               rows={1}
               className="flex-1 bg-[var(--cp-bg-0)] border border-[var(--cp-border)] px-3 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:border-[var(--cp-cyan)] resize-none min-h-[32px] max-h-[120px] overflow-y-auto"
@@ -2480,4 +2891,3 @@ Please analyze the code context and the history, then respond to the user's mess
     </div>
   );
 }
-
