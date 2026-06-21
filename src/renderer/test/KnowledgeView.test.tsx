@@ -103,6 +103,16 @@ describe('KnowledgeView', () => {
     await waitFor(() => expect(window.fetch).toHaveBeenCalledWith('http://savant.local/api/knowledge/purge-workspace', expect.objectContaining({ method: 'POST' })))
   })
 
+  it('includes person in the node type selectors', async () => {
+    render(<KnowledgeView serverUrl="http://savant.local" apiKey="sk-test" />)
+
+    await screen.findByText('// Knowledge Network')
+    window.dispatchEvent(new CustomEvent('knowledge-add-node'))
+    await screen.findByText('// ADD NODE')
+
+    expect(screen.getAllByRole('option', { name: 'person' }).length).toBeGreaterThan(0)
+  })
+
   it('allows editing a node title and type', async () => {
     render(<KnowledgeView serverUrl="http://savant.local" apiKey="sk-test" />)
     await screen.findByText('// Knowledge Network')

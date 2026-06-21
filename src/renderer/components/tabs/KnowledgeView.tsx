@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
-import { GitFork, Network, Layers, RefreshCw, ZoomIn, ZoomOut, Maximize, Plus, Trash2, Search, ArrowRight, ArrowLeft, Download, Upload, Info, Check, Copy } from "lucide-react";
+import { GitFork, Network, Layers, RefreshCw, ZoomIn, ZoomOut, Maximize, Plus, Trash2, Search, ArrowRight, ArrowLeft, Download, Upload, Info, Check, Copy, Box } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { buildAthenaPromptSections, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits } from "@/lib/athenaContext";
 
@@ -19,6 +19,12 @@ interface Node extends d3.SimulationNodeDatum {
     workspace_id?: string;
     source?: string;
   };
+  z?: number;
+  vz?: number;
+  px?: number;
+  py?: number;
+  pScale?: number;
+  depth?: number;
 }
 
 interface Edge extends d3.SimulationLinkDatum<Node> {
@@ -50,6 +56,7 @@ const KNOWLEDGE_NODE_TYPES = [
   "repo",
   "session",
   "issue",
+  "person",
 ];
 
 
@@ -61,8 +68,19 @@ interface KnowledgeViewProps {
 export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const zoomInRef = useRef<() => void>(() => {});
+  const zoomOutRef = useRef<() => void>(() => {});
+  const updatePositionsRef = useRef<() => void>(() => {});
+  const exploreDepthRef = useRef(2);
+  const isExploreActiveRef = useRef(false);
+  const focalNodesRef = useRef<Set<string>>(new Set());
+  const selectedNodesRef = useRef<Map<string, Node>>(new Map());
+  const selectedNodeRef = useRef<Node | null>(null);
+  const searchQueryRef = useRef("");
+  const searchTagsRef = useRef<string[]>([]);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [activeLayer, setActiveLayer] = useState("all");
+  const [is3DMode, setIs3DMode] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [nodesCount, setNodesCount] = useState(0);
   const [edgesCount, setEdgesCount] = useState(0);
@@ -71,8 +89,12 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
   const [isInspectorOpen, setIsInspectorOpen] = useState(true);
   const [editedNodeTitle, setEditedNodeTitle] = useState("");
   const [editedNodeType, setEditedNodeType] = useState("");
+  const [editedNodeWorkspace, setEditedNodeWorkspace] = useState("");
+  const [bulkWorkspace, setBulkWorkspace] = useState("");
   const [isSavingNodeType, setIsSavingNodeType] = useState(false);
   const [isSavingNodeTitle, setIsSavingNodeTitle] = useState(false);
+  const [isSavingNodeWorkspaces, setIsSavingNodeWorkspaces] = useState(false);
+  const [availableWorkspaces, setAvailableWorkspaces] = useState<any[]>([]);
 
   // Add node form state
   const [newNodeTitle, setNewNodeTitle] = useState("");
@@ -192,6 +214,13 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
       setNodesCount(filteredNodes.length);
       setEdgesCount(filteredEdges.length);
 
+      let yaw = 0;
+      let pitch = 0;
+      let cameraDistance = 400;
+      let panX = 0;
+      let panY = 0;
+      let updatePositions = () => {};
+
       const d3Svg = d3.select(svgRef.current);
       d3Svg.selectAll("*").remove();
 
@@ -206,9 +235,71 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
         .on("zoom", (event) => {
           g.attr("transform", event.transform);
         });
-      d3Svg.call(zoom);
 
-      const nodes: Node[] = filteredNodes.map((n: any) => ({
+      if (is3DMode) {
+        d3Svg.on(".zoom", null);
+        let isDragging = false;
+        let startX = 0, startY = 0;
+        let startYaw = 0, startPitch = 0;
+
+        d3Svg
+          .on("mousedown", (event) => {
+            if (event.target.tagName === "svg" || event.target.id === "kb-graph-svg") {
+              isDragging = true;
+              startX = event.clientX;
+              startY = event.clientY;
+              startYaw = yaw;
+              startPitch = pitch;
+            }
+          })
+          .on("mousemove", (event) => {
+            if (!isDragging) return;
+            const dx = event.clientX - startX;
+            const dy = event.clientY - startY;
+            yaw = startYaw + dx * 0.008;
+            pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, startPitch - dy * 0.008));
+            updatePositions();
+          })
+          .on("mouseup", () => { isDragging = false; })
+          .on("mouseleave", () => { isDragging = false; })
+          .on("wheel", (event) => {
+            event.preventDefault();
+            if (event.ctrlKey) {
+              cameraDistance = Math.max(150, Math.min(1000, cameraDistance + event.deltaY * 0.4));
+            } else {
+              panX -= event.deltaX * 0.8;
+              panY -= event.deltaY * 0.8;
+            }
+            updatePositions();
+          });
+
+        zoomInRef.current = () => {
+          cameraDistance = Math.max(150, cameraDistance - 40);
+          updatePositions();
+        };
+        zoomOutRef.current = () => {
+          cameraDistance = Math.min(1000, cameraDistance + 40);
+          updatePositions();
+        };
+      } else {
+        d3Svg.call(zoom);
+        d3Svg.on("wheel", (event) => {
+          if (event.ctrlKey) return;
+          event.preventDefault();
+          const currentTransform = d3.zoomTransform(svgRef.current!);
+          const nextTransform = currentTransform.translate(-event.deltaX * 0.6, -event.deltaY * 0.6);
+          d3Svg.call(zoom.transform, nextTransform);
+        });
+
+        zoomInRef.current = () => {
+          d3Svg.transition().duration(250).call(zoom.scaleBy, 1.3);
+        };
+        zoomOutRef.current = () => {
+          d3Svg.transition().duration(250).call(zoom.scaleBy, 1 / 1.3);
+        };
+      }
+
+      const nodes: Node[] = filteredNodes.map((n: any, idx: number) => ({
         id: n.node_id,
         node_id: n.node_id,
         title: n.title,
@@ -217,6 +308,8 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
         status: n.status,
         created_at: n.created_at,
         metadata: n.metadata,
+        z: (idx % 2 === 0 ? 1 : -1) * (20 + (idx * 25) % 150),
+        vz: 0,
       }));
 
       const edges: Edge[] = filteredEdges.map((e: any) => ({
@@ -253,6 +346,7 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
         technology: "#4ade80",
         concept: "#a78bfa",
         session: "#6b7280",
+        person: "#f97316",
       };
 
       const domainHullColors = [
@@ -263,7 +357,7 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
         "rgba(251,146,60,0.38)",
       ];
 
-      const typeOrder = ["domain", "service", "library", "technology", "concept", "session"];
+      const typeOrder = ["domain", "service", "library", "technology", "concept", "session", "person"];
       const clusterCenters: Record<string, { x: number; y: number }> = {};
       typeOrder.forEach((t, i) => {
         const angle = (i / typeOrder.length) * 2 * Math.PI - Math.PI / 2;
@@ -302,11 +396,14 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
       const domainHullG = g.append("g");
       const hullLine = d3.line().curve(d3.curveCardinalClosed.tension(0.65));
 
-      const _domainHullPath = (memberNodes: any[], pad: number) => {
+      const _domainHullPath = (memberNodes: any[], pad: number, useProjected: boolean = false) => {
         if (!memberNodes.length) return null;
+        const getCoord = (n: any) => {
+          return useProjected ? [n.px || 0, n.py || 0] : [n.x || 0, n.y || 0];
+        };
         if (memberNodes.length === 1) {
           const r = pad + 18;
-          const [px, py] = [memberNodes[0].x, memberNodes[0].y];
+          const [px, py] = getCoord(memberNodes[0]);
           const pts = Array.from({ length: 8 }, (_, k) => {
             const a = (k / 8) * 2 * Math.PI;
             return [px + r * Math.cos(a), py + r * Math.sin(a)] as [number, number];
@@ -315,8 +412,8 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
         }
         if (memberNodes.length === 2) {
           const [n1, n2] = memberNodes;
-          const [x1, y1] = [n1.x, n1.y];
-          const [x2, y2] = [n2.x, n2.y];
+          const [x1, y1] = getCoord(n1);
+          const [x2, y2] = getCoord(n2);
           const dx = x2 - x1;
           const dy = y2 - y1;
           const len = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -333,7 +430,7 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
           ];
           return hullLine(pts);
         }
-        const pts: [number, number][] = memberNodes.map((n) => [n.x, n.y]);
+        const pts: [number, number][] = memberNodes.map((n) => getCoord(n) as [number, number]);
         const raw = d3.polygonHull(pts);
         if (!raw || raw.length < 2) return null;
         const cx = raw.reduce((s, p) => s + p[0], 0) / raw.length;
@@ -467,24 +564,212 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
       .style("pointer-events", "none")
       .style("opacity", 0.92);
 
-    simulation.on("tick", () => {
-      link
-        .attr("x1", (d: any) => d.source.x || 0)
-        .attr("y1", (d: any) => d.source.y || 0)
-        .attr("x2", (d: any) => d.target.x || 0)
-        .attr("y2", (d: any) => d.target.y || 0);
-      node.attr("transform", (d: any) => `translate(${d.x || 0}, ${d.y || 0})`);
-      areaElements.forEach(({ path, label, area }) => {
-        const members = nodes.filter((n) => area.memberIds.has(n.node_id) && n.x != null && n.y != null);
-        if (!members.length) return;
-        const dPath = _domainHullPath(members, 30);
-        if (dPath) {
-          path.attr("d", dPath);
-          const cx = members.reduce((s, n) => s + (n.x || 0), 0) / members.length;
-          const topY = Math.min(...members.map((n) => n.y || 0)) - 30;
-          label.attr("x", cx).attr("y", topY);
-        }
+    updatePositions = () => {
+      let matchedIds = new Set<string>();
+      let visibleIds = new Set<string>();
+      const query = searchQueryRef.current.trim().toLowerCase();
+      const tags = searchTagsRef.current;
+      const activeSelectedNodes = selectedNodesRef.current;
+      const activeSelectedNode = selectedNodeRef.current;
+      const activeIsExploreActive = isExploreActiveRef.current;
+      const activeFocalNodes = focalNodesRef.current;
+      const activeExploreDepth = exploreDepthRef.current;
+
+      const adj: Record<string, string[]> = {};
+      rawNodes.forEach((n) => { adj[n.node_id] = []; });
+      rawEdges.forEach((e) => {
+        if (adj[e.source_id]) adj[e.source_id].push(e.target_id);
+        if (adj[e.target_id]) adj[e.target_id].push(e.source_id);
       });
+
+      const distMap = (activeIsExploreActive && activeFocalNodes.size > 0 && activeSelectedNodes.size === 0)
+        ? bfs(activeFocalNodes, activeExploreDepth, adj)
+        : null;
+
+      const hasSearch = query || tags.length > 0;
+      if (hasSearch) {
+        nodes.forEach((n: any) => {
+          const title = (n.title || "").toLowerCase();
+          const content = (n.content || "").toLowerCase();
+          const nid = (n.node_id || "").toLowerCase();
+          if ((query && (title.includes(query) || content.includes(query) || nid.includes(query))) || (tags.length === 0)) {
+            matchedIds.add(n.node_id);
+          }
+        });
+
+        if (tags.length > 0) {
+          tags.forEach((tag, idx) => {
+            const currentTagVisible = new Set<string>();
+            nodes.forEach((n: any) => {
+              const tagsList = n.metadata?.tags || [];
+              const matchesTag = tagsList.some((t: string) => t.toLowerCase() === tag.toLowerCase());
+              if (matchesTag) {
+                currentTagVisible.add(n.node_id);
+                const neighbors = rawEdges
+                  .filter((e) => e.source_id === n.node_id || e.target_id === n.node_id)
+                  .map((e) => e.source_id === n.node_id ? e.target_id : e.source_id);
+                neighbors.forEach((nb) => currentTagVisible.add(nb));
+              }
+            });
+            if (idx === 0) {
+              visibleIds = currentTagVisible;
+            } else {
+              visibleIds = new Set(Array.from(visibleIds).filter(id => currentTagVisible.has(id)));
+            }
+          });
+        } else {
+          visibleIds = new Set(matchedIds);
+          matchedIds.forEach((id) => {
+            const neighbors = rawEdges
+              .filter((e) => e.source_id === id || e.target_id === id)
+              .map((e) => e.source_id === id ? e.target_id : e.source_id);
+            neighbors.forEach((nb) => visibleIds.add(nb));
+          });
+        }
+      }
+
+      const getNodeOpacity = (d: any) => {
+        let factor = 1.0;
+        if (hasSearch) {
+          factor = visibleIds.has(d.node_id) ? (matchedIds.has(d.node_id) ? 1.0 : 0.5) : 0.08;
+        } else if (distMap) {
+          factor = distMap.has(d.node_id) ? Math.max(0.4, 1 - distMap.get(d.node_id)! * 0.2) : 0.08;
+        } else if (activeSelectedNodes.size > 0) {
+          factor = activeSelectedNodes.has(d.node_id) ? 1.0 : 0.15;
+        } else if (activeSelectedNode && d.node_id === activeSelectedNode.id) {
+          factor = 1.0;
+        }
+        return factor;
+      };
+
+      const getLinkOpacity = (d: any) => {
+        const s = d.source.node_id || d.source;
+        const t = d.target.node_id || d.target;
+        let factor = 0.55;
+        if (hasSearch) {
+          factor = (visibleIds.has(s) && visibleIds.has(t)) ? 0.7 : 0.05;
+        } else if (distMap) {
+          factor = (distMap.has(s) && distMap.has(t)) ? 0.7 : 0.05;
+        } else if (activeSelectedNodes.size > 0) {
+          factor = (activeSelectedNodes.has(s) && activeSelectedNodes.has(t)) ? 0.7 : 0.15;
+        }
+        return factor;
+      };
+
+      if (is3DMode) {
+        resolvedEdges.forEach((edge: any) => {
+          const s = edge.source;
+          const t = edge.target;
+          if (s.z != null && t.z != null) {
+            const dz = t.z - s.z;
+            s.vz = (s.vz || 0) + dz * 0.005;
+            t.vz = (t.vz || 0) - dz * 0.005;
+          }
+        });
+
+        nodes.forEach((n: any) => {
+          n.z = (n.z || 0) + (n.vz || 0);
+          n.vz = (n.vz || 0) * 0.82;
+          n.z -= n.z * 0.015;
+        });
+
+        nodes.forEach((n: any) => {
+          const cx = (n.x || 0) - width / 2;
+          const cy = (n.y || 0) - height / 2;
+          const cz = n.z || 0;
+
+          const r1x = cx * Math.cos(yaw) - cz * Math.sin(yaw);
+          const r1z = cx * Math.sin(yaw) + cz * Math.cos(yaw);
+
+          const r2y = cy * Math.cos(pitch) - r1z * Math.sin(pitch);
+          const r2z = cy * Math.sin(pitch) + r1z * Math.cos(pitch);
+
+          const distance = cameraDistance;
+          const fov = 350;
+          const scale = fov / (distance + r2z);
+
+          n.px = width / 2 + r1x * scale + panX;
+          n.py = height / 2 + r2y * scale + panY;
+          n.pScale = scale;
+          n.depth = r2z;
+        });
+
+        link
+          .attr("x1", (d: any) => d.source.px || 0)
+          .attr("y1", (d: any) => d.source.py || 0)
+          .attr("x2", (d: any) => d.target.px || 0)
+          .attr("y2", (d: any) => d.target.py || 0)
+          .attr("opacity", (d: any) => {
+            const avgDepth = ((d.source.depth || 0) + (d.target.depth || 0)) / 2;
+            const depthOpacity = Math.max(0.1, Math.min(0.7, 1 - (avgDepth + 150) / 300));
+            return getLinkOpacity(d) * (depthOpacity / 0.7);
+          });
+
+        node
+          .attr("transform", (d: any) => `translate(${d.px || 0}, ${d.py || 0})`)
+          .attr("opacity", (d: any) => {
+            const avgDepth = d.depth || 0;
+            const depthOpacity = Math.max(0.15, Math.min(1.0, 1 - (avgDepth + 150) / 350));
+            return getNodeOpacity(d) * depthOpacity;
+          });
+
+        node.selectAll(".node-shape")
+          .attr("transform", (d: any) => `scale(${d.pScale || 1})`);
+
+        areaElements.forEach(({ path, label, area }) => {
+          path.style("display", null);
+          label.style("display", null);
+
+          const members = nodes.filter((n) => area.memberIds.has(n.node_id) && n.px != null && n.py != null);
+          const dPath = _domainHullPath(members, 30, true);
+          if (dPath) {
+            path.attr("d", dPath);
+            const cx = members.reduce((s, n) => s + (n.px || 0), 0) / members.length;
+            const topY = Math.min(...members.map((n) => n.py || 0)) - 30;
+            label.attr("x", cx).attr("y", topY);
+
+            const avgDepth = members.reduce((s, n) => s + (n.depth || 0), 0) / members.length;
+            const depthOpacity = Math.max(0.05, Math.min(1.0, 1 - (avgDepth + 150) / 350));
+            path.attr("fill-opacity", 0.12 * depthOpacity)
+                .attr("stroke-opacity", 0.6 * depthOpacity);
+            label.attr("opacity", 0.5 * depthOpacity);
+          }
+        });
+      } else {
+        link
+          .attr("x1", (d: any) => d.source.x || 0)
+          .attr("y1", (d: any) => d.source.y || 0)
+          .attr("x2", (d: any) => d.target.x || 0)
+          .attr("y2", (d: any) => d.target.y || 0)
+          .attr("opacity", 0.55);
+
+        node
+          .attr("transform", (d: any) => `translate(${d.x || 0}, ${d.y || 0})`)
+          .attr("opacity", 1.0);
+
+        node.selectAll(".node-shape")
+          .attr("transform", "scale(1)");
+
+        areaElements.forEach(({ path, label, area }) => {
+          path.style("display", null);
+          label.style("display", null);
+
+          const members = nodes.filter((n) => area.memberIds.has(n.node_id) && n.x != null && n.y != null);
+          const dPath = _domainHullPath(members, 30);
+          if (dPath) {
+            path.attr("d", dPath);
+            const cx = members.reduce((s, n) => s + (n.x || 0), 0) / members.length;
+            const topY = Math.min(...members.map((n) => n.y || 0)) - 30;
+            label.attr("x", cx).attr("y", topY);
+          }
+        });
+      }
+    };
+
+    updatePositionsRef.current = updatePositions;
+
+    simulation.on("tick", () => {
+      updatePositions();
     });
   } catch (e) {
     console.error(e);
@@ -599,9 +884,39 @@ useEffect(() => {
 }, [exploreDepth, isExploreActive, focalNodes, rawNodes, rawEdges, selectedNodes, selectedNode, searchQuery, searchTags]);
 
 useEffect(() => {
+  exploreDepthRef.current = exploreDepth;
+  isExploreActiveRef.current = isExploreActive;
+  focalNodesRef.current = focalNodes;
+  selectedNodesRef.current = selectedNodes;
+  selectedNodeRef.current = selectedNode;
+  searchQueryRef.current = searchQuery;
+  searchTagsRef.current = searchTags;
+  if (is3DMode && updatePositionsRef.current) {
+    updatePositionsRef.current();
+  }
+}, [exploreDepth, isExploreActive, focalNodes, selectedNodes, selectedNode, searchQuery, searchTags, is3DMode]);
+
+useEffect(() => {
   if (selectedNodes.size > 0) return;
   setIsInspectorOpen(Boolean(selectedNode));
 }, [selectedNode, selectedNodes.size]);
+
+useEffect(() => {
+  const fetchWorkspacesList = async () => {
+    try {
+      const res = await fetch(`${baseUrl}/api/workspaces`, {
+        headers: { "X-API-Key": apiKey },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAvailableWorkspaces(Array.isArray(data) ? data : (data?.workspaces || []));
+      }
+    } catch (e) {
+      console.error("Failed to load workspaces:", e);
+    }
+  };
+  fetchWorkspacesList();
+}, [baseUrl, apiKey]);
 
 const handleMergeSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
@@ -646,31 +961,72 @@ const handleBulkConnect = async () => {
   } catch (e: any) { alert("Failed: " + e.message); } finally { setIsLoading(false); }
 };
 
+  const handleBulkApplyWorkspace = async () => {
+    const ids = Array.from(selectedNodes.keys());
+    if (ids.length === 0) return;
+    setIsLoading(true);
+    try {
+      await Promise.all(ids.map(async (nodeId) => {
+        const nodeRes = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
+          headers: { "X-API-Key": apiKey },
+        });
+        if (nodeRes.ok) {
+          const nodeData = await nodeRes.json();
+          const updatedMetadata = {
+            ...(nodeData.metadata || {}),
+            workspaces: bulkWorkspace ? [bulkWorkspace] : [],
+          };
+          if (bulkWorkspace) {
+            updatedMetadata.workspace_id = bulkWorkspace;
+          } else {
+            delete updatedMetadata.workspace_id;
+          }
+          await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+            body: JSON.stringify({ metadata: updatedMetadata }),
+          });
+        }
+      }));
+      setSelectedNodes(new Map());
+      setSelectedNode(null);
+      await loadGraph();
+    } catch (err: any) {
+      alert("Bulk workspace update failed: " + err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleConnectNodes = async (e: React.FormEvent) => {
-  e.preventDefault();
-  if (!selectedNode || connectTargetIds.length === 0) return;
-  const sourceId = selectedNode.node_id || selectedNode.id;
-  setIsLoading(true);
-  try {
-    const res = await fetch(`${baseUrl}/api/knowledge/edges/bulk`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
-      body: JSON.stringify({ source_id: sourceId, target_ids: connectTargetIds, edge_type: connectType }),
-    });
-    if (res.ok) {
+    e.preventDefault();
+    const isMulti = selectedNodes.size >= 2;
+    if ((!selectedNode && !isMulti) || connectTargetIds.length === 0) return;
+    const sourceIds = isMulti ? Array.from(selectedNodes.keys()) : [selectedNode!.node_id || selectedNode!.id];
+    setIsLoading(true);
+    try {
+      await Promise.all(sourceIds.map(async (sourceId) => {
+        const res = await fetch(`${baseUrl}/api/knowledge/edges/bulk`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+          body: JSON.stringify({ source_id: sourceId, target_ids: connectTargetIds, edge_type: connectType }),
+        });
+        if (!res.ok) {
+          throw new Error(`Failed to connect node: ${sourceId}`);
+        }
+      }));
       setIsConnectModalOpen(false);
       setConnectTargetIds([]);
       setConnectTargetQuery("");
+      setSelectedNodes(new Map());
+      setSelectedNode(null);
       await loadGraph();
-    } else {
-      alert("Failed to connect nodes");
+    } catch (err: any) {
+      alert("Failed: " + err.message);
+    } finally {
+      setIsLoading(false);
     }
-  } catch (err: any) {
-    alert("Failed: " + err.message);
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
 
 const handleDeleteEdge = async (edgeId: string | undefined, sourceId: string, targetId: string, edgeType: string) => {
   if (!confirm("Are you sure you want to remove this connection edge?")) return;
@@ -751,13 +1107,39 @@ const handleUpdateNodeMeta = async () => {
   const nodeId = selectedNode.node_id || selectedNode.id;
   const nextTitle = editedNodeTitle.trim();
   const nextType = editedNodeType.trim();
-  const payload: Record<string, string> = {};
+  
+  const currentWorkspaces = selectedNode.metadata?.workspaces || (selectedNode.metadata?.workspace_id ? [selectedNode.metadata.workspace_id] : []);
+  const currentWorkspaceVal = currentWorkspaces[0] || "";
+  const currentMatchingWs = Array.isArray(availableWorkspaces) ? availableWorkspaces.find(ws => 
+    ws.workspace_id === currentWorkspaceVal || 
+    ws.id === currentWorkspaceVal || 
+    ws.name === currentWorkspaceVal
+  ) : undefined;
+  const currentWorkspaceId = currentMatchingWs?.workspace_id || currentMatchingWs?.id || currentWorkspaceVal;
+  
+  const isWorkspaceChanged = editedNodeWorkspace !== currentWorkspaceId;
+
+  const payload: Record<string, any> = {};
   if (nextTitle && nextTitle !== (selectedNode.title || "")) payload.title = nextTitle;
   if (nextType && nextType !== selectedNode.node_type) payload.node_type = nextType;
+  
+  if (isWorkspaceChanged) {
+    payload.metadata = {
+      ...(selectedNode.metadata || {}),
+      workspaces: editedNodeWorkspace ? [editedNodeWorkspace] : [],
+    };
+    if (editedNodeWorkspace) {
+      payload.metadata.workspace_id = editedNodeWorkspace;
+    } else {
+      delete payload.metadata.workspace_id;
+    }
+  }
+
   if (Object.keys(payload).length === 0) return;
 
   setIsSavingNodeTitle(true);
   setIsSavingNodeType(true);
+  setIsSavingNodeWorkspaces(true);
   try {
     const res = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
       method: "PUT",
@@ -777,6 +1159,7 @@ const handleUpdateNodeMeta = async () => {
   } finally {
     setIsSavingNodeTitle(false);
     setIsSavingNodeType(false);
+    setIsSavingNodeWorkspaces(false);
   }
 };
 
@@ -909,7 +1292,7 @@ const filteredTargetNodes = connectTargetQuery.trim()
     (acc[key] ||= []).push(node);
     return acc;
   }, {});
-  const connectTypeOrder = ["domain", "service", "library", "technology", "concept", "session", "project", "repo", "client", "insight", "other"];
+  const connectTypeOrder = ["domain", "service", "library", "technology", "concept", "session", "project", "repo", "client", "insight", "person", "other"];
   const selectedConnections = selectedNode
     ? rawEdges
         .filter((edge) => edge.source_id === selectedNode.node_id || edge.target_id === selectedNode.node_id)
@@ -1063,7 +1446,15 @@ const triggerUpload = () => {
     setDrawerTab("info");
     setEditedNodeTitle(selectedNode?.title || "");
     setEditedNodeType(selectedNode?.node_type || "");
-  }, [selectedNode?.node_id, selectedNode?.id]);
+    const workspacesList = selectedNode?.metadata?.workspaces || (selectedNode?.metadata?.workspace_id ? [selectedNode.metadata.workspace_id] : []);
+    const workspaceVal = workspacesList[0] || "";
+    const matchingWs = Array.isArray(availableWorkspaces) ? availableWorkspaces.find(ws => 
+      ws.workspace_id === workspaceVal || 
+      ws.id === workspaceVal || 
+      ws.name === workspaceVal
+    ) : undefined;
+    setEditedNodeWorkspace(matchingWs?.workspace_id || matchingWs?.id || workspaceVal);
+  }, [selectedNode?.node_id, selectedNode?.id, availableWorkspaces]);
 
   useEffect(() => {
     if (!selectedNode) return;
@@ -1291,7 +1682,7 @@ Please analyze the node information, the neighboring nodes, and the connection e
     }
   };
 
-  useEffect(() => { loadGraph(); }, [activeLayer, baseUrl, apiKey]);
+  useEffect(() => { loadGraph(); }, [activeLayer, baseUrl, apiKey, is3DMode]);
 useEffect(() => {
   const handleResize = () => {
     if (svgRef.current && containerRef.current) {
@@ -1363,7 +1754,30 @@ return (
       </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-0.5">
-        </div>
+            <button
+              type="button"
+              onClick={() => setIs3DMode(!is3DMode)}
+              className={`px-2 py-1 text-[10px] uppercase font-mono transition-all cursor-pointer flex items-center gap-1.5 ${is3DMode ? "bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              <Box size={12} /> {is3DMode ? "3D MODE" : "2D MODE"}
+            </button>
+            <button
+              type="button"
+              onClick={() => zoomInRef.current()}
+              className="px-2 py-1 text-[10px] text-muted-foreground hover:text-[var(--cp-cyan)] transition-all cursor-pointer flex items-center justify-center border-l border-[var(--cp-border)]/50"
+              title="Zoom In"
+            >
+              <ZoomIn size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={() => zoomOutRef.current()}
+              className="px-2 py-1 text-[10px] text-muted-foreground hover:text-[var(--cp-cyan)] transition-all cursor-pointer flex items-center justify-center border-l border-[var(--cp-border)]/50"
+              title="Zoom Out"
+            >
+              <ZoomOut size={12} />
+            </button>
+          </div>
         <div className="flex items-center gap-1.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-1">
           {layers.map((layer) => (
             <button
@@ -1448,13 +1862,33 @@ return (
                   <button type="submit" className="w-full py-1.5 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase hover:opacity-90 flex items-center justify-center gap-1"><GitFork size={12} />Merge Nodes</button>
                 </form>
                 <div className="space-y-3 pt-4 border-t border-[var(--cp-border)]/30">
-                  <h4 className="text-[10px] text-muted-foreground uppercase font-bold">// BULK CONNECT</h4>
+                  <h4 className="text-[10px] text-muted-foreground uppercase font-bold">// LINK TO WORKSPACE</h4>
+                  <select
+                    value={bulkWorkspace}
+                    onChange={(e) => setBulkWorkspace(e.target.value)}
+                    className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono text-xs"
+                  >
+                    <option value="">No Workspace</option>
+                    {Array.isArray(availableWorkspaces) && availableWorkspaces.map((ws) => (
+                      <option key={ws.workspace_id || ws.id} value={ws.workspace_id || ws.id}>
+                        {ws.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button onClick={handleBulkApplyWorkspace} className="w-full py-1.5 bg-[var(--cp-cyan)]/20 border border-[var(--cp-cyan)]/40 text-[var(--cp-cyan)] font-bold text-xs uppercase hover:bg-[var(--cp-cyan)]/30 flex items-center justify-center gap-1"><Plus size={12} />Apply Workspace</button>
+                </div>
+                <div className="space-y-3 pt-4 border-t border-[var(--cp-border)]/30">
+                  <h4 className="text-[10px] text-muted-foreground uppercase font-bold">// LINK TO OTHER NODE</h4>
+                  <button onClick={() => { setConnectTargetIds([]); setConnectTargetQuery(""); setIsConnectModalOpen(true); }} className="w-full py-1.5 bg-[var(--cp-cyan)]/20 border border-[var(--cp-cyan)]/40 text-[var(--cp-cyan)] font-bold text-xs uppercase hover:bg-[var(--cp-cyan)]/30 flex items-center justify-center gap-1.5"><GitFork size={12} />Connect Selected to Other...</button>
+                </div>
+                <div className="space-y-3 pt-4 border-t border-[var(--cp-border)]/30">
+                  <h4 className="text-[10px] text-muted-foreground uppercase font-bold">// BULK CONNECT SURVIVOR</h4>
                   <select value={bulkEdgeType} onChange={(e) => setBulkEdgeType(e.target.value)} className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 font-mono text-xs">
                     {["relates_to", "learned_from", "uses", "depends_on", "built_with"].map((et) => <option key={et} value={et}>{et.replace(/_/g, " ")}</option>)}
                   </select>
-                  <button onClick={handleBulkConnect} className="w-full py-1.5 bg-[var(--cp-cyan)]/20 border border-[var(--cp-cyan)]/40 text-[var(--cp-cyan)] font-bold text-xs uppercase hover:bg-[var(--cp-cyan)]/30 flex items-center justify-center gap-1"><Plus size={12} />Connect All</button>
+                  <button onClick={handleBulkConnect} className="w-full py-1.5 bg-[var(--cp-cyan)]/20 border border-[var(--cp-cyan)]/40 text-[var(--cp-cyan)] font-bold text-xs uppercase hover:bg-[var(--cp-cyan)]/30 flex items-center justify-center gap-1"><Plus size={12} />Connect Survivor to Others</button>
                 </div>
-                <div className="pt-2"><button onClick={handleBulkDelete} className="w-full py-1.5 bg-red-950/20 border border-red-500/30 text-red-400 font-bold text-xs uppercase hover:bg-red-950/40 flex items-center justify-center gap-1"><Trash2 size={12} />Delete Selected</button></div>
+                <div className="pt-4 border-t border-[var(--cp-border)]/30"><button onClick={handleBulkDelete} className="w-full py-1.5 bg-red-950/20 border border-red-500/30 text-red-400 font-bold text-xs uppercase hover:bg-red-950/40 flex items-center justify-center gap-1"><Trash2 size={12} />Delete Selected</button></div>
               </div>
             </div>
           ) : isInspectorOpen ? (
@@ -1477,29 +1911,52 @@ return (
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">// NODE TYPE</label>
-                    <div className="flex gap-2">
-                      <select
-                        value={editedNodeType}
-                        onChange={(e) => setEditedNodeType(e.target.value)}
-                        className="flex-1 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono"
-                      >
-                        {KNOWLEDGE_NODE_TYPES.map((t) => (
-                          <option key={t} value={t}>{t}</option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={handleUpdateNodeMeta}
-                        disabled={
-                          (!editedNodeTitle.trim() || editedNodeTitle.trim() === (selectedNode!.title || "")) &&
-                          (!editedNodeType.trim() || editedNodeType.trim() === selectedNode!.node_type) ||
-                          isSavingNodeTitle || isSavingNodeType
-                        }
-                        className="px-3 py-1.5 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-[10px] uppercase hover:opacity-90 disabled:opacity-50 font-mono"
-                      >
-                        {(isSavingNodeTitle || isSavingNodeType) ? "Saving..." : "Update"}
-                      </button>
-                    </div>
+                    <select
+                      value={editedNodeType}
+                      onChange={(e) => setEditedNodeType(e.target.value)}
+                      className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono"
+                    >
+                      {KNOWLEDGE_NODE_TYPES.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">// WORKSPACE</label>
+                    <select
+                      value={editedNodeWorkspace}
+                      onChange={(e) => setEditedNodeWorkspace(e.target.value)}
+                      className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono"
+                    >
+                      <option value="">No Workspace</option>
+                      {Array.isArray(availableWorkspaces) && availableWorkspaces.map((ws) => (
+                        <option key={ws.workspace_id || ws.id} value={ws.workspace_id || ws.id}>
+                          {ws.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={handleUpdateNodeMeta}
+                      disabled={
+                        ((!editedNodeTitle.trim() || editedNodeTitle.trim() === (selectedNode!.title || "")) &&
+                         (!editedNodeType.trim() || editedNodeType.trim() === selectedNode!.node_type) &&
+                         (editedNodeWorkspace === (
+                           (() => {
+                             const currentWorkspaces = selectedNode!.metadata?.workspaces || (selectedNode!.metadata?.workspace_id ? [selectedNode!.metadata.workspace_id] : []);
+                             const currentVal = currentWorkspaces[0] || "";
+                             const match = Array.isArray(availableWorkspaces) ? availableWorkspaces.find(ws => ws.workspace_id === currentVal || ws.id === currentVal || ws.name === currentVal) : undefined;
+                             return match?.workspace_id || match?.id || currentVal;
+                           })()
+                         ))) ||
+                        isSavingNodeTitle || isSavingNodeType || isSavingNodeWorkspaces
+                      }
+                      className="w-full py-1.5 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase hover:opacity-90 disabled:opacity-50 font-mono"
+                    >
+                      {(isSavingNodeTitle || isSavingNodeType || isSavingNodeWorkspaces) ? "Saving..." : "Update Details"}
+                    </button>
                   </div>
                   <div>
                     <h4 className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">// CONNECTIONS</h4>
@@ -1635,12 +2092,19 @@ return (
         </div>
       )}
     </div>
-    {isConnectModalOpen && selectedNode && (
+    {isConnectModalOpen && (selectedNode || selectedNodes.size >= 2) && (
       <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
         <div className="bg-[var(--cp-bg-1)] border border-[var(--cp-border)] w-full max-w-md p-6 rounded shadow-2xl space-y-4">
           <div className="flex justify-between items-center border-b border-[var(--cp-border)] pb-2"><h3 className="text-sm font-mono text-[var(--cp-cyan)] tracking-wider font-bold">// CONNECT NODE LINK</h3><button onClick={() => { setIsConnectModalOpen(false); setConnectTargetQuery(""); }} className="text-muted-foreground hover:text-foreground text-xs font-mono">✕</button></div>
           <form onSubmit={handleConnectNodes} className="space-y-4">
-            <div><label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1">Source Node</label><div className="text-xs font-mono bg-[var(--cp-bg-2)] border border-[var(--cp-border)] px-2.5 py-1.5 text-foreground/80">{selectedNode.title || selectedNode.id}</div></div>
+            <div>
+              <label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1">Source Node(s)</label>
+              <div className="text-xs font-mono bg-[var(--cp-bg-2)] border border-[var(--cp-border)] px-2.5 py-1.5 text-foreground/80 max-h-24 overflow-y-auto">
+                {selectedNodes.size >= 2
+                  ? Array.from(selectedNodes.values()).map(n => n.title || n.id).join(", ")
+                  : (selectedNode?.title || selectedNode?.id || "")}
+              </div>
+            </div>
             <div><label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1">Relation Type</label><select value={connectType} onChange={(e) => setConnectType(e.target.value)} className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5">{["relates_to", "learned_from", "uses", "depends_on", "built_with"].map(et => <option key={et} value={et}>{et.replace(/_/g, " ")}</option>)}</select></div>
             <div className="space-y-2">
               <label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1">Target Node</label>
