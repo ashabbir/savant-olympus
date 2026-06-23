@@ -165,7 +165,14 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     setIsUploadingGraphify(true);
     setUploadSuccess(null);
 
-    const jsonFiles = Array.from(files).filter((file) => file.name.toLowerCase().endsWith(".json"));
+    const jsonFiles = Array.from(files).filter((file) => {
+      const name = file.name.toLowerCase();
+      if (!name.endsWith(".json")) return false;
+      const path = (file.webkitRelativePath || "").toLowerCase();
+      if (path.includes("/cache/") || path.includes("\\cache\\")) return false;
+      return true;
+    });
+
     if (jsonFiles.length === 0) {
       setUploadSuccess("No JSON files found in the selected directory.");
       setIsUploadingGraphify(false);
@@ -174,14 +181,18 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     }
 
     const promises = jsonFiles.map((file) => {
-      return new Promise<{ name: string; content: any }>((resolve, reject) => {
+      return new Promise<{ name: string; relPath: string; content: any }>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (evt) => {
           try {
             const text = evt.target?.result;
             if (typeof text !== "string") throw new Error("Could not read file");
             const json = JSON.parse(text);
-            resolve({ name: file.name, content: json });
+            resolve({
+              name: file.name,
+              relPath: file.webkitRelativePath || "",
+              content: json
+            });
           } catch (err) {
             reject(err);
           }
@@ -194,12 +205,23 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       .then(async (results) => {
         let graphJson: any = null;
         let metaJson: any = null;
+        let bestGraphDepth = Infinity;
+        let bestMetaDepth = Infinity;
 
         results.forEach((item) => {
-          if (item.content.nodes || item.content.edges || item.content.vertices) {
-            graphJson = item.content;
+          const depth = (item.relPath.match(/[\/\\]/g) || []).length;
+          const isGraph = !!(item.content.nodes || item.content.edges || item.content.vertices || item.content.links);
+
+          if (isGraph) {
+            if (depth < bestGraphDepth) {
+              graphJson = item.content;
+              bestGraphDepth = depth;
+            }
           } else {
-            metaJson = item.content;
+            if (depth < bestMetaDepth) {
+              metaJson = item.content;
+              bestMetaDepth = depth;
+            }
           }
         });
 

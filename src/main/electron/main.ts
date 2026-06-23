@@ -410,7 +410,11 @@ ipcMain.handle('list-directory', async (_event, dirPath) => {
 
 ipcMain.handle('read-graphify-json', async (_event, repoPath) => {
   try {
-    const filePath = path.join(repoPath, 'graphify-out', 'graph.json')
+    let resolvedPath = repoPath
+    if (repoPath.startsWith('/base-code/')) {
+      resolvedPath = repoPath.replace('/base-code/', '/Users/home/code/')
+    }
+    const filePath = path.join(resolvedPath, 'graphify-out', 'graph.json')
     const content = await fs.readFile(filePath, 'utf8')
     return JSON.parse(content)
   } catch (e) {
