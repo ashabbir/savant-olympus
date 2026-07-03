@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Bell, RefreshCw, X, AlertTriangle, CheckCircle2, EyeOff } from "lucide-react";
+import { Bell, RefreshCw, X, AlertTriangle, CheckCircle2, EyeOff, ChevronLeft, ChevronRight } from "lucide-react";
 import { Calendar } from "../ui/calendar";
 
 interface Reminder {
@@ -56,6 +56,7 @@ export function RemindersView({ serverUrl, apiKey }: RemindersViewProps) {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "done" | "dismissed">("all");
   const [userFilter, setUserFilter] = useState<string>("all");
+  const [isReminderPaneOpen, setIsReminderPaneOpen] = useState(true);
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
 
@@ -211,9 +212,9 @@ export function RemindersView({ serverUrl, apiKey }: RemindersViewProps) {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--cp-border)] pb-3">
         <div>
-          <h2 className="text-lg font-medium text-[var(--cp-cyan)] tracking-wider flex items-center gap-2" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+          <h2 className="text-lg font-medium text-[var(--section-label)] tracking-wider flex items-center gap-2" style={{ fontFamily: "'Orbitron', sans-serif" }}>
             <Bell size={18} className="text-[var(--cp-cyan)] animate-pulse" />
-            // SYSTEM REMINDERS
+            SYSTEM REMINDERS
           </h2>
           <p className="text-xs text-muted-foreground opacity-60">Scheduled administrative tasks, checkpoints, and pending operations alerts</p>
         </div>
@@ -232,95 +233,117 @@ export function RemindersView({ serverUrl, apiKey }: RemindersViewProps) {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col md:flex-row gap-4 overflow-hidden">
         {/* Left Column: Calendar & Filters */}
-        <div className="w-full md:w-80 flex flex-col space-y-4 shrink-0">
-          {/* Calendar Widget */}
-          <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-3 flex flex-col items-center">
-            <h3 className="text-xs uppercase text-[var(--cp-cyan)] tracking-wider font-mono w-full text-left mb-2">// Scheduler Matrix</h3>
-            <Calendar
-              mode="single"
-              selected={selectedDate}
-              onSelect={setSelectedDate}
-              className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] p-2 w-full flex justify-center"
-              modifiers={{
-                hasReminder: isPendingReminderDate
-              }}
-              modifiersStyles={{
-                hasReminder: {
-                  border: "2px solid var(--cp-yellow)",
-                  borderRadius: "4px",
-                  color: "var(--cp-yellow)",
-                  boxShadow: "0 0 6px rgba(255, 230, 0, 0.4)",
-                  fontWeight: "bold",
-                  backgroundColor: "rgba(255, 230, 0, 0.1)"
-                }
-              }}
-            />
-            {selectedDate && (
-              <button
-                onClick={() => setSelectedDate(undefined)}
-                className="mt-3 w-full py-1 border border-[var(--cp-magenta)] hover:bg-[rgba(255,0,170,0.1)] text-[10px] text-[var(--cp-magenta)] font-mono flex items-center justify-center gap-1.5 transition-all duration-200 cursor-pointer"
-              >
-                <X size={10} />
-                CLEAR DATE FILTER
-              </button>
-            )}
+        <div className={`${isReminderPaneOpen ? "w-full md:w-80" : "w-11"} flex flex-col space-y-4 shrink-0 overflow-hidden transition-all duration-200`}>
+          <div className="flex items-center justify-between border border-[var(--cp-border)] bg-[var(--cp-bg-1)] px-2 py-1.5 shrink-0">
+            {isReminderPaneOpen && <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono">Scheduler Matrix</h3>}
+            <button
+              type="button"
+              onClick={() => setIsReminderPaneOpen((open) => !open)}
+              title={isReminderPaneOpen ? "Collapse reminders panel" : "Expand reminders panel"}
+              aria-label={isReminderPaneOpen ? "Collapse reminders panel" : "Expand reminders panel"}
+              className="h-6 w-6 inline-flex items-center justify-center border border-[var(--cp-border)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.08)]"
+            >
+              {isReminderPaneOpen ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
+            </button>
           </div>
 
-          {/* Status Filters */}
-          <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-3 space-y-2">
-            <h3 className="text-xs uppercase text-[var(--cp-cyan)] tracking-wider font-mono">// Status Filters</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {(["all", "pending", "done", "dismissed"] as const).map((status) => {
-                const isActive = statusFilter === status;
-                return (
+          {isReminderPaneOpen ? (
+            <>
+              {/* Calendar Widget */}
+              <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-3 flex flex-col items-center">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={setSelectedDate}
+                  className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] p-2 w-full flex justify-center"
+                  modifiers={{
+                    hasReminder: isPendingReminderDate
+                  }}
+                  modifiersStyles={{
+                    hasReminder: {
+                      border: "2px solid var(--cp-yellow)",
+                      borderRadius: "4px",
+                      color: "var(--cp-yellow)",
+                      boxShadow: "0 0 6px rgba(255, 230, 0, 0.4)",
+                      fontWeight: "bold",
+                      backgroundColor: "rgba(255, 230, 0, 0.1)"
+                    }
+                  }}
+                />
+                {selectedDate && (
                   <button
-                    key={status}
-                    onClick={() => setStatusFilter(status)}
-                    className={`px-2 py-1.5 border text-xs font-mono transition-all duration-200 cursor-pointer text-center truncate ${
-                      isActive
-                        ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.1)] text-[var(--cp-cyan)] shadow-[0_0_6px_rgba(0,229,255,0.2)]"
-                        : "border-[var(--cp-border)] bg-[var(--cp-bg-2)] text-muted-foreground hover:border-[rgba(0,229,255,0.3)] hover:text-foreground"
-                    }`}
+                    onClick={() => setSelectedDate(undefined)}
+                    className="mt-3 w-full py-1 border border-[var(--cp-magenta)] hover:bg-[rgba(255,0,170,0.1)] text-[10px] text-[var(--cp-magenta)] font-mono flex items-center justify-center gap-1.5 transition-all duration-200 cursor-pointer"
                   >
-                    {status.toUpperCase()}
+                    <X size={10} />
+                    CLEAR DATE FILTER
                   </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* User Filters */}
-          <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-3 space-y-2">
-            <h3 className="text-xs uppercase text-[var(--cp-cyan)] tracking-wider font-mono">// User Filters</h3>
-            <div className="relative">
-              <select
-                id="user-filter-select"
-                aria-label="Filter by user"
-                value={userFilter}
-                onChange={(e) => setUserFilter(e.target.value)}
-                className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground hover:border-[rgba(0,229,255,0.3)] px-3 py-1.5 pr-8 text-xs font-mono focus:outline-none focus:border-[var(--cp-cyan)] focus:shadow-[0_0_6px_rgba(0,229,255,0.2)] transition-all duration-200 cursor-pointer appearance-none rounded-none"
-              >
-                <option value="all">ALL USERS</option>
-                {users.map((u) => (
-                  <option key={u.user_id} value={u.user_id}>
-                    {u.name.toUpperCase()} ({u.user_id})
-                  </option>
-                ))}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-[var(--cp-cyan)]">
-                <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
-                  <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
-                </svg>
+                )}
               </div>
+
+              {/* Status Filters */}
+              <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-3 space-y-2">
+                <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono">Status Filters</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["all", "pending", "done", "dismissed"] as const).map((status) => {
+                    const isActive = statusFilter === status;
+                    return (
+                      <button
+                        key={status}
+                        onClick={() => setStatusFilter(status)}
+                        className={`px-2 py-1.5 border text-xs font-mono transition-all duration-200 cursor-pointer text-center truncate ${
+                          isActive
+                            ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.1)] text-[var(--cp-cyan)] shadow-[0_0_6px_rgba(0,229,255,0.2)]"
+                            : "border-[var(--cp-border)] bg-[var(--cp-bg-2)] text-muted-foreground hover:border-[rgba(0,229,255,0.3)] hover:text-foreground"
+                        }`}
+                      >
+                        {status.toUpperCase()}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* User Filters */}
+              <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-3 space-y-2">
+                <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono">User Filters</h3>
+                <div className="relative">
+                  <select
+                    id="user-filter-select"
+                    aria-label="Filter by user"
+                    value={userFilter}
+                    onChange={(e) => setUserFilter(e.target.value)}
+                    className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground hover:border-[rgba(0,229,255,0.3)] px-3 py-1.5 pr-8 text-xs font-mono focus:outline-none focus:border-[var(--cp-cyan)] focus:shadow-[0_0_6px_rgba(0,229,255,0.2)] transition-all duration-200 cursor-pointer appearance-none rounded-none"
+                  >
+                    <option value="all">ALL USERS</option>
+                    {users.map((u) => (
+                      <option key={u.user_id} value={u.user_id}>
+                        {u.name.toUpperCase()} ({u.user_id})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-[var(--cp-cyan)]">
+                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                      <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex items-center justify-center">
+              <span className="font-mono text-[10px] text-[var(--cp-cyan)] [writing-mode:vertical-rl] rotate-180 tracking-widest">
+                REMINDERS
+              </span>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Right Column: Reminders List */}
         <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-4 flex flex-col overflow-hidden">
           <div className="flex justify-between items-center mb-3">
-            <h3 className="text-xs uppercase text-[var(--cp-cyan)] tracking-wider font-mono flex items-center gap-1.5">
-              // ACTIVE_TASKS_QUEUE
+            <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono flex items-center gap-1.5">
+              ACTIVE_TASKS_QUEUE
               {selectedDate && (
                 <span className="text-[10px] text-muted-foreground lowercase">
                   (due on {selectedDate.toLocaleDateString()})
@@ -348,7 +371,7 @@ export function RemindersView({ serverUrl, apiKey }: RemindersViewProps) {
             ) : filteredReminders.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center opacity-30 py-12">
                 <Bell size={32} className="text-muted-foreground mb-2" />
-                <span className="text-xs tracking-widest font-mono text-[var(--cp-cyan)] uppercase">
+                <span className="text-xs tracking-widest font-mono text-[var(--section-label)] uppercase">
                   queue_empty
                 </span>
               </div>
@@ -360,7 +383,7 @@ export function RemindersView({ serverUrl, apiKey }: RemindersViewProps) {
                 >
                   <div className="space-y-1 min-w-0 flex-1">
                     <div className="text-sm font-semibold text-foreground flex items-center gap-2">
-                      <span className="text-[var(--cp-cyan)] font-mono text-xs font-normal">#{reminder.id}</span>
+                      <span className="text-[var(--section-label)] font-mono text-xs font-normal">#{reminder.id}</span>
                       <span className="truncate">{reminder.text}</span>
                     </div>
                     {reminder.description && (
@@ -376,7 +399,7 @@ export function RemindersView({ serverUrl, apiKey }: RemindersViewProps) {
                       {reminder.user_id && (
                         <div className="flex items-center gap-1.5 border-l border-[var(--cp-border)] pl-3">
                           <span>USER:</span>
-                          <span className="text-[var(--cp-cyan)]">{reminder.user_id.toUpperCase()}</span>
+                          <span className="text-[var(--section-label)]">{reminder.user_id.toUpperCase()}</span>
                         </div>
                       )}
                     </div>

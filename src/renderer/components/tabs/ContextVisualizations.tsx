@@ -1392,7 +1392,7 @@ export function ContextVisualizations({ nodes, repoName, analysis, activeModel, 
                   </div>
                   <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-3)] rounded p-4 flex flex-col items-center justify-center min-w-[100px]">
                     <span className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Files</span>
-                    <span className="text-2xl font-bold text-[var(--cp-cyan)]">{filesCount}</span>
+                    <span className="text-2xl font-bold text-[var(--section-label)]">{filesCount}</span>
                     <span className="text-[9px] text-muted-foreground">{total} findings</span>
                   </div>
                 </div>
@@ -1412,7 +1412,7 @@ export function ContextVisualizations({ nodes, repoName, analysis, activeModel, 
 
                 {/* Findings List */}
                 <div className="space-y-2">
-                  <h4 className="text-xs uppercase text-[var(--cp-cyan)] tracking-wider flex items-center gap-1.5">
+                  <h4 className="text-xs uppercase text-[var(--section-label)] tracking-wider flex items-center gap-1.5">
                     <ShieldAlert size={14} /> PAIN POINTS &amp; FINDINGS ({total})
                   </h4>
                   <div className="space-y-2">
@@ -1455,7 +1455,7 @@ export function ContextVisualizations({ nodes, repoName, analysis, activeModel, 
             })() : (
               <div className="flex flex-col items-center justify-center py-12 text-center opacity-40">
                 <Info size={32} className="text-[var(--cp-cyan)] mb-2 animate-pulse" />
-                <span className="text-xs font-mono uppercase tracking-widest text-[var(--cp-cyan)]">
+                <span className="text-xs font-mono uppercase tracking-widest text-[var(--section-label)]">
                   running_analysis_rules
                 </span>
                 <p className="text-[10px] text-muted-foreground max-w-xs mt-1.5">
@@ -1545,9 +1545,9 @@ export function ContextVisualizations({ nodes, repoName, analysis, activeModel, 
                     </span>
                     {/* Hierarchy breadcrumb */}
                     <div className="p-2 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] rounded text-[10px] text-muted-foreground">
-                      <span className="text-[var(--cp-cyan)]">📦</span> {selectedFile.repo || repoName}
+                      <span className="text-[var(--section-label)]">📦</span> {selectedFile.repo || repoName}
                       <span className="mx-1 text-muted-foreground">›</span>
-                      <span className="text-[var(--cp-cyan)]">📁</span> {selectedFile.path}
+                      <span className="text-[var(--section-label)]">📁</span> {selectedFile.path}
                     </div>
                   </div>
 
@@ -2623,7 +2623,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
           {/* Metrics Grid */}
           {complexity > 0 && (
             <div className="space-y-2">
-              <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest font-mono">// METRICS</h5>
+              <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest font-mono">METRICS</h5>
               <div className="grid grid-cols-2 gap-2">
                 {/* Complexity */}
                 <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2.5 text-center">
@@ -2654,13 +2654,13 @@ Always prefer using a tool if it can provide more accurate or deep information.
           {/* Line Range */}
           {line && (
             <div className="space-y-1">
-              <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest font-mono">// LINE RANGE</h5>
+              <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest font-mono">LINE RANGE</h5>
               <div className="flex items-center gap-2 p-2 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] rounded">
-                <span className="text-[var(--cp-cyan)] font-bold">L{line}</span>
+                <span className="text-[var(--section-label)] font-bold">L{line}</span>
                 {endLine && (
                   <>
                     <span className="text-muted-foreground">—</span>
-                    <span className="text-[var(--cp-cyan)] font-bold">{endLine}</span>
+                    <span className="text-[var(--section-label)] font-bold">{endLine}</span>
                     <span className="text-[9px] text-muted-foreground ml-auto">({lineSpan} lines)</span>
                   </>
                 )}
@@ -2671,7 +2671,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
           {/* McCabe Advisory */}
           {complexity > 0 && (
             <div className="space-y-1">
-              <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest font-mono">// CYCLOMATIC ASSESSMENT</h5>
+              <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest font-mono">CYCLOMATIC ASSESSMENT</h5>
               <div
                 className="p-3 rounded border text-[10px] leading-relaxed"
                 style={{
@@ -2697,12 +2697,12 @@ Always prefer using a tool if it can provide more accurate or deep information.
           {/* Hierarchy Path */}
           {pathParts.length > 0 && (
             <div className="space-y-1">
-              <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest font-mono">// HIERARCHY PATH</h5>
+              <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest font-mono">HIERARCHY PATH</h5>
               <div className="p-2 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] rounded leading-relaxed text-[10px] opacity-85">
                 {pathParts.map((part, i) => (
                   <span key={i}>
                     {i > 0 && <span className="text-muted-foreground mx-1">➔</span>}
-                    <span className={i === pathParts.length - 1 ? "text-[var(--cp-cyan)] font-bold" : "text-muted-foreground"}>{part}</span>
+                    <span className={i === pathParts.length - 1 ? "text-[var(--section-label)] font-bold" : "text-muted-foreground"}>{part}</span>
                   </span>
                 ))}
               </div>
@@ -2712,7 +2712,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
           {/* Scope Details */}
           {nestedCount > 0 && (
             <div className="space-y-1">
-              <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest font-mono">// SCOPE DETAILS</h5>
+              <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest font-mono">SCOPE DETAILS</h5>
               <p className="text-muted-foreground text-[10px] font-sans">
                 Contains <strong className="text-foreground">{nestedCount}</strong> nested typed blocks.
                 {lineSpan > 200 && (

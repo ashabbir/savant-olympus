@@ -82,7 +82,7 @@ export function FileBrowserModal({ isOpen, onClose, onSelect, initialPath, baseP
           <div className="flex items-center gap-2">
             <Folder size={16} className="text-[var(--cp-cyan)]" />
             <span className="text-xs font-bold text-[var(--cp-cyan)] tracking-wider">
-              // BROWSE SERVER (BASE_CODE_DIR)
+              BROWSE SERVER (BASE_CODE_DIR)
             </span>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">

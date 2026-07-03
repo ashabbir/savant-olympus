@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Search, Folder, RefreshCw, Trash2, Cpu, FileCode, CheckCircle, Database, AlertTriangle, Layers, Play, Square, Trash, Zap, Clock, Upload } from "lucide-react";
+import { Search, Folder, RefreshCw, Trash2, Cpu, FileCode, CheckCircle, Database, AlertTriangle, Layers, Play, Square, Trash, Zap, Clock, Upload, ChevronLeft, ChevronRight } from "lucide-react";
 import { ContextVisualizations, analyzeProjectSource } from "./ContextVisualizations";
 import { GraphifyVisualizer } from "./GraphifyVisualizer";
 import { FileBrowserModal } from "../FileBrowserModal";
@@ -36,6 +36,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const [isLoading, setIsLoading] = useState(false);
   const [indexingStatus, setIndexingStatus] = useState<Record<string, any>>({});
   const [searchQuery, setSearchQuery] = useState("");
+  const [isRepoPaneOpen, setIsRepoPaneOpen] = useState(true);
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
 
@@ -586,8 +587,8 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     <div className="flex flex-col h-full overflow-hidden p-4 space-y-4" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
       <div className="flex items-center justify-between border-b border-[var(--cp-border)] pb-3">
         <div>
-          <h2 className="text-lg font-medium text-[var(--cp-cyan)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-            // CONTEXT ENGINE
+          <h2 className="text-lg font-medium text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+            CONTEXT ENGINE
           </h2>
           <p className="text-xs text-muted-foreground opacity-60">Manage indexed code repositories & projects</p>
         </div>
@@ -595,29 +596,46 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
       <div className="flex-1 flex gap-4 overflow-hidden">
         {/* Repository list */}
-        <div className="w-80 flex flex-col space-y-3 shrink-0">
+        <div className={`${isRepoPaneOpen ? "w-80" : "w-11"} flex flex-col space-y-3 shrink-0 overflow-hidden transition-all duration-200`}>
+          <div className="flex items-center justify-between border border-[var(--cp-border)] bg-[var(--cp-bg-1)] px-2 py-1.5">
+            {isRepoPaneOpen && (
+              <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+                Project tree
+              </h3>
+            )}
+            <button
+              type="button"
+              onClick={() => setIsRepoPaneOpen((open) => !open)}
+              title={isRepoPaneOpen ? "Collapse project tree" : "Expand project tree"}
+              aria-label={isRepoPaneOpen ? "Collapse project tree" : "Expand project tree"}
+              className="h-6 w-6 inline-flex items-center justify-center border border-[var(--cp-border)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.08)]"
+            >
+              {isRepoPaneOpen ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
+            </button>
+          </div>
 
+          {isRepoPaneOpen ? (
+            <>
+              <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+                Actions
+              </h3>
+              <button
+                onClick={handleOpenAddModal}
+                className="w-full py-2.5 text-xs bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold hover:opacity-90 cursor-pointer font-mono tracking-wider"
+              >
+                + REGISTER REPOSITORY
+              </button>
 
-          <h3 className="text-xs uppercase text-[var(--cp-cyan)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-            // Actions
-          </h3>
-          <button
-            onClick={handleOpenAddModal}
-            className="w-full py-2.5 text-xs bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold hover:opacity-90 cursor-pointer font-mono tracking-wider"
-          >
-            + REGISTER REPOSITORY
-          </button>
-
-          <h3 className="text-xs uppercase text-[var(--cp-cyan)] tracking-wider pt-2" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-            // Registered Projects
-          </h3>
-          <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-2">
-            {isLoading ? (
-              <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REPOS...</div>
-            ) : repos.length === 0 ? (
-              <div className="text-center py-6 text-xs text-muted-foreground opacity-40">No projects registered.</div>
-            ) : (
-              repos.map((repo) => {
+              <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider pt-2" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+                Registered Projects
+              </h3>
+              <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-2">
+                {isLoading ? (
+                  <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REPOS...</div>
+                ) : repos.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-muted-foreground opacity-40">No projects registered.</div>
+                ) : (
+                  repos.map((repo) => {
                 const status = indexingStatus[repo.name] || {};
                 const isSelected = selectedProject === repo.name;
                 const activeStatus = (status.status || repo.status || "ready").toLowerCase();
@@ -680,9 +698,17 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     </div>
                   </div>
                 );
-              })
-            )}
-          </div>
+                  })
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex items-center justify-center">
+              <span className="font-mono text-[10px] text-[var(--cp-cyan)] [writing-mode:vertical-rl] rotate-180 tracking-widest">
+                PROJECTS
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Project details */}
@@ -812,7 +838,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         <div className="bg-cyan-950/20 border border-[var(--cp-cyan)]/30 p-4 rounded flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs font-mono backdrop-blur-md">
                           <div>
                             <h5 className="text-[var(--cp-cyan)] font-bold uppercase tracking-wider mb-1">
-                              {needsSync ? "// Graphify Update Available" : "// Graphify Data Detected"}
+                              {needsSync ? "Graphify Update Available" : "Graphify Data Detected"}
                             </h5>
                             <p className="text-muted-foreground">
                               {needsSync 
@@ -869,7 +895,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
                   {/* Stats Grid */}
                   <div className="space-y-2">
-                    <h4 className="text-[11px] uppercase font-mono text-[var(--cp-cyan)] tracking-wider">// Overview Metrics</h4>
+                    <h4 className="text-[11px] uppercase font-mono text-[var(--section-label)] tracking-wider">Overview Metrics</h4>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded">
                         <span className="block text-[10px] font-mono text-muted-foreground uppercase">Total Files</span>
@@ -893,7 +919,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   {/* Graphify Stats */}
                   {graphifyStats && graphifyStats.total > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-[11px] uppercase font-mono text-[var(--cp-cyan)] tracking-wider">// Graphify Stats</h4>
+                      <h4 className="text-[11px] uppercase font-mono text-[var(--section-label)] tracking-wider">Graphify Stats</h4>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {Object.entries(graphifyStats.stats || {}).map(([type, count]) => (
                           <div key={type} className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded">
@@ -912,7 +938,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   {/* Languages Distribution */}
                   {selectedRepo.languages && Object.keys(selectedRepo.languages).length > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-[11px] uppercase font-mono text-[var(--cp-cyan)] tracking-wider">// Languages</h4>
+                      <h4 className="text-[11px] uppercase font-mono text-[var(--section-label)] tracking-wider">Languages</h4>
                       <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded space-y-2 font-mono text-xs">
                         {Object.entries(selectedRepo.languages)
                           .sort((a, b) => b[1] - a[1])
@@ -938,7 +964,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
                   {/* Timeline */}
                   <div className="space-y-2">
-                    <h4 className="text-[11px] uppercase font-mono text-[var(--cp-cyan)] tracking-wider">// Timeline</h4>
+                    <h4 className="text-[11px] uppercase font-mono text-[var(--section-label)] tracking-wider">Timeline</h4>
                     <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded text-xs font-mono text-muted-foreground space-y-1.5">
                       <div className="flex items-center gap-1.5">
                         <Clock size={12} className="text-muted-foreground/60" />
@@ -1019,7 +1045,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
           ) : (
             <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
               <Folder size={48} className="text-muted-foreground mb-2" />
-              <span className="text-xs tracking-widest font-mono text-[var(--cp-cyan)] uppercase">
+              <span className="text-xs tracking-widest font-mono text-[var(--section-label)] uppercase">
                 select_project_to_explore_context
               </span>
             </div>
@@ -1031,8 +1057,8 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-[var(--cp-bg-1)] border border-[var(--cp-border)] w-full max-w-md p-5 flex flex-col space-y-4 shadow-2xl relative">
             <div className="flex items-center justify-between border-b border-[var(--cp-border)] pb-2.5">
-              <span className="text-xs font-bold font-mono text-[var(--cp-cyan)] tracking-wider">
-                // REGISTER NEW REPOSITORY
+              <span className="text-xs font-bold font-mono text-[var(--section-label)] tracking-wider">
+                REGISTER NEW REPOSITORY
               </span>
               <button
                 onClick={() => setIsAddModalOpen(false)}

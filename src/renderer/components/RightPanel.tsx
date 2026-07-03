@@ -390,7 +390,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
                 <div className="flex flex-col h-full w-full overflow-hidden" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
                   <div className="border-b border-[var(--cp-border)] px-3 py-2 shrink-0 flex items-center justify-between bg-[var(--cp-bg-2)]">
                     <span className="text-xs font-bold font-mono text-[var(--cp-cyan)] tracking-wider">
-                      // CONTEXT CONTROL
+                      CONTEXT CONTROL
                     </span>
                     <div className="flex gap-1">
                       {(["search", "memory", "ast"] as const).map((sub) => (
@@ -489,7 +489,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
                           </div>
                         ) : (
                           <>
-                            <h4 className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">// Active Memory Banks</h4>
+                            <h4 className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">Active Memory Banks</h4>
                             {isLoadingMemory ? (
                               <div className="text-center text-[10px] font-mono text-[var(--cp-cyan)] animate-pulse py-6">
                                 FETCHING_MEMORY_BANKS...
@@ -559,7 +559,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
                                 onChange={(e) => setFileSearchQuery(e.target.value)}
                                 className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1 focus:outline-none"
                               />
-                              <h4 className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">// Code files ({filteredCodeFiles.length})</h4>
+                              <h4 className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">Code files ({filteredCodeFiles.length})</h4>
                             </div>
                             {isLoadingCodeFiles ? (
                               <div className="text-center text-[10px] font-mono text-[var(--cp-cyan)] animate-pulse py-6">
@@ -594,7 +594,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
                 <div className="flex-1 flex flex-col overflow-hidden p-3 space-y-3" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
                   <div className="border-b border-[var(--cp-border)] pb-2">
                     <h3 className="text-xs font-bold font-mono text-[var(--cp-cyan)] uppercase tracking-wider">
-                      // SYSTEM_{activeRightTab?.toUpperCase()}
+                      SYSTEM_{activeRightTab?.toUpperCase()}
                     </h3>
                   </div>
 
@@ -645,7 +645,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
                   {activeRightTab === "graph" && (
                     <div className="flex-1 flex flex-col justify-center items-center">
                       <div className="w-full border border-[var(--cp-border)] bg-[var(--cp-bg-2)] p-3">
-                        <div className="text-[9px] text-muted-foreground font-mono mb-2 uppercase">// Agent Interaction Topology</div>
+                        <div className="text-[9px] text-muted-foreground font-mono mb-2 uppercase">Agent Interaction Topology</div>
                         <AgentGraph />
                       </div>
                     </div>
@@ -653,7 +653,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
 
                   {activeRightTab === "summary" && (
                     <div className="flex-1 overflow-y-auto font-mono text-[11px] leading-relaxed text-foreground/80 space-y-2 p-1">
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-widest border-b border-[var(--cp-border)] pb-1">// SESSION_OVERVIEW</p>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-widest border-b border-[var(--cp-border)] pb-1">SESSION_OVERVIEW</p>
                       <div className="space-y-1 bg-[var(--cp-bg-2)] p-2 border border-[var(--cp-border)]">
                         <div>WORKSPACE_ID: olympus</div>
                         <div>USER: ahmed</div>

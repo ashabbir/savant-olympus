@@ -3,7 +3,7 @@ import JSZip from "jszip";
 import { 
   Award, ShieldCheck, Trash2, Plus, Search, Bot, Send, 
   Download, Code, FileText, Check, Sparkles, AlertTriangle, 
-  Play, RefreshCcw, Save, HelpCircle, ChevronRight, X, Copy
+  Play, RefreshCcw, Save, HelpCircle, ChevronLeft, ChevronRight, X, Copy
 } from "lucide-react";
 import { buildAthenaPromptSections, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits } from "@/lib/athenaContext";
 
@@ -139,6 +139,7 @@ export function SkillsView({ serverUrl, apiKey, activeModel }: SkillsViewProps) 
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isSkillPaneOpen, setIsSkillPaneOpen] = useState(true);
 
   // Manual Creation states
   const [showAddForm, setShowAddForm] = useState(false);
@@ -871,8 +872,8 @@ If you have a decent understanding of the core behavior and are ready to generat
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--cp-border)] pb-3">
         <div>
-          <h2 className="text-lg font-medium text-[var(--cp-cyan)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-            // SKILL SYSTEM
+          <h2 className="text-lg font-medium text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+            SKILL SYSTEM
           </h2>
           <p className="text-xs text-muted-foreground opacity-60">Verified, provider-compliant capability modules running on the Savant Server</p>
         </div>
@@ -889,103 +890,126 @@ If you have a decent understanding of the core behavior and are ready to generat
 
       <div className="flex-1 flex gap-4 overflow-hidden">
         {/* Sidebar Browser */}
-        <div className="w-80 flex flex-col space-y-3 shrink-0">
+        <div className={`${isSkillPaneOpen ? "w-80" : "w-11"} flex flex-col space-y-3 shrink-0 overflow-hidden transition-all duration-200`}>
           <div className="flex items-center justify-between">
-            <h3 className="text-xs uppercase text-[var(--cp-cyan)] tracking-wider font-mono">// Skill Registry</h3>
+            {isSkillPaneOpen && <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono">Skill Registry</h3>}
             <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => {
-                  setIsAiMode(!isAiMode);
-                  if (!isAiMode && chatMessages.length === 0) {
-                    setChatMessages([
-                      {
-                        id: "welcome",
-                        sender: "assistant",
-                        text: "Hi! I am the Savant AI Skill Assistant. Tell me what capability or skill you'd like to build, and I will generate the complete configuration, parameter schema, and implementation code for you!",
-                        timestamp: new Date().toISOString()
+              {isSkillPaneOpen && (
+                <>
+                  <button
+                    onClick={() => {
+                      setIsAiMode(!isAiMode);
+                      if (!isAiMode && chatMessages.length === 0) {
+                        setChatMessages([
+                          {
+                            id: "welcome",
+                            sender: "assistant",
+                            text: "Hi! I am the Savant AI Skill Assistant. Tell me what capability or skill you'd like to build, and I will generate the complete configuration, parameter schema, and implementation code for you!",
+                            timestamp: new Date().toISOString()
+                          }
+                        ]);
                       }
-                    ]);
-                  }
-                }}
-                style={{ borderColor: isAiMode ? "var(--cp-magenta)" : "rgba(0, 229, 255, 0.3)" }}
-                className={`px-1.5 py-0.5 border text-[10px] flex items-center gap-1 font-mono cursor-pointer transition-all ${
-                  isAiMode 
-                    ? "text-[var(--cp-magenta)] hover:bg-[rgba(255,0,229,0.1)]" 
-                    : "text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)]"
-                }`}
-              >
-                <Sparkles size={10} />
-                {isAiMode ? "VIEW EDITOR" : "CREATE WITH ATHENA"}
-              </button>
+                    }}
+                    style={{ borderColor: isAiMode ? "var(--cp-magenta)" : "rgba(0, 229, 255, 0.3)" }}
+                    className={`px-1.5 py-0.5 border text-[10px] flex items-center gap-1 font-mono cursor-pointer transition-all ${
+                      isAiMode
+                        ? "text-[var(--cp-magenta)] hover:bg-[rgba(255,0,229,0.1)]"
+                        : "text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)]"
+                    }`}
+                  >
+                    <Sparkles size={10} />
+                    {isAiMode ? "VIEW EDITOR" : "CREATE WITH ATHENA"}
+                  </button>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{ borderColor: "rgba(0, 229, 255, 0.3)" }}
+                    className="px-1.5 py-0.5 border text-[10px] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] flex items-center gap-1 font-mono cursor-pointer"
+                  >
+                    <Plus size={10} />
+                    <span>UPLOAD</span>
+                  </button>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleUploadSkill}
+                    accept=".zip"
+                    className="hidden"
+                    data-testid="upload-file-input"
+                  />
+                </>
+              )}
               <button
-                onClick={() => fileInputRef.current?.click()}
-                style={{ borderColor: "rgba(0, 229, 255, 0.3)" }}
-                className="px-1.5 py-0.5 border text-[10px] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] flex items-center gap-1 font-mono cursor-pointer"
+                type="button"
+                onClick={() => setIsSkillPaneOpen((open) => !open)}
+                title={isSkillPaneOpen ? "Collapse skills tree" : "Expand skills tree"}
+                aria-label={isSkillPaneOpen ? "Collapse skills tree" : "Expand skills tree"}
+                className="h-6 w-6 inline-flex items-center justify-center border border-[var(--cp-border)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.08)]"
               >
-                <Plus size={10} />
-                <span>UPLOAD</span>
+                {isSkillPaneOpen ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
               </button>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleUploadSkill}
-                accept=".zip"
-                className="hidden"
-                data-testid="upload-file-input"
-              />
             </div>
           </div>
 
-          {/* Search box */}
-          <div className="flex items-center gap-1.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] px-2 py-1">
-            <Search size={11} className="text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search skills..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="bg-transparent border-none text-foreground text-xs focus:outline-none w-full font-mono"
-            />
-          </div>
+          {isSkillPaneOpen ? (
+            <>
+              {/* Search box */}
+              <div className="flex items-center gap-1.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] px-2 py-1">
+                <Search size={11} className="text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search skills..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="bg-transparent border-none text-foreground text-xs focus:outline-none w-full font-mono"
+                />
+              </div>
 
-          {/* Skill List */}
-          <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-2">
-            {isLoading ? (
-              <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REGISTRY...</div>
-            ) : filteredSkills.length === 0 ? (
-              <div className="text-center py-6 text-xs text-muted-foreground opacity-40">No skills found</div>
-            ) : (
-              filteredSkills.map((s) => (
-                <div
-                  key={s.id}
-                  onClick={() => {
-                    setSelectedSkill(s);
-                    setIsAiMode(false);
-                  }}
-                  className={`p-2.5 border cursor-pointer transition-all flex items-start justify-between group ${
-                    selectedSkill?.id === s.id && !isAiMode
-                      ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.05)]"
-                      : "border-[var(--cp-border)] bg-[var(--cp-bg-2)] hover:border-[rgba(0,229,255,0.3)]"
-                  }`}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold font-mono text-[var(--cp-cyan)] flex items-center gap-1">
-                      <Award size={12} className="text-[var(--cp-cyan)] shrink-0" />
-                      <span className="truncate">{s.name}</span>
+              {/* Skill List */}
+              <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-2">
+                {isLoading ? (
+                  <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REGISTRY...</div>
+                ) : filteredSkills.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-muted-foreground opacity-40">No skills found</div>
+                ) : (
+                  filteredSkills.map((s) => (
+                    <div
+                      key={s.id}
+                      onClick={() => {
+                        setSelectedSkill(s);
+                        setIsAiMode(false);
+                      }}
+                      className={`p-2.5 border cursor-pointer transition-all flex items-start justify-between group ${
+                        selectedSkill?.id === s.id && !isAiMode
+                          ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.05)]"
+                          : "border-[var(--cp-border)] bg-[var(--cp-bg-2)] hover:border-[rgba(0,229,255,0.3)]"
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold font-mono text-[var(--cp-cyan)] flex items-center gap-1">
+                          <Award size={12} className="text-[var(--cp-cyan)] shrink-0" />
+                          <span className="truncate">{s.name}</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground opacity-70 mt-1 line-clamp-2">{s.description}</p>
+                      </div>
+                      <button
+                        onClick={(e) => handleDeleteSkill(s.id, e)}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-[var(--cp-magenta)] hover:bg-red-950/20 transition-all cursor-pointer rounded shrink-0 ml-1.5"
+                        title="Delete skill"
+                      >
+                        <Trash2 size={12} />
+                      </button>
                     </div>
-                    <p className="text-[10px] text-muted-foreground opacity-70 mt-1 line-clamp-2">{s.description}</p>
-                  </div>
-                  <button
-                    onClick={(e) => handleDeleteSkill(s.id, e)}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-[var(--cp-magenta)] hover:bg-red-950/20 transition-all cursor-pointer rounded shrink-0 ml-1.5"
-                    title="Delete skill"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
+                  ))
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex items-center justify-center">
+              <span className="font-mono text-[10px] text-[var(--cp-cyan)] [writing-mode:vertical-rl] rotate-180 tracking-widest">
+                SKILLS
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Central UI Panel */}
@@ -1232,7 +1256,7 @@ If you have a decent understanding of the core behavior and are ready to generat
                   </button>
                   
                   <div className="pt-2 border-t border-[var(--cp-border)]/50">
-                    <span className="text-[9px] uppercase font-mono text-muted-foreground tracking-widest block mb-1.5">// Compliance check</span>
+                    <span className="text-[9px] uppercase font-mono text-muted-foreground tracking-widest block mb-1.5">Compliance check</span>
                     <div className="space-y-1.5 text-[9px] font-mono text-muted-foreground">
                       <div className="flex items-center gap-1 text-[var(--cp-green)]">
                         <Check size={9} />
@@ -1254,7 +1278,7 @@ If you have a decent understanding of the core behavior and are ready to generat
           ) : (
             <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
               <Award size={48} className="text-muted-foreground mb-2" />
-              <span className="text-xs tracking-widest font-mono text-[var(--cp-cyan)] uppercase">
+              <span className="text-xs tracking-widest font-mono text-[var(--section-label)] uppercase">
                 select_skill_to_explore
               </span>
             </div>

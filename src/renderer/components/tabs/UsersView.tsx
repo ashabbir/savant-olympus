@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Users, Key, Shield, UserCheck, Eye, EyeOff, X, Save, Mail, Plus, RefreshCw, ChevronDown, ChevronRight, Copy } from "lucide-react";
+import { Users, Key, Shield, UserCheck, Eye, EyeOff, X, Save, Mail, Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Copy } from "lucide-react";
 import { setStoredApiKey } from "../../services/auth";
 
 interface User {
@@ -38,6 +38,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [isUserPaneOpen, setIsUserPaneOpen] = useState(true);
 
   // Create user form state
   const [createUsername, setCreateUsername] = useState("");
@@ -296,7 +297,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
   const renderCreateForm = () => {
     return (
       <form onSubmit={handleCreateUser} className="space-y-4 font-mono text-xs max-w-xl">
-        <div className="text-sm font-bold text-[var(--cp-cyan)] tracking-wider border-b border-[var(--cp-border)] pb-2 uppercase">// Create New User Profile</div>
+        <div className="text-sm font-bold text-[var(--cp-cyan)] tracking-wider border-b border-[var(--cp-border)] pb-2 uppercase">Create New User Profile</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="flex flex-col space-y-1">
             <label htmlFor="create-username" className="text-[10px] text-muted-foreground uppercase font-mono">Username</label>
@@ -396,7 +397,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
         {/* Profile Details Header Block for Test Inspections */}
         <div className="text-sm font-bold text-[var(--cp-cyan)] tracking-wider border-b border-[var(--cp-border)] pb-2 flex flex-col gap-1.5 uppercase">
           <div className="flex justify-between items-center">
-            <span>// User Profile: {user.username}</span>
+            <span>User Profile: {user.username}</span>
             <span className={`text-[10px] px-2 py-0.5 border ${
               user.active ? "border-[var(--cp-green)] text-[var(--cp-green)] bg-[rgba(0,255,136,0.05)]" : "border-red-500/30 text-red-400 bg-red-500/5"
             }`}>
@@ -485,7 +486,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
         {/* Security / Credentials Section */}
         <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] p-4 space-y-4">
           <div className="text-[11px] font-bold text-[var(--cp-cyan)] tracking-wider uppercase flex items-center gap-2">
-            <Key size={14} /> // Credentials & Key Management
+            <Key size={14} /> Credentials & Key Management
           </div>
 
           <div className="flex flex-col space-y-1.5">
@@ -529,8 +530,8 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
       {/* Top Header */}
       <div className="flex items-center justify-between border-b border-[var(--cp-border)] pb-3 shrink-0">
         <div>
-          <h2 className="text-lg font-medium text-[var(--cp-cyan)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-            // USERS & CREDENTIALS
+          <h2 className="text-lg font-medium text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+            USERS & CREDENTIALS
           </h2>
           <p className="text-xs text-muted-foreground opacity-60">Provisioned identities and authorization keys</p>
         </div>
@@ -552,52 +553,75 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
       {/* Main Two-Column Layout */}
       <div className="flex-1 flex flex-col md:flex-row gap-4 overflow-hidden">
         {/* Left Column: User Index Tree with Search & Filters on Top */}
-        <div className="w-full md:w-80 flex flex-col space-y-4 shrink-0 overflow-hidden">
-          {/* Search and Filter Panel */}
-          <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-3 space-y-3 shrink-0">
-            <h3 className="text-xs uppercase text-[var(--cp-cyan)] tracking-wider font-mono">// Search & Filters</h3>
-            <input
-              type="text"
-              placeholder="Search users..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <select
-                value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value)}
-                className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono cursor-pointer"
-              >
-                <option value="all">ALL ROLES</option>
-                <option value="admin">ADMIN</option>
-                <option value="operator">OPERATOR</option>
-                <option value="guest">GUEST</option>
-              </select>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono cursor-pointer"
-              >
-                <option value="all">ALL STATUS</option>
-                <option value="active">ACTIVE</option>
-                <option value="inactive">INACTIVE</option>
-              </select>
-            </div>
+        <div className={`${isUserPaneOpen ? "w-full md:w-80" : "w-11"} flex flex-col space-y-4 shrink-0 overflow-hidden transition-all duration-200`}>
+          <div className="flex items-center justify-between border border-[var(--cp-border)] bg-[var(--cp-bg-1)] px-2 py-1.5 shrink-0">
+            {isUserPaneOpen && <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono">User tree</h3>}
+            <button
+              type="button"
+              onClick={() => setIsUserPaneOpen((open) => !open)}
+              title={isUserPaneOpen ? "Collapse user tree" : "Expand user tree"}
+              aria-label={isUserPaneOpen ? "Collapse user tree" : "Expand user tree"}
+              className="h-6 w-6 inline-flex items-center justify-center border border-[var(--cp-border)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.08)]"
+            >
+              {isUserPaneOpen ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
+            </button>
           </div>
 
-          {/* User Flat list */}
-          <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-3 overflow-y-auto space-y-2">
-            {isLoading ? (
-              <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse font-mono">RESOLVING_USERS...</div>
-            ) : filteredUsers.length === 0 ? (
-              <div className="text-center py-6 text-xs text-muted-foreground opacity-50 font-mono">NO USERS RECORDED</div>
-            ) : (
-              <div className="space-y-1.5">
-                {filteredUsers.map(renderUserNode)}
+          {isUserPaneOpen ? (
+            <>
+              {/* Search and Filter Panel */}
+              <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-3 space-y-3 shrink-0">
+                <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono">Search & Filters</h3>
+                <input
+                  type="text"
+                  placeholder="Search users..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono"
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={roleFilter}
+                    onChange={(e) => setRoleFilter(e.target.value)}
+                    className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono cursor-pointer"
+                  >
+                    <option value="all">ALL ROLES</option>
+                    <option value="admin">ADMIN</option>
+                    <option value="operator">OPERATOR</option>
+                    <option value="guest">GUEST</option>
+                  </select>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono cursor-pointer"
+                  >
+                    <option value="all">ALL STATUS</option>
+                    <option value="active">ACTIVE</option>
+                    <option value="inactive">INACTIVE</option>
+                  </select>
+                </div>
               </div>
-            )}
-          </div>
+
+              {/* User Flat list */}
+              <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-3 overflow-y-auto space-y-2">
+                {isLoading ? (
+                  <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse font-mono">RESOLVING_USERS...</div>
+                ) : filteredUsers.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-muted-foreground opacity-50 font-mono">NO USERS RECORDED</div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {filteredUsers.map(renderUserNode)}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex items-center justify-center">
+              <span className="font-mono text-[10px] text-[var(--cp-cyan)] [writing-mode:vertical-rl] rotate-180 tracking-widest">
+                USERS
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Right Column: User Edit Page or Create Form */}
@@ -609,7 +633,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
           ) : (
             <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
               <Users size={48} className="text-muted-foreground mb-3" />
-              <p className="text-sm font-mono uppercase text-[var(--cp-cyan)] tracking-wider">No user selected</p>
+              <p className="text-sm font-mono uppercase text-[var(--section-label)] tracking-wider">No user selected</p>
               <p className="text-xs text-muted-foreground mt-1">Select a user from the sidebar index or add a new one.</p>
             </div>
           )}
@@ -621,7 +645,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 backdrop-blur-md p-4 font-mono">
           <div className="bg-[var(--cp-bg-1)] border border-[var(--cp-border)] w-full max-w-md p-6 flex flex-col space-y-4 shadow-2xl relative">
             <div className="text-sm font-bold text-[var(--cp-green)] tracking-wider uppercase border-b border-[var(--cp-border)] pb-2 flex items-center gap-2">
-              <Key size={16} /> // CREDENTIALS GENERATED
+              <Key size={16} /> CREDENTIALS GENERATED
             </div>
             
             <p className="text-xs text-foreground leading-relaxed">

@@ -1697,7 +1697,7 @@ return (
   <div className="h-full min-h-0 flex flex-col overflow-hidden bg-[var(--cp-bg-0)] p-4 gap-4">
     <div className="flex justify-between items-center bg-[var(--cp-bg-1)] border border-[var(--cp-border)] p-3 shrink-0">
       <div className="flex items-center gap-3">
-        <span className="text-xs font-mono text-muted-foreground uppercase">// Knowledge Network</span>
+        <span className="text-xs font-mono text-muted-foreground uppercase">Knowledge Network</span>
         <div className="flex flex-col">
           <div className="relative">
             <div className="flex items-center gap-1 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] px-2 py-1">
@@ -1797,7 +1797,7 @@ return (
         <svg ref={svgRef} id="kb-graph-svg" className="w-full h-full cursor-grab active:cursor-grabbing" />
         {isExploreActive && (
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1 bg-[var(--cp-bg-1)] border border-[var(--cp-cyan)] rounded shadow-2xl font-mono text-xs z-20">
-            <span className="text-[var(--cp-cyan)] font-bold uppercase tracking-wider">DEPTH</span>
+            <span className="text-[var(--section-label)] font-bold uppercase tracking-wider">DEPTH</span>
             <button onClick={() => setExploreDepth((d) => Math.max(1, d - 1))} className="w-5 h-5 flex items-center justify-center bg-[var(--cp-bg-2)] border border-[var(--cp-border)] hover:bg-[var(--cp-bg-3)] rounded font-bold cursor-pointer">-</button>
             <span className="text-foreground font-bold px-1">{exploreDepth}</span>
             <button onClick={() => setExploreDepth((d) => d + 1)} className="w-5 h-5 flex items-center justify-center bg-[var(--cp-bg-2)] border border-[var(--cp-border)] hover:bg-[var(--cp-bg-3)] rounded font-bold cursor-pointer">+</button>
@@ -1808,8 +1808,8 @@ return (
       {(selectedNodes.size >= 2 || selectedNode) && (
         <div className="absolute top-0 right-0 bottom-0 w-[34rem] max-w-[46vw] border border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex flex-col overflow-hidden z-20 shadow-2xl" style={{ animation: "slideInRight 0.2s ease-out" }}>
           <div className="flex border-b border-[var(--cp-border)] shrink-0 bg-[var(--cp-bg-2)] px-4 py-3 items-center justify-between">
-            <span className="text-xs font-mono tracking-widest uppercase font-bold text-[var(--cp-cyan)]">
-              {selectedNodes.size >= 2 ? `// Merge ${selectedNodes.size} Nodes` : "// Node Details"}
+            <span className="text-xs font-mono tracking-widest uppercase font-bold text-[var(--section-label)]">
+              {selectedNodes.size >= 2 ? `Merge ${selectedNodes.size} Nodes` : "Node Details"}
             </span>
             <div className="flex items-center gap-2">
               {selectedNodes.size === 0 && (
@@ -1855,14 +1855,14 @@ return (
                   ))}
                 </div>
                 <form onSubmit={handleMergeSubmit} className="space-y-3 pt-2 border-t border-[var(--cp-border)]/30">
-                  <h4 className="text-[10px] text-muted-foreground uppercase font-bold">// TARGET TYPE</h4>
+                  <h4 className="text-[10px] text-muted-foreground uppercase font-bold">TARGET TYPE</h4>
                   <select value={mergeNodeType} onChange={(e) => setMergeNodeType(e.target.value)} className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono text-xs">
                     {KNOWLEDGE_NODE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                   </select>
                   <button type="submit" className="w-full py-1.5 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase hover:opacity-90 flex items-center justify-center gap-1"><GitFork size={12} />Merge Nodes</button>
                 </form>
                 <div className="space-y-3 pt-4 border-t border-[var(--cp-border)]/30">
-                  <h4 className="text-[10px] text-muted-foreground uppercase font-bold">// LINK TO WORKSPACE</h4>
+                  <h4 className="text-[10px] text-muted-foreground uppercase font-bold">LINK TO WORKSPACE</h4>
                   <select
                     value={bulkWorkspace}
                     onChange={(e) => setBulkWorkspace(e.target.value)}
@@ -1878,11 +1878,11 @@ return (
                   <button onClick={handleBulkApplyWorkspace} className="w-full py-1.5 bg-[var(--cp-cyan)]/20 border border-[var(--cp-cyan)]/40 text-[var(--cp-cyan)] font-bold text-xs uppercase hover:bg-[var(--cp-cyan)]/30 flex items-center justify-center gap-1"><Plus size={12} />Apply Workspace</button>
                 </div>
                 <div className="space-y-3 pt-4 border-t border-[var(--cp-border)]/30">
-                  <h4 className="text-[10px] text-muted-foreground uppercase font-bold">// LINK TO OTHER NODE</h4>
+                  <h4 className="text-[10px] text-muted-foreground uppercase font-bold">LINK TO OTHER NODE</h4>
                   <button onClick={() => { setConnectTargetIds([]); setConnectTargetQuery(""); setIsConnectModalOpen(true); }} className="w-full py-1.5 bg-[var(--cp-cyan)]/20 border border-[var(--cp-cyan)]/40 text-[var(--cp-cyan)] font-bold text-xs uppercase hover:bg-[var(--cp-cyan)]/30 flex items-center justify-center gap-1.5"><GitFork size={12} />Connect Selected to Other...</button>
                 </div>
                 <div className="space-y-3 pt-4 border-t border-[var(--cp-border)]/30">
-                  <h4 className="text-[10px] text-muted-foreground uppercase font-bold">// BULK CONNECT SURVIVOR</h4>
+                  <h4 className="text-[10px] text-muted-foreground uppercase font-bold">BULK CONNECT SURVIVOR</h4>
                   <select value={bulkEdgeType} onChange={(e) => setBulkEdgeType(e.target.value)} className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1.5 font-mono text-xs">
                     {["relates_to", "learned_from", "uses", "depends_on", "built_with"].map((et) => <option key={et} value={et}>{et.replace(/_/g, " ")}</option>)}
                   </select>
@@ -1901,7 +1901,7 @@ return (
                     {selectedNode!.status === "staged" ? <span className="text-[9px] font-mono text-yellow-500 uppercase bg-yellow-950/20 px-1 border border-yellow-500/20 rounded">staged</span> : <span className="text-[9px] font-mono text-green-500 uppercase bg-green-950/20 px-1 border border-green-500/20 rounded">committed</span>}
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">// NODE TITLE</label>
+                    <label className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">NODE TITLE</label>
                     <input
                       value={editedNodeTitle}
                       onChange={(e) => setEditedNodeTitle(e.target.value)}
@@ -1910,7 +1910,7 @@ return (
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">// NODE TYPE</label>
+                    <label className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">NODE TYPE</label>
                     <select
                       value={editedNodeType}
                       onChange={(e) => setEditedNodeType(e.target.value)}
@@ -1922,7 +1922,7 @@ return (
                     </select>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">// WORKSPACE</label>
+                    <label className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">WORKSPACE</label>
                     <select
                       value={editedNodeWorkspace}
                       onChange={(e) => setEditedNodeWorkspace(e.target.value)}
@@ -1959,13 +1959,13 @@ return (
                     </button>
                   </div>
                   <div>
-                    <h4 className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">// CONNECTIONS</h4>
+                    <h4 className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">CONNECTIONS</h4>
                     {selectedConnections.length ? (
                       <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                         {selectedConnections.map((connection) => (
                           <div key={connection.edge_id || `${connection.edge_type}-${connection.relatedNodeId}`} className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] px-3 py-2 text-xs font-mono">
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-[var(--cp-cyan)] uppercase">{connection.edge_type.replace(/_/g, " ")}</span>
+                              <span className="text-[var(--section-label)] uppercase">{connection.edge_type.replace(/_/g, " ")}</span>
                               <span className="text-[10px] text-muted-foreground uppercase">{connection.direction}</span>
                             </div>
                             <div className="mt-1 text-foreground/80 flex items-center justify-between gap-2">
@@ -2002,11 +2002,11 @@ return (
                   </div>
                   {selectedNode!.content && (
                     <div>
-                      <h4 className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">// CONTENT</h4>
+                      <h4 className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">CONTENT</h4>
                       <pre className="text-xs text-foreground/80 whitespace-pre-wrap leading-relaxed bg-[var(--cp-bg-2)] p-2 border border-[var(--cp-border)] max-h-96 overflow-y-auto">{selectedNode!.content}</pre>
                     </div>
                   )}
-                  {selectedNode!.metadata?.source && (<div><h4 className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">// SOURCE</h4><p className="text-xs text-foreground/70">{selectedNode!.metadata.source}</p></div>)}
+                  {selectedNode!.metadata?.source && (<div><h4 className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">SOURCE</h4><p className="text-xs text-foreground/70">{selectedNode!.metadata.source}</p></div>)}
                   {selectedNode!.status === "staged" && (
                     <div className="pt-2">
                       <button onClick={() => handleCommitNode(selectedNode!.node_id || selectedNode!.id)} className="w-full py-2 bg-green-600 text-white font-bold text-xs uppercase hover:bg-green-700 flex items-center justify-center gap-1.5 font-mono text-[10px]"><Check size={14} />COMMIT_NODE</button>
@@ -2095,7 +2095,7 @@ return (
     {isConnectModalOpen && (selectedNode || selectedNodes.size >= 2) && (
       <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
         <div className="bg-[var(--cp-bg-1)] border border-[var(--cp-border)] w-full max-w-md p-6 rounded shadow-2xl space-y-4">
-          <div className="flex justify-between items-center border-b border-[var(--cp-border)] pb-2"><h3 className="text-sm font-mono text-[var(--cp-cyan)] tracking-wider font-bold">// CONNECT NODE LINK</h3><button onClick={() => { setIsConnectModalOpen(false); setConnectTargetQuery(""); }} className="text-muted-foreground hover:text-foreground text-xs font-mono">✕</button></div>
+          <div className="flex justify-between items-center border-b border-[var(--cp-border)] pb-2"><h3 className="text-sm font-mono text-[var(--cp-cyan)] tracking-wider font-bold">CONNECT NODE LINK</h3><button onClick={() => { setIsConnectModalOpen(false); setConnectTargetQuery(""); }} className="text-muted-foreground hover:text-foreground text-xs font-mono">✕</button></div>
           <form onSubmit={handleConnectNodes} className="space-y-4">
             <div>
               <label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1">Source Node(s)</label>
@@ -2173,7 +2173,7 @@ return (
       <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
         <div className="bg-[var(--cp-bg-1)] border border-[var(--cp-border)] w-full max-w-md p-6 rounded shadow-2xl space-y-4">
           <div className="flex justify-between items-center border-b border-[var(--cp-border)] pb-2">
-            <h3 className="text-sm font-mono text-[var(--cp-cyan)] tracking-wider font-bold">// ADD NODE</h3>
+            <h3 className="text-sm font-mono text-[var(--section-label)] tracking-wider font-bold">ADD NODE</h3>
             <button onClick={() => setIsAddModalOpen(false)} className="text-muted-foreground hover:text-foreground text-xs font-mono">✕</button>
           </div>
           <form onSubmit={handleAddNode} className="space-y-4">

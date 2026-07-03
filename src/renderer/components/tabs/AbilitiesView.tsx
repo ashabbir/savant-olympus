@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Cpu, Save, Plus, Trash2, Shield, RefreshCcw, Sparkles, Folder, FileText, Check } from "lucide-react";
+import { Cpu, Save, Plus, Trash2, Shield, RefreshCcw, Sparkles, Folder, FileText, Check, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface AbilityAsset {
   id: string;
@@ -23,6 +23,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
   const [selectedAsset, setSelectedAsset] = useState<AbilityAsset | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isAssetPaneOpen, setIsAssetPaneOpen] = useState(true);
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({
     "type:persona": true,
     "type:rule": true,
@@ -299,8 +300,8 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
     <div className="flex flex-col h-full overflow-hidden p-4 space-y-4" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
       <div className="flex items-center justify-between border-b border-[var(--cp-border)] pb-3">
         <div>
-          <h2 className="text-lg font-medium text-[var(--cp-cyan)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-            // ABILITIES
+          <h2 className="text-lg font-medium text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+            ABILITIES
           </h2>
           <p className="text-xs text-muted-foreground opacity-60">System abilities & custom AI prompt builder</p>
         </div>
@@ -308,34 +309,49 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
 
       <div className="flex-1 flex gap-4 overflow-hidden">
         {/* Left Side: Asset Browser */}
-        <div className="w-80 flex flex-col space-y-3 shrink-0">
+        <div className={`${isAssetPaneOpen ? "w-80" : "w-11"} flex flex-col space-y-3 shrink-0 overflow-hidden transition-all duration-200`}>
 
           <div className="flex items-center justify-between">
-            <h3 className="text-xs uppercase text-[var(--cp-cyan)] tracking-wider font-mono">// Asset Trees</h3>
-            <button
-              onClick={() => setShowNewModal(true)}
-              className="px-2 py-0.5 border text-[10px] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] flex items-center gap-1 font-mono cursor-pointer"
-              style={{ borderColor: "rgba(0, 229, 255, 0.3)" }}
-            >
-              <Plus size={10} /> NEW_ASSET
-            </button>
+            {isAssetPaneOpen && <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono">Asset Trees</h3>}
+            <div className="flex items-center gap-1">
+              {isAssetPaneOpen && (
+                <button
+                  onClick={() => setShowNewModal(true)}
+                  className="px-2 py-0.5 border text-[10px] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] flex items-center gap-1 font-mono cursor-pointer"
+                  style={{ borderColor: "rgba(0, 229, 255, 0.3)" }}
+                >
+                  <Plus size={10} /> NEW_ASSET
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsAssetPaneOpen((open) => !open)}
+                title={isAssetPaneOpen ? "Collapse asset tree" : "Expand asset tree"}
+                aria-label={isAssetPaneOpen ? "Collapse asset tree" : "Expand asset tree"}
+                className="h-6 w-6 inline-flex items-center justify-center border border-[var(--cp-border)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.08)]"
+              >
+                {isAssetPaneOpen ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
+              </button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-1.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] px-2 py-1">
-            <input
-              type="text"
-              placeholder="Search assets..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="bg-transparent border-none text-foreground text-xs focus:outline-none w-full font-mono"
-            />
-          </div>
+          {isAssetPaneOpen ? (
+            <>
+              <div className="flex items-center gap-1.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] px-2 py-1">
+                <input
+                  type="text"
+                  placeholder="Search assets..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="bg-transparent border-none text-foreground text-xs focus:outline-none w-full font-mono"
+                />
+              </div>
 
-          <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-1">
-            {isLoading ? (
-              <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REGISTRY...</div>
-            ) : (
-              typeOrder.map(type => {
+              <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-1">
+                {isLoading ? (
+                  <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REGISTRY...</div>
+                ) : (
+                  typeOrder.map(type => {
                 let items = assets[type] || [];
                 if (searchQuery) {
                   items = items.filter(a =>
@@ -385,9 +401,17 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
                     )}
                   </div>
                 );
-              })
-            )}
-          </div>
+                  })
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex items-center justify-center">
+              <span className="font-mono text-[10px] text-[var(--cp-cyan)] [writing-mode:vertical-rl] rotate-180 tracking-widest">
+                ASSETS
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Right Side: Workspace Resolution or Editor */}
@@ -475,15 +499,15 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
 
             {resolutionResult && (
               <div className="space-y-3 pt-2">
-                <h4 className="text-xs text-[var(--cp-cyan)] font-mono uppercase tracking-wider">// Resolution Manifest</h4>
+                <h4 className="text-xs text-[var(--section-label)] font-mono uppercase tracking-wider">Resolution Manifest</h4>
                 <div className="p-3 border border-[var(--cp-border)] bg-[var(--cp-bg-2)] font-mono text-xs space-y-1 max-h-40 overflow-y-auto">
                   <div>Applied Persona: <code>{resolutionResult.manifest?.applied?.persona || buildPersona}</code></div>
                   <div>Applied Rules: <code>{JSON.stringify(resolutionResult.manifest?.applied?.rules || [])}</code></div>
                   <div>Applied Policies: <code>{JSON.stringify(resolutionResult.manifest?.applied?.policies || [])}</code></div>
                 </div>
 
-                <h4 className="text-xs text-[var(--cp-cyan)] font-mono uppercase tracking-wider">
-                  <label htmlFor="resolved-prompt-text">// Rendered Engineering Prompt</label>
+                <h4 className="text-xs text-[var(--section-label)] font-mono uppercase tracking-wider">
+                  <label htmlFor="resolved-prompt-text">Rendered Engineering Prompt</label>
                 </h4>
                 <textarea
                   id="resolved-prompt-text"
@@ -611,7 +635,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
             {/* Tags and Includes Displays */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">// Active Tags</span>
+                <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">Active Tags</span>
                 <div className="flex flex-wrap gap-1.5 min-h-[30px] p-1.5 border border-[var(--cp-border)] bg-[var(--cp-bg-2)]">
                   {editTags.map((t, idx) => (
                     <span key={idx} className="inline-flex items-center gap-1 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] px-2 py-0.5 text-[10px] font-mono text-foreground">
@@ -622,7 +646,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">// Linked Asset Dependencies</span>
+                <span className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">Linked Asset Dependencies</span>
                 <div className="flex flex-wrap gap-1.5 min-h-[30px] p-1.5 border border-[var(--cp-border)] bg-[var(--cp-bg-2)]">
                   {editIncludes.map((inc, idx) => (
                     <span key={idx} className="inline-flex items-center gap-1 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] px-2 py-0.5 text-[10px] font-mono text-foreground">
@@ -650,7 +674,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center opacity-30 border border-[var(--cp-border)] bg-[var(--cp-bg-1)]">
             <Cpu size={48} className="text-muted-foreground mb-2" />
-            <span className="text-xs tracking-widest font-mono text-[var(--cp-cyan)] uppercase">
+            <span className="text-xs tracking-widest font-mono text-[var(--section-label)] uppercase">
               select_ability_to_build_prompt
             </span>
           </div>
@@ -662,7 +686,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
           <div className="bg-[var(--cp-bg-1)] border border-[var(--cp-border)] w-full max-w-md p-4 space-y-4">
             <div className="flex justify-between items-center border-b border-[var(--cp-border)] pb-2">
-              <h3 className="text-sm font-bold text-[var(--cp-cyan)] font-mono">// NEW ABILITY ASSET</h3>
+              <h3 className="text-sm font-bold text-[var(--section-label)] font-mono">NEW ABILITY ASSET</h3>
               <button onClick={() => setShowNewModal(false)} className="text-muted-foreground hover:text-foreground">×</button>
             </div>
             <form onSubmit={handleCreate} className="space-y-3 font-mono text-xs">

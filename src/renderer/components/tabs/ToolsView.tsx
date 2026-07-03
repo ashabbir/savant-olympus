@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Wrench, Sliders, Play, Trash2, Plus, Search, ShieldCheck } from "lucide-react";
+import { Wrench, Sliders, Play, Trash2, Plus, Search, ShieldCheck, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface Tool {
   name: string;
@@ -26,6 +26,7 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newToolName, setNewToolName] = useState("");
   const [newToolDesc, setNewToolDesc] = useState("");
+  const [isToolPaneOpen, setIsToolPaneOpen] = useState(true);
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
 
@@ -131,8 +132,8 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
     <div className="flex flex-col h-full overflow-hidden p-4 space-y-4" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
       <div className="flex items-center justify-between border-b border-[var(--cp-border)] pb-3">
         <div>
-          <h2 className="text-lg font-medium text-[var(--cp-cyan)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-            // MCP TOOLKIT
+          <h2 className="text-lg font-medium text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+            MCP TOOLKIT
           </h2>
           <p className="text-xs text-muted-foreground opacity-60">Meta-Cognitive Programming protocol registry & playground</p>
         </div>
@@ -140,92 +141,115 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
 
       <div className="flex-1 flex gap-4 overflow-hidden">
         {/* Tools list sidebar / Browser */}
-        <div className="w-80 flex flex-col space-y-3 shrink-0">
+        <div className={`${isToolPaneOpen ? "w-80" : "w-11"} flex flex-col space-y-3 shrink-0 overflow-hidden transition-all duration-200`}>
 
           <div className="flex items-center justify-between">
-            <h3 className="text-xs uppercase text-[var(--cp-cyan)] tracking-wider font-mono">// Available Tools</h3>
-            <button
-              onClick={() => setShowAddForm(!showAddForm)}
-              style={{ borderColor: "rgba(0, 229, 255, 0.3)" }}
-              className="px-2 py-0.5 border text-[10px] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] flex items-center gap-1 font-mono cursor-pointer"
-            >
-              <Plus size={10} />
-              {showAddForm ? "CANCEL" : "ADD_TOOL"}
-            </button>
-          </div>
-
-          {showAddForm && (
-            <form onSubmit={handleAddTool} className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-2.5 space-y-2">
-              <input
-                type="text"
-                placeholder="Tool Name (e.g. run_command)"
-                value={newToolName}
-                onChange={e => setNewToolName(e.target.value)}
-                className="w-full bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1 focus:outline-none font-mono"
-                required
-              />
-              <input
-                type="text"
-                placeholder="Description"
-                value={newToolDesc}
-                onChange={e => setNewToolDesc(e.target.value)}
-                className="w-full bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1 focus:outline-none"
-              />
-              <button
-                type="submit"
-                className="w-full py-1 text-xs bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold font-mono hover:opacity-90 cursor-pointer"
-              >
-                CREATE_TOOL
-              </button>
-            </form>
-          )}
-
-          {/* Search box */}
-          <div className="flex items-center gap-1.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] px-2 py-1">
-            <Search size={11} className="text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search tools..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="bg-transparent border-none text-foreground text-xs focus:outline-none w-full font-mono"
-            />
-          </div>
-
-          <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-2">
-            {isLoading ? (
-              <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REGISTRY...</div>
-            ) : filteredTools.length === 0 ? (
-              <div className="text-center py-6 text-xs text-muted-foreground opacity-40">No tools found</div>
-            ) : (
-              filteredTools.map((t) => (
-                <div
-                  key={t.name}
-                  onClick={() => handleToolSelect(t)}
-                  className={`p-2.5 border cursor-pointer transition-all flex items-start justify-between group ${
-                    selectedTool?.name === t.name
-                      ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.05)]"
-                      : "border-[var(--cp-border)] bg-[var(--cp-bg-2)] hover:border-[rgba(0,229,255,0.3)]"
-                  }`}
+            {isToolPaneOpen && <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono">Available Tools</h3>}
+            <div className="flex items-center gap-1">
+              {isToolPaneOpen && (
+                <button
+                  onClick={() => setShowAddForm(!showAddForm)}
+                  style={{ borderColor: "rgba(0, 229, 255, 0.3)" }}
+                  className="px-2 py-0.5 border text-[10px] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] flex items-center gap-1 font-mono cursor-pointer"
                 >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold font-mono text-[var(--cp-cyan)] flex items-center gap-1">
-                      <ShieldCheck size={11} className="text-[var(--cp-green)] shrink-0" />
-                      <span className="truncate">{t.name}</span>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground opacity-70 mt-1 line-clamp-2">{t.description}</p>
-                  </div>
-                  <button
-                    onClick={(e) => handleDeleteTool(t.name, e)}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-[var(--cp-magenta)] hover:bg-red-950/20 transition-all cursor-pointer rounded shrink-0 ml-1.5"
-                    title="Delete tool"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))
-            )}
+                  <Plus size={10} />
+                  {showAddForm ? "CANCEL" : "ADD_TOOL"}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsToolPaneOpen((open) => !open)}
+                title={isToolPaneOpen ? "Collapse tools tree" : "Expand tools tree"}
+                aria-label={isToolPaneOpen ? "Collapse tools tree" : "Expand tools tree"}
+                className="h-6 w-6 inline-flex items-center justify-center border border-[var(--cp-border)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.08)]"
+              >
+                {isToolPaneOpen ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
+              </button>
+            </div>
           </div>
+
+          {isToolPaneOpen ? (
+            <>
+              {showAddForm && (
+                <form onSubmit={handleAddTool} className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-2.5 space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Tool Name (e.g. run_command)"
+                    value={newToolName}
+                    onChange={e => setNewToolName(e.target.value)}
+                    className="w-full bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1 focus:outline-none font-mono"
+                    required
+                  />
+                  <input
+                    type="text"
+                    placeholder="Description"
+                    value={newToolDesc}
+                    onChange={e => setNewToolDesc(e.target.value)}
+                    className="w-full bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-2 py-1 focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    className="w-full py-1 text-xs bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold font-mono hover:opacity-90 cursor-pointer"
+                  >
+                    CREATE_TOOL
+                  </button>
+                </form>
+              )}
+
+              {/* Search box */}
+              <div className="flex items-center gap-1.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] px-2 py-1">
+                <Search size={11} className="text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search tools..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="bg-transparent border-none text-foreground text-xs focus:outline-none w-full font-mono"
+                />
+              </div>
+
+              <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-2">
+                {isLoading ? (
+                  <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REGISTRY...</div>
+                ) : filteredTools.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-muted-foreground opacity-40">No tools found</div>
+                ) : (
+                  filteredTools.map((t) => (
+                    <div
+                      key={t.name}
+                      onClick={() => handleToolSelect(t)}
+                      className={`p-2.5 border cursor-pointer transition-all flex items-start justify-between group ${
+                        selectedTool?.name === t.name
+                          ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.05)]"
+                          : "border-[var(--cp-border)] bg-[var(--cp-bg-2)] hover:border-[rgba(0,229,255,0.3)]"
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold font-mono text-[var(--cp-cyan)] flex items-center gap-1">
+                          <ShieldCheck size={11} className="text-[var(--cp-green)] shrink-0" />
+                          <span className="truncate">{t.name}</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground opacity-70 mt-1 line-clamp-2">{t.description}</p>
+                      </div>
+                      <button
+                        onClick={(e) => handleDeleteTool(t.name, e)}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-[var(--cp-magenta)] hover:bg-red-950/20 transition-all cursor-pointer rounded shrink-0 ml-1.5"
+                        title="Delete tool"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex items-center justify-center">
+              <span className="font-mono text-[10px] text-[var(--cp-cyan)] [writing-mode:vertical-rl] rotate-180 tracking-widest">
+                TOOLS
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Tool Playground */}
@@ -238,8 +262,8 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
               </div>
 
               <form onSubmit={handleCallTool} className="space-y-3">
-                <h4 className="text-xs uppercase text-[var(--cp-cyan)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-                  // Arguments
+                <h4 className="text-xs uppercase text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+                  Arguments
                 </h4>
                 {selectedTool.input_schema?.properties && Object.keys(selectedTool.input_schema.properties).length > 0 ? (
                   Object.keys(selectedTool.input_schema.properties).map((prop) => (
@@ -271,8 +295,8 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
 
               {result && (
                 <div className="space-y-2 pt-2">
-                  <h4 className="text-xs uppercase text-[var(--cp-cyan)] tracking-wider font-mono">
-                    // Execution Result
+                  <h4 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono">
+                    Execution Result
                   </h4>
                   <pre className="text-xs text-foreground/80 leading-relaxed bg-[var(--cp-bg-0)] p-3 border border-[var(--cp-border)] overflow-x-auto max-h-80 font-mono">
                     {result}
@@ -283,7 +307,7 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
           ) : (
             <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
               <Wrench size={48} className="text-muted-foreground mb-2" />
-              <span className="text-xs tracking-widest font-mono text-[var(--cp-cyan)] uppercase">
+              <span className="text-xs tracking-widest font-mono text-[var(--section-label)] uppercase">
                 select_tool_for_playground
               </span>
             </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Wrench, Play, CheckCircle, AlertTriangle, RefreshCcw } from "lucide-react";
+import { Wrench, Play, CheckCircle, AlertTriangle, RefreshCcw, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface ParamDef {
   key: string;
@@ -86,6 +86,7 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
   const [mcpOnline, setMcpOnline] = useState<boolean | null>(null);
   const [mcpStatusText, setMcpStatusText] = useState("Checking...");
   const [isRunning, setIsRunning] = useState(false);
+  const [isToolPaneOpen, setIsToolPaneOpen] = useState(true);
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
 
@@ -258,8 +259,8 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--cp-border)] pb-3 shrink-0">
         <div>
-          <h2 className="text-lg font-medium text-[var(--cp-cyan)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-            // MCP SERVER: SAVANT-WORKSPACE
+          <h2 className="text-lg font-medium text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+            MCP SERVER: SAVANT-WORKSPACE
           </h2>
           <p className="text-xs text-muted-foreground opacity-60">
             Control center for workspaces, tasks, Jira tickets, and merge requests telemetry.
@@ -285,33 +286,51 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
       {/* Main View Grid */}
       <div className="flex-1 flex gap-4 overflow-hidden">
         {/* Tools List */}
-        <div className="w-80 flex flex-col border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 overflow-y-auto shrink-0">
-
-          <div className="text-[10px] text-muted-foreground font-mono px-2 py-1 mb-2 border-b border-[var(--cp-border)]">
-            AVAILABLE_MCP_TOOLS ({MCP_WORKSPACES_TOOLS.length})
+        <div
+          className={`${isToolPaneOpen ? "w-80 p-2" : "w-11 p-1"} flex flex-col border border-[var(--cp-border)] bg-[var(--cp-bg-1)] overflow-hidden shrink-0 transition-all duration-200`}
+        >
+          <div className={`flex items-center ${isToolPaneOpen ? "justify-between" : "justify-center"} text-[10px] text-muted-foreground font-mono px-1 py-1 mb-2 border-b border-[var(--cp-border)]`}>
+            {isToolPaneOpen && <span>AVAILABLE_MCP_TOOLS ({MCP_WORKSPACES_TOOLS.length})</span>}
+            <button
+              type="button"
+              onClick={() => setIsToolPaneOpen((open) => !open)}
+              title={isToolPaneOpen ? "Collapse tools pane" : "Expand tools pane"}
+              aria-label={isToolPaneOpen ? "Collapse tools pane" : "Expand tools pane"}
+              className="h-6 w-6 inline-flex items-center justify-center border border-[var(--cp-border)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.08)]"
+            >
+              {isToolPaneOpen ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
+            </button>
           </div>
-          <div className="space-y-1.5">
-            {MCP_WORKSPACES_TOOLS.map((tool) => {
-              const isSelected = selectedTool?.name === tool.name;
-              return (
-                <div
-                  key={tool.name}
-                  onClick={() => handleToolSelect(tool)}
-                  className={`p-2 border cursor-pointer transition-all ${
-                    isSelected
-                      ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.05)]"
-                      : "border-[var(--cp-border)] bg-[var(--cp-bg-2)] hover:border-[rgba(0,229,255,0.2)]"
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-foreground mb-1">
-                    <span>{tool.icon}</span>
-                    <span>{tool.name}</span>
+          {isToolPaneOpen ? (
+            <div className="space-y-1.5 overflow-y-auto">
+              {MCP_WORKSPACES_TOOLS.map((tool) => {
+                const isSelected = selectedTool?.name === tool.name;
+                return (
+                  <div
+                    key={tool.name}
+                    onClick={() => handleToolSelect(tool)}
+                    className={`p-2 border cursor-pointer transition-all ${
+                      isSelected
+                        ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.05)]"
+                        : "border-[var(--cp-border)] bg-[var(--cp-bg-2)] hover:border-[rgba(0,229,255,0.2)]"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-foreground mb-1">
+                      <span>{tool.icon}</span>
+                      <span>{tool.name}</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground opacity-70 leading-normal">{tool.desc}</p>
                   </div>
-                  <p className="text-[11px] text-muted-foreground opacity-70 leading-normal">{tool.desc}</p>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <span className="font-mono text-[10px] text-[var(--cp-cyan)] [writing-mode:vertical-rl] rotate-180 tracking-widest">
+                TOOLS
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Playground area */}
@@ -329,7 +348,7 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
               <form onSubmit={handleRunTool} className="space-y-4">
                 {selectedTool.params.length > 0 ? (
                   <div className="space-y-3">
-                    <h4 className="text-xs font-semibold text-[var(--cp-cyan)] tracking-wider uppercase font-mono">// PARAMETERS</h4>
+                    <h4 className="text-xs font-semibold text-[var(--section-label)] tracking-wider uppercase font-mono">PARAMETERS</h4>
                     <div className="grid grid-cols-1 gap-3 bg-[var(--cp-bg-2)] p-3 border border-[var(--cp-border)]">
                       {selectedTool.params.map((p) => (
                         <div key={p.key} className="flex flex-col space-y-1">
@@ -373,7 +392,7 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
 
               {result && (
                 <div className="space-y-2 pt-2 border-t border-[var(--cp-border)]">
-                  <h4 className="text-xs font-semibold text-[var(--cp-cyan)] tracking-wider uppercase font-mono">// EXECUTION_RESULT</h4>
+                  <h4 className="text-xs font-semibold text-[var(--section-label)] tracking-wider uppercase font-mono">EXECUTION_RESULT</h4>
                   <pre className="bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs p-3 font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed">
                     {result}
                   </pre>
@@ -383,7 +402,7 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
           ) : (
             <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
               <Wrench size={48} className="text-muted-foreground mb-2" />
-              <span className="text-xs tracking-widest font-mono text-[var(--cp-cyan)] uppercase">
+              <span className="text-xs tracking-widest font-mono text-[var(--section-label)] uppercase">
                 select_mcp_tool_to_explore
               </span>
             </div>

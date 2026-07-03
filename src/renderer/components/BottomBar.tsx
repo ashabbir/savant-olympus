@@ -285,7 +285,7 @@ export function BottomBar() {
             <div className="flex items-center gap-2">
               <Terminal size={14} className="text-[var(--cp-cyan)]" />
               <span className="text-xs font-bold font-mono tracking-wider text-[var(--cp-cyan)]">
-                // GATEWAY PROMPT TRACKER
+                GATEWAY PROMPT TRACKER
               </span>
             </div>
             <button
@@ -402,7 +402,7 @@ export function BottomBar() {
                   {/* Terminal Logs */}
                   <div className="flex-1 border border-[var(--cp-border)] bg-black/60 rounded p-2.5 font-mono text-[11px] overflow-y-auto space-y-1.5 scrollbar-thin">
                     <div className="text-[9px] text-muted-foreground border-b border-white/5 pb-1 uppercase tracking-widest flex justify-between items-center">
-                      <span>// execution event log</span>
+                      <span>execution event log</span>
                       {isPollingEvents && <span className="animate-pulse text-[var(--cp-cyan)] text-[8px]">polling...</span>}
                     </div>
 
