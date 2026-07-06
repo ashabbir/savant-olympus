@@ -34,7 +34,11 @@ if (!window.system) {
     getChatHistory: async (_target_id: string) => [],
     saveChatHistory: async (_target_id: string, _messages: any[]) => true,
     clearChatHistory: async (_target_id: string) => true,
+    loadAthenaThreads: async () => [],
+    saveAthenaThread: async (_target_id: string, _messages: any[]) => true,
+    clearAthenaThread: async (_target_id: string) => true,
     readGraphifyJson: async (_repoPath: string) => null,
+    runAgentViaGateway: async () => '',
   }
 }
 

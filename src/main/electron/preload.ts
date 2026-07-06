@@ -30,9 +30,13 @@ contextBridge.exposeInMainWorld('system', {
   saveSetting: (key: string, value: any) => ipcRenderer.invoke('save-setting', { key, value }),
   getDbStatus: () => ipcRenderer.invoke('get-db-status'),
   getChatHistory: (target_id: string) => ipcRenderer.invoke('get-chat-history', target_id),
-  saveChatHistory: (target_id: string, messages: any[]) => ipcRenderer.invoke('save-chat-history', { target_id, messages }),
-  clearChatHistory: (target_id: string) => ipcRenderer.invoke('clear-chat-history', target_id),
+  saveChatHistory: (target_id: string, messages: any[]) => ipcRenderer.invoke('save-athena-thread', { target_id, messages }),
+  clearChatHistory: (target_id: string) => ipcRenderer.invoke('clear-athena-thread', target_id),
+  loadAthenaThreads: () => ipcRenderer.invoke('load-athena-threads'),
+  saveAthenaThread: (target_id: string, messages: any[]) => ipcRenderer.invoke('save-athena-thread', { target_id, messages }),
+  clearAthenaThread: (target_id: string) => ipcRenderer.invoke('clear-athena-thread', target_id),
   readGraphifyJson: (repoPath: string) => ipcRenderer.invoke('read-graphify-json', repoPath),
+  runAgentViaGateway: (args: { provider: string; model: string; prompt: string }) => ipcRenderer.invoke('run-agent', args),
 })
 
 contextBridge.exposeInMainWorld('electronAPI', {

@@ -28,7 +28,11 @@ interface Window {
     getChatHistory: (target_id: string) => Promise<any[]>
     saveChatHistory: (target_id: string, messages: any[]) => Promise<boolean>
     clearChatHistory: (target_id: string) => Promise<boolean>
+    loadAthenaThreads: () => Promise<any[]>
+    saveAthenaThread: (target_id: string, messages: any[]) => Promise<boolean>
+    clearAthenaThread: (target_id: string) => Promise<boolean>
     readGraphifyJson: (repoPath: string) => Promise<any | null>
+    runAgentViaGateway: (args: { provider: string; model: string; prompt: string }) => Promise<string>
   }
   electronAPI?: {
     pickDirectory: (defaultPath?: string) => Promise<string | null>;

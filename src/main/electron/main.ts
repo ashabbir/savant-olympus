@@ -206,7 +206,7 @@ app.whenReady().then(async () => {
   createTray()
 })
 
-ipcMain.handle('run-agent', async (_event, { provider, model, prompt }) => {
+async function runGatewayAgent(provider: string, model: string, prompt: string) {
   try {
     let gatewayUrl = GATEWAY_URL;
     let apiKey = '';
@@ -264,15 +264,17 @@ ipcMain.handle('run-agent', async (_event, { provider, model, prompt }) => {
         return responseText;
       }
       if (run.status === 'error' || run.status === 'killed') {
-        return `Error: Gateway run failed with status ${run.status} - ${run.error || 'Unknown error'}`;
+       return `Error: Gateway run failed with status ${run.status} - ${run.error || 'Unknown error'}`;
       }
     }
   } catch (error: any) {
     return `Error: ${error.message}`;
   }
-})
+}
 
-ipcMain.handle('save-chat-history', async (_event, { target_id, messages }) => {
+ipcMain.handle('run-agent', async (_event, { provider, model, prompt }) => runGatewayAgent(provider, model, prompt))
+
+ipcMain.handle('save-athena-thread', async (_event, { target_id, messages }) => {
   if (!db) return false
   try {
     const val = typeof messages === 'string' ? messages : JSON.stringify(messages)
@@ -283,8 +285,24 @@ ipcMain.handle('save-chat-history', async (_event, { target_id, messages }) => {
     `).run(target_id, val)
     return true
   } catch (e) {
-    console.error('Failed to save chat history:', target_id, e)
+    console.error('Failed to save athena thread:', target_id, e)
     return false
+  }
+})
+
+ipcMain.handle('load-athena-threads', async () => {
+  if (!db) return []
+  try {
+    const rows = db.prepare('SELECT target_id, messages, updated_at FROM chat_history ORDER BY updated_at DESC').all()
+    return rows.map((row: any) => {
+      try {
+        return { target_id: row.target_id, messages: JSON.parse(row.messages), updated_at: row.updated_at }
+      } catch {
+        return { target_id: row.target_id, messages: [], updated_at: row.updated_at }
+      }
+    })
+  } catch (e) {
+    return []
   }
 })
 
@@ -299,7 +317,7 @@ ipcMain.handle('get-chat-history', async (_event, target_id) => {
   }
 })
 
-ipcMain.handle('clear-chat-history', async (_event, target_id) => {
+ipcMain.handle('clear-athena-thread', async (_event, target_id) => {
   if (!db) return false
   try {
     db.prepare('DELETE FROM chat_history WHERE target_id = ?').run(target_id)
@@ -421,4 +439,3 @@ ipcMain.handle('read-graphify-json', async (_event, repoPath) => {
     return null
   }
 })
-

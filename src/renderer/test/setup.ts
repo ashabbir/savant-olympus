@@ -21,17 +21,22 @@ const mockIpcRenderer = {
   invoke: vi.fn(),
 }
 
-const mockSystem = {
+const mockSystem: any = {
   getUser: vi.fn().mockResolvedValue('test-user'),
   getSettings: vi.fn().mockResolvedValue({ 'user:apiKey': 'sk-test-key', 'user:name': 'test-user' }),
   saveSetting: vi.fn().mockResolvedValue(true),
   listProviders: vi.fn().mockResolvedValue({ source: 'gateway', providers: [] }),
   getDbStatus: vi.fn().mockResolvedValue('connected'),
-  getChatHistory: vi.fn().mockResolvedValue([]),
-  saveChatHistory: vi.fn().mockResolvedValue(true),
-  clearChatHistory: vi.fn().mockResolvedValue(true),
+  loadAthenaThreads: vi.fn().mockResolvedValue([]),
+  saveAthenaThread: vi.fn().mockResolvedValue(true),
+  clearAthenaThread: vi.fn().mockResolvedValue(true),
   readGraphifyJson: vi.fn().mockResolvedValue(null),
+  runAgentViaGateway: vi.fn().mockResolvedValue('Mock agent response'),
 }
+
+mockSystem.getChatHistory = vi.fn().mockResolvedValue([])
+mockSystem.saveChatHistory = vi.fn().mockResolvedValue(true)
+mockSystem.clearChatHistory = vi.fn().mockResolvedValue(true)
 
 const localStorageMock = (() => {
   const store = new Map<string, string>([['savant_api_key', 'sk-test-key']])

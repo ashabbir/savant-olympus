@@ -3,12 +3,17 @@
   "version": "6.0.0",
   "description": "Savant Olympus - Command & Control center for the Savant ecosystem.",
   "author": "project-x",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ashabbir/savant-olympus.git"
+  },
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "node scripts/start-electron-dev.mjs --with-renderer",
     "dev:renderer": "QUORUM_RENDERER_ONLY=1 vite --force --host 127.0.0.1 --port 5174 --strictPort",
     "dev:electron": "node scripts/start-electron-dev.mjs",
     "build": "tsc && vite build && electron-builder",
+    "release:mac": "node -e \"const m = !process.env.APPLE_ID || !process.env.APPLE_APP_SPECIFIC_PASSWORD; if (m) console.warn('[release] APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD are not set. The app will still build and upload, but unsigned users may see a Gatekeeper warning on macOS until the app is signed.');\" && GH_TOKEN=$GH_TOKEN electron-builder --mac --publish always",
     "preview": "vite preview",
     "electron:dev": "vite",
     "test": "vitest run"
@@ -109,9 +114,11 @@
       "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
       "target": [
-        "dmg",
-        "zip"
+        "dmg"
       ]
+    },
+    "publish": {
+      "provider": "github"
     },
     "dmg": {
       "icon": "build/icon.icns"

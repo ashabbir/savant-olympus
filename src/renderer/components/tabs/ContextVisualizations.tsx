@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 import { Folder, FileCode, CheckCircle, Database, AlertTriangle, Square, Trash, Zap, Clock, Info, ShieldAlert, FileText, ChevronRight, ChevronDown, Layers, HelpCircle, MessageSquare, Send, Sparkles, Trash2, Loader2, Copy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { buildAthenaPromptSections, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits } from "@/lib/athenaContext";
+import { buildAthenaAugmentedPrompt as compileAthenaAugmentedPrompt } from "@/services/athenaService";
 
 export interface ASTNode {
   name: string;
@@ -665,16 +665,16 @@ function AnalysisChatPanel({
 
   useEffect(() => {
     async function load() {
-      const stored = await window.system.getChatHistory(getStorageKey());
-      if (stored) setMessages(stored);
-      else setMessages([]);
+      const threads = await window.system.loadAthenaThreads();
+      const stored = Array.isArray(threads) ? threads.find((thread: any) => thread?.target_id === getStorageKey()) : null;
+      setMessages(Array.isArray(stored?.messages) ? stored.messages : []);
     }
     load();
   }, [repoName, filePath]);
 
   const saveMessages = (newMsgs: ChatMessage[]) => {
     setMessages(newMsgs);
-    window.system.saveChatHistory(getStorageKey(), newMsgs);
+    window.system.saveAthenaThread(getStorageKey(), newMsgs);
   };
 
   useEffect(() => {
@@ -703,8 +703,6 @@ function AnalysisChatPanel({
       const provider = activeModel?.provider || chain[0]?.provider || "gemini";
       const model = activeModel?.model || chain[0]?.model || "3.5";
 
-      const baseUrl = serverUrl.replace(/\/+$/, "");
-
       const analysisSummary = `
 ANALYSIS OVERVIEW for ${repoName}:
 - Files Analyzed: ${analysis.summary.filesAnalyzed}
@@ -715,21 +713,6 @@ ANALYSIS OVERVIEW for ${repoName}:
 DETAILED FINDINGS (Truncated to first 100):
 ${analysis.findings.slice(0, 100).map((f, i) => `${i + 1}. [${f.severity.toUpperCase()}] ${f.title} in ${f.path}:${f.line} - ${f.detail}`).join("\n")}
       `;
-
-      const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
-        const [codeHits, knowledgeHits, tools] = await Promise.all([
-          fetchAthenaCodeContext(baseUrl, apiKey, query, repoName),
-          fetchAthenaKnowledgeContext(baseUrl, apiKey, query),
-          fetchAthenaMcpTools(baseUrl, apiKey),
-        ]);
-
-        return buildAthenaPromptSections([
-          ["BASE PROMPT", basePrompt],
-          ["RETRIEVED CODE CONTEXT", formatAthenaContextHits(codeHits)],
-          ["RETRIEVED KNOWLEDGE CONTEXT", formatAthenaContextHits(knowledgeHits)],
-          ["AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools available."],
-        ]);
-      };
 
       const prompt = `You are ATHENA, an expert software architect and security auditor integrated into the Savant Olympus dashboard.
 The user is investigating static analysis results for the repository "${repoName}".
@@ -750,10 +733,14 @@ You have access to a variety of Savant MCP tools. Use them to investigate code, 
 Always prefer using a tool if it can provide more accurate or deep information.
 `;
 
-      const response = await window.ipcRenderer.invoke("run-agent", {
+      const response = await window.system.runAgentViaGateway({
         provider,
         model,
-        prompt: await buildAthenaAugmentedPrompt(prompt, `${repoName} ${textToSend} ${analysisSummary}`),
+        prompt: await compileAthenaAugmentedPrompt(prompt, `${repoName} ${textToSend} ${analysisSummary}`, {
+          baseUrl: serverUrl,
+          apiKey,
+          repo: repoName,
+        }),
       });
 
       const aiMsg: ChatMessage = {
@@ -2373,12 +2360,9 @@ Please provide suggestions to reduce complexity and address the identified issue
   useEffect(() => {
     async function load() {
       const key = getStorageKey();
-      const stored = await window.system.getChatHistory(key);
-      if (stored) {
-        setMessages(stored);
-      } else {
-        setMessages([]);
-      }
+      const threads = await window.system.loadAthenaThreads();
+      const stored = Array.isArray(threads) ? threads.find((thread: any) => thread?.target_id === key) : null;
+      setMessages(Array.isArray(stored?.messages) ? stored.messages : []);
     }
     load();
   }, [id, repoName]);
@@ -2418,23 +2402,7 @@ Please provide suggestions to reduce complexity and address the identified issue
 
   const saveMessages = (newMessages: ChatMessage[]) => {
     setMessages(newMessages);
-    window.system.saveChatHistory(getStorageKey(), newMessages);
-  };
-
-  const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
-    const baseUrl = serverUrl.replace(/\/+$/, "");
-    const [codeHits, knowledgeHits, tools] = await Promise.all([
-      fetchAthenaCodeContext(baseUrl, apiKey, query, repoName),
-      fetchAthenaKnowledgeContext(baseUrl, apiKey, query),
-      fetchAthenaMcpTools(baseUrl, apiKey),
-    ]);
-
-    return buildAthenaPromptSections([
-      ["BASE PROMPT", basePrompt],
-      ["RETRIEVED CODE CONTEXT", formatAthenaContextHits(codeHits)],
-      ["RETRIEVED KNOWLEDGE CONTEXT", formatAthenaContextHits(knowledgeHits)],
-      ["AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools available."],
-    ]);
+    window.system.saveAthenaThread(getStorageKey(), newMessages);
   };
 
   const handleClearHistory = () => {
@@ -2506,10 +2474,14 @@ You have access to a variety of Savant MCP tools. Use them to investigate code, 
 Always prefer using a tool if it can provide more accurate or deep information.
 `;
 
-      const responseText = await window.ipcRenderer.invoke("run-agent", {
+      const responseText = await window.system.runAgentViaGateway({
         provider,
         model,
-        prompt: await buildAthenaAugmentedPrompt(contextPrompt, `${name} ${textToSend} ${filePath || ""}`),
+        prompt: await compileAthenaAugmentedPrompt(contextPrompt, `${name} ${textToSend} ${filePath || ""}`, {
+          baseUrl: serverUrl,
+          apiKey,
+          repo: repoName,
+        }),
       });
 
       const newAiMessage: ChatMessage = {

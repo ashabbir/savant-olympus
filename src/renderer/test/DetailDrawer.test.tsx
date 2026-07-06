@@ -5,7 +5,7 @@ import { DetailDrawer } from '../components/tabs/ContextVisualizations'
 
 describe('DetailDrawer Component ATHENA Integration', () => {
   beforeEach(() => {
-    vi.resetAllMocks()
+    vi.clearAllMocks()
     
     // Mock getSettings to return a configured provider chain
     window.system.getSettings = vi.fn().mockResolvedValue({
@@ -14,15 +14,9 @@ describe('DetailDrawer Component ATHENA Integration', () => {
       ]
     })
 
-    // Mock run-agent invoke
-    window.ipcRenderer.invoke = vi.fn().mockImplementation((channel) => {
-      if (channel === 'run-agent') {
-        return Promise.resolve('This is a simulated ATHENA refactoring advice response.')
-      }
-      return Promise.resolve()
-    })
-
-    // Mock fetch for context API calls
+    window.system.loadAthenaThreads = vi.fn().mockResolvedValue([])
+    window.system.saveAthenaThread = vi.fn().mockResolvedValue(true)
+    window.system.runAgentViaGateway = vi.fn().mockResolvedValue('This is a simulated ATHENA refactoring advice response.')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -114,7 +108,7 @@ describe('DetailDrawer Component ATHENA Integration', () => {
     })
 
     // Verify IPC call
-    expect(window.ipcRenderer.invoke).toHaveBeenCalledWith('run-agent', expect.objectContaining({
+    expect(window.system.runAgentViaGateway).toHaveBeenCalledWith(expect.objectContaining({
       provider: 'gemini',
       model: '3.5',
       prompt: expect.stringContaining('How can I fix this?')
