@@ -6,9 +6,11 @@ const graphPayload = {
   nodes: [
     { node_id: 'n1', title: 'Auth Service', node_type: 'service', content: 'Handles auth', status: 'committed', metadata: { source: 'test' } },
     { node_id: 'n2', title: 'Postgres', node_type: 'technology', content: 'Database', status: 'staged', metadata: {} },
+    { node_id: 'd1', title: 'Auth Domain', node_type: 'domain', content: 'Authentication boundary', status: 'committed', metadata: {} },
   ],
   edges: [
     { edge_id: 'e1', source_id: 'n1', target_id: 'n2', edge_type: 'uses', weight: 1 },
+    { edge_id: 'e2', source_id: 'd1', target_id: 'n1', edge_type: 'contains', weight: 1 },
   ],
 }
 
@@ -69,6 +71,24 @@ describe('KnowledgeView', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /open node details/i })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: /open node details/i }))
     await waitFor(() => expect(screen.getByText('Node Details')).toBeInTheDocument())
+  })
+
+  it('renders domains only as areas and searches them through their members', async () => {
+    const { container } = render(<KnowledgeView serverUrl="http://savant.local/" apiKey="sk-test" />)
+
+    await screen.findByText('Knowledge Network')
+    await waitFor(() => expect(container.querySelectorAll('g.node')).toHaveLength(2))
+    expect(container.querySelector('[data-domain-id="d1"].domain-area')).toBeInTheDocument()
+    expect(screen.getByText('AUTH DOMAIN')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('Find knowledge node...'), { target: { value: 'Auth Domain' } })
+    fireEvent.click(await screen.findByText('Auth Domain'))
+
+    expect(screen.queryByText('Node Details')).not.toBeInTheDocument()
+    expect(screen.getByText('Auth Domain')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(container.querySelector('[data-domain-id="d1"].domain-area')).toHaveAttribute('stroke-width', '3')
+    })
   })
 
   it('creates a new knowledge node and reloads the graph', async () => {

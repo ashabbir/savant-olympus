@@ -200,16 +200,28 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
       setRawNodes(raw.nodes || []);
       setRawEdges(raw.edges || []);
 
-      let filteredNodes = raw.nodes || [];
-      let filteredEdges = raw.edges || [];
+      const graphNodes = raw.nodes || [];
+      const graphEdges = raw.edges || [];
+      const domainNodes: any[] = graphNodes.filter((n: any) => n.node_type === "domain");
+      let filteredNodes = graphNodes.filter((n: any) => n.node_type !== "domain");
+      let filteredEdges = graphEdges;
 
-      if (activeLayer !== "all") {
+      if (activeLayer === "domain") {
+        const domainIds = new Set(domainNodes.map((n: any) => n.node_id));
+        const memberIds = new Set<string>();
+        graphEdges.forEach((e: any) => {
+          if (domainIds.has(e.source_id)) memberIds.add(e.target_id);
+          if (domainIds.has(e.target_id)) memberIds.add(e.source_id);
+        });
+        filteredNodes = filteredNodes.filter((n: any) => memberIds.has(n.node_id));
+      } else if (activeLayer !== "all") {
         filteredNodes = filteredNodes.filter((n: any) => n.node_type === activeLayer);
-        const keptIds = new Set(filteredNodes.map((n: any) => n.node_id));
-        filteredEdges = filteredEdges.filter(
-          (e: any) => keptIds.has(e.source_id) && keptIds.has(e.target_id)
-        );
       }
+
+      const keptIds = new Set(filteredNodes.map((n: any) => n.node_id));
+      filteredEdges = graphEdges.filter(
+        (e: any) => keptIds.has(e.source_id) && keptIds.has(e.target_id)
+      );
 
       setNodesCount(filteredNodes.length);
       setEdgesCount(filteredEdges.length);
@@ -381,15 +393,14 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
         .force("collision", d3.forceCollide<Node>().radius((d: any) => 22 + (d.connections || 0) * 2))
         .force("cluster", forceCluster);
 
-      const domainNodes = nodes.filter((n) => n.node_type === "domain");
-      const domainAreas = domainNodes.map((dn, i) => {
-        const memberIds = new Set([dn.node_id]);
-        filteredEdges.forEach((e: any) => {
-          if (e.source_id === dn.node_id) memberIds.add(e.target_id);
-          if (e.target_id === dn.node_id) memberIds.add(e.source_id);
+      const domainAreas = domainNodes.map((dn: any, i: number) => {
+        const memberIds = new Set<string>();
+        graphEdges.forEach((e: any) => {
+          if (e.source_id === dn.node_id && keptIds.has(e.target_id)) memberIds.add(e.target_id);
+          if (e.target_id === dn.node_id && keptIds.has(e.source_id)) memberIds.add(e.source_id);
         });
         return { domain: dn, memberIds, color: domainHullColors[i % domainHullColors.length] };
-      });
+      }).filter((area: any) => area.memberIds.size > 0);
 
 
 
@@ -443,8 +454,11 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
         return hullLine(expanded);
       };
 
-      const areaElements = domainAreas.map((area) => {
+      const areaElements = domainAreas.map((area: any) => {
         const path = domainHullG.append("path")
+          .datum(area)
+          .attr("class", "domain-area")
+          .attr("data-domain-id", area.domain.node_id)
           .attr("fill", area.color)
           .attr("fill-opacity", 0.12)
           .attr("stroke", area.color)
@@ -454,6 +468,9 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
           .attr("pointer-events", "none");
 
         const label = domainHullG.append("text")
+          .datum(area)
+          .attr("class", "domain-area-label")
+          .attr("data-domain-id", area.domain.node_id)
           .attr("text-anchor", "middle")
           .attr("font-family", "monospace")
         .attr("font-size", "8px")
@@ -466,21 +483,6 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
 
       return { path, label, area };
     });
-
-    const forceDomainGravity = (alpha: number) => {
-      for (const area of domainAreas) {
-        const dn = nodes.find((n) => n.node_id === area.domain.node_id);
-        if (!dn || dn.x == null || dn.y == null) continue;
-        for (const n of nodes) {
-          if (!area.memberIds.has(n.node_id) || n.node_id === dn.node_id) continue;
-          n.vx = (n.vx || 0) + (dn.x - (n.x || 0)) * 0.012 * alpha;
-          n.vy = (n.vy || 0) + (dn.y - (n.y || 0)) * 0.012 * alpha;
-        }
-      }
-    };
-    if (domainAreas.length > 0) {
-      simulation.force("domainGravity", forceDomainGravity);
-    }
 
     const link = g.append("g")
       .selectAll("line")
@@ -588,7 +590,7 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
 
       const hasSearch = query || tags.length > 0;
       if (hasSearch) {
-        nodes.forEach((n: any) => {
+        rawNodes.forEach((n: any) => {
           const title = (n.title || "").toLowerCase();
           const content = (n.content || "").toLowerCase();
           const nid = (n.node_id || "").toLowerCase();
@@ -600,9 +602,13 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
         if (tags.length > 0) {
           tags.forEach((tag, idx) => {
             const currentTagVisible = new Set<string>();
-            nodes.forEach((n: any) => {
+            rawNodes.forEach((n: any) => {
               const tagsList = n.metadata?.tags || [];
-              const matchesTag = tagsList.some((t: string) => t.toLowerCase() === tag.toLowerCase());
+              const normalizedTag = tag.toLowerCase();
+              const matchesTag = (n.title || "").toLowerCase().includes(normalizedTag)
+                || (n.content || "").toLowerCase().includes(normalizedTag)
+                || (n.node_id || "").toLowerCase().includes(normalizedTag)
+                || tagsList.some((t: string) => t.toLowerCase() === normalizedTag);
               if (matchesTag) {
                 currentTagVisible.add(n.node_id);
                 const neighbors = rawEdges
@@ -716,7 +722,7 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
         node.selectAll(".node-shape")
           .attr("transform", (d: any) => `scale(${d.pScale || 1})`);
 
-        areaElements.forEach(({ path, label, area }) => {
+        areaElements.forEach(({ path, label, area }: any) => {
           path.style("display", null);
           label.style("display", null);
 
@@ -741,16 +747,16 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
           .attr("y1", (d: any) => d.source.y || 0)
           .attr("x2", (d: any) => d.target.x || 0)
           .attr("y2", (d: any) => d.target.y || 0)
-          .attr("opacity", 0.55);
+          .attr("opacity", (d: any) => getLinkOpacity(d));
 
         node
           .attr("transform", (d: any) => `translate(${d.x || 0}, ${d.y || 0})`)
-          .attr("opacity", 1.0);
+          .attr("opacity", (d: any) => getNodeOpacity(d));
 
         node.selectAll(".node-shape")
           .attr("transform", "scale(1)");
 
-        areaElements.forEach(({ path, label, area }) => {
+        areaElements.forEach(({ path, label, area }: any) => {
           path.style("display", null);
           label.style("display", null);
 
@@ -761,6 +767,11 @@ export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
             const cx = members.reduce((s, n) => s + (n.x || 0), 0) / members.length;
             const topY = Math.min(...members.map((n) => n.y || 0)) - 30;
             label.attr("x", cx).attr("y", topY);
+            const isMatch = matchedIds.has(area.domain.node_id);
+            path.attr("fill-opacity", hasSearch ? (isMatch ? 0.24 : 0.04) : 0.12)
+              .attr("stroke-opacity", hasSearch ? (isMatch ? 1 : 0.2) : 0.6)
+              .attr("stroke-width", hasSearch && isMatch ? 3 : 1.5);
+            label.attr("opacity", hasSearch ? (isMatch ? 1 : 0.2) : 0.5);
           }
         });
       }
@@ -846,6 +857,12 @@ useEffect(() => {
       const t = e.target.node_id || e.target;
       return (visibleIds.has(s) && visibleIds.has(t)) ? 0.7 : 0.05;
     });
+    svg.selectAll(".domain-area")
+      .attr("fill-opacity", (area: any) => matchedIds.has(area.domain.node_id) ? 0.24 : 0.04)
+      .attr("stroke-opacity", (area: any) => matchedIds.has(area.domain.node_id) ? 1 : 0.2)
+      .attr("stroke-width", (area: any) => matchedIds.has(area.domain.node_id) ? 3 : 1.5);
+    svg.selectAll(".domain-area-label")
+      .attr("opacity", (area: any) => matchedIds.has(area.domain.node_id) ? 1 : 0.2);
   } else if (isExploreActive && focalNodes.size > 0 && selectedNodes.size === 0) {
     const adj: Record<string, string[]> = {};
     rawNodes.forEach((n) => { adj[n.node_id] = []; });
@@ -866,6 +883,11 @@ useEffect(() => {
       .attr("stroke-dasharray", (n: any) => n.status === "staged" ? "3,3" : "none");
     svg.selectAll(".node text").attr("opacity", 1);
   } else {
+    svg.selectAll(".domain-area")
+      .attr("fill-opacity", 0.12)
+      .attr("stroke-opacity", 0.6)
+      .attr("stroke-width", 1.5);
+    svg.selectAll(".domain-area-label").attr("opacity", 0.5);
     svg.selectAll(".node .node-shape")
       .attr("stroke", (n: any) => selectedNodes.size > 0 ? (selectedNodes.has(n.node_id) ? "#00e6c8" : "#1a1a2e") : ((selectedNode && n.node_id === selectedNode.id) ? "#fff" : "#1a1a2e"))
       .attr("stroke-width", (n: any) => selectedNodes.size > 0 ? (selectedNodes.has(n.node_id) ? 4 : 1.5) : ((selectedNode && n.node_id === selectedNode.id) ? 3 : 2))
@@ -1718,6 +1740,13 @@ return (
                     key={n.node_id}
                     onClick={async () => {
                       setSelectedNodes(new Map());
+                      if (n.node_type === "domain") {
+                        setSelectedNode(null);
+                        setSearchTags((current) => current.includes(n.title) ? current : [...current, n.title]);
+                        handleExploreNode(n.node_id);
+                        setSearchQuery("");
+                        return;
+                      }
                       setSelectedNode(n);
                       handleExploreNode(n.node_id);
                       try {
