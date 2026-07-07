@@ -152,12 +152,23 @@ export default function App() {
     init();
   }, []);
 
-  const handleLogin = async (candidateApiKey: string) => {
+  const handleLogin = async (candidateApiKey: string, candidateServerUrl?: string) => {
     const trimmed = candidateApiKey.trim();
     const loadedSettings = await window.system.getSettings();
-    const auth = await validateSavantApiKey(trimmed, loadedSettings);
+    const validationSettings = {
+      ...loadedSettings,
+      "server:config": candidateServerUrl
+        ? { url: candidateServerUrl.trim(), enabled: true, status: "idle" }
+        : loadedSettings["server:config"]
+    };
+    const auth = await validateSavantApiKey(trimmed, validationSettings);
     setStoredApiKey(trimmed);
     await window.system.saveSetting("user:apiKey", trimmed);
+    if (candidateServerUrl) {
+      const serverConfig = { url: candidateServerUrl.trim(), enabled: true, status: "idle" };
+      await window.system.saveSetting("server:config", serverConfig);
+      loadedSettings["server:config"] = serverConfig;
+    }
     if (auth?.user_id) {
       await window.system.saveSetting("user:id", auth.user_id);
       loadedSettings["user:id"] = auth.user_id;
@@ -200,7 +211,7 @@ export default function App() {
   }
 
   if (!isAuthenticated || !getStoredApiKey()) {
-    return <LoginScreen onLogin={handleLogin} />;
+    return <LoginScreen onLogin={handleLogin} initialServerUrl={settings["server:config"]?.url} />;
   }
 
   return (

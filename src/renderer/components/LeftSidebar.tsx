@@ -101,18 +101,18 @@ export function LeftSidebar({ onSettingsChanged, onLogout, activeTab, onChangeTa
         </div>
         <div className="flex flex-col items-center gap-1">
           <NavIcon
-            icon={<Settings size={16} />}
+            icon={<Settings size={14} />}
             label="settings"
             onClick={() => setSettingsModalOpen(true)}
           />
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
               <button
-                title="user"
+                title="Logout"
                 style={{ color: "var(--cp-cyan)", opacity: 0.45 }}
                 className="w-10 h-10 flex items-center justify-center hover:opacity-100 transition-all cursor-pointer"
               >
-                <User size={16} />
+                <LogOut size={14} />
               </button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
@@ -120,25 +120,34 @@ export function LeftSidebar({ onSettingsChanged, onLogout, activeTab, onChangeTa
                 side="right"
                 align="end"
                 style={{
-                  background: "var(--cp-bg-3)",
-                  border: "1px solid var(--cp-border)",
-                  boxShadow: "0 0 10px rgba(0,229,255,0.15)",
+                  background: "#0a0e18",
+                  border: "1px solid rgba(0, 229, 255, 0.16)",
+                  boxShadow: "0 20px 40px rgba(0, 0, 0, 0.45)",
                 }}
-                className="min-w-[140px] z-50"
+                className="min-w-[140px] z-50 p-2 flex flex-col gap-1.5"
               >
                 <DropdownMenu.Item
                   onClick={() => setProfileModalOpen(true)}
-                  style={{ color: "var(--foreground)", fontFamily: "'Share Tech Mono', monospace" }}
-                  className="px-3 py-2 text-xs cursor-pointer hover:bg-[rgba(0,229,255,0.08)] outline-none flex items-center gap-2"
+                  style={{
+                    color: "var(--foreground)",
+                    fontFamily: "'Share Tech Mono', monospace",
+                    background: "rgba(255, 255, 255, 0.02)",
+                    border: "1px solid rgba(255, 255, 255, 0.05)",
+                  }}
+                  className="px-3 py-2 text-xs cursor-pointer outline-none flex items-center gap-2 hover:bg-[rgba(0,229,255,0.06)] hover:border-[rgba(0,229,255,0.28)] transition-all"
                 >
                   <UserCog size={12} style={{ color: "var(--cp-cyan)" }} />
                   Edit Profile
                 </DropdownMenu.Item>
-                <DropdownMenu.Separator style={{ background: "var(--cp-border)" }} className="h-[1px] my-1" />
                 <DropdownMenu.Item
                   onClick={onLogout}
-                  style={{ color: "var(--foreground)", fontFamily: "'Share Tech Mono', monospace" }}
-                  className="px-3 py-2 text-xs cursor-pointer hover:bg-[rgba(255,0,170,0.08)] outline-none flex items-center gap-2"
+                  style={{
+                    color: "var(--foreground)",
+                    fontFamily: "'Share Tech Mono', monospace",
+                    background: "rgba(255, 255, 255, 0.02)",
+                    border: "1px solid rgba(255, 255, 255, 0.05)",
+                  }}
+                  className="px-3 py-2 text-xs cursor-pointer outline-none flex items-center gap-2 hover:bg-[rgba(255,0,170,0.06)] hover:border-[rgba(255,0,170,0.28)] transition-all"
                 >
                   <LogOut size={12} style={{ color: "var(--cp-magenta)" }} />
                   Logout

@@ -39,6 +39,18 @@ describe('LoginScreen', () => {
     expect(onLogin).not.toHaveBeenCalled()
   })
 
+  it('requires a non-empty Server URL before calling onLogin', async () => {
+    const onLogin = vi.fn()
+    render(<LoginScreen onLogin={onLogin} />)
+
+    const serverUrlInput = screen.getByPlaceholderText('http://127.0.0.1:8090')
+    fireEvent.change(serverUrlInput, { target: { value: '   ' } })
+    fireEvent.click(screen.getByRole('button', { name: /login/i }))
+
+    expect(await screen.findByText('Server URL is required.')).toBeInTheDocument()
+    expect(onLogin).not.toHaveBeenCalled()
+  })
+
   it('submits a trimmed API key and shows pending state', async () => {
     let resolveLogin!: () => void
     const onLogin = vi.fn(() => new Promise<void>((resolve) => { resolveLogin = resolve }))
@@ -47,7 +59,7 @@ describe('LoginScreen', () => {
     fireEvent.change(screen.getByPlaceholderText('sk-...'), { target: { value: '  sk-valid  ' } })
     fireEvent.click(screen.getByRole('button', { name: /login/i }))
 
-    expect(onLogin).toHaveBeenCalledWith('sk-valid')
+    expect(onLogin).toHaveBeenCalledWith('sk-valid', 'http://127.0.0.1:8090')
     expect(screen.getByRole('button', { name: /authenticating/i })).toBeDisabled()
     resolveLogin()
   })

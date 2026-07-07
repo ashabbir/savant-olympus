@@ -1,19 +1,26 @@
 import { useState } from "react";
-import { KeyRound, Shield, LogIn, AlertTriangle } from "lucide-react";
+import { KeyRound, Shield, LogIn, AlertTriangle, Server } from "lucide-react";
 
 interface LoginScreenProps {
-  onLogin: (apiKey: string) => Promise<void>;
+  onLogin: (apiKey: string, serverUrl?: string) => Promise<void>;
+  initialServerUrl?: string;
 }
 
-export function LoginScreen({ onLogin }: LoginScreenProps) {
+export function LoginScreen({ onLogin, initialServerUrl }: LoginScreenProps) {
   const [apiKey, setApiKey] = useState("");
+  const [serverUrl, setServerUrl] = useState(initialServerUrl || "http://127.0.0.1:8090");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    const trimmed = apiKey.trim();
-    if (!trimmed) {
+    const trimmedKey = apiKey.trim();
+    const trimmedUrl = serverUrl.trim();
+    if (!trimmedUrl) {
+      setError("Server URL is required.");
+      return;
+    }
+    if (!trimmedKey) {
       setError("Savant API key is required.");
       return;
     }
@@ -21,7 +28,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     setIsSubmitting(true);
     setError("");
     try {
-      await onLogin(trimmed);
+      await onLogin(trimmedKey, trimmedUrl);
     } catch (e: any) {
       setError(e?.message || "Login failed.");
       setIsSubmitting(false);
@@ -71,6 +78,33 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
           style={{ color: "var(--cp-cyan)", fontFamily: "'Share Tech Mono', monospace" }}
           className="block text-xs mb-2 opacity-70"
         >
+          Server URL
+        </label>
+        <div
+          style={{ background: "var(--cp-bg-3)", border: "1px solid var(--cp-border)" }}
+          className="flex items-center gap-2 px-3 py-2 mb-4"
+        >
+          <Server size={14} style={{ color: "var(--cp-cyan)", opacity: 0.7 }} />
+          <input
+            type="text"
+            value={serverUrl}
+            onChange={e => setServerUrl(e.target.value)}
+            placeholder="http://127.0.0.1:8090"
+            style={{
+              background: "transparent",
+              color: "var(--foreground)",
+              fontFamily: "'Share Tech Mono', monospace",
+              outline: "none",
+              border: "none",
+            }}
+            className="flex-1 text-xs placeholder:opacity-30"
+          />
+        </div>
+
+        <label
+          style={{ color: "var(--cp-cyan)", fontFamily: "'Share Tech Mono', monospace" }}
+          className="block text-xs mb-2 opacity-70"
+        >
           Savant API Key
         </label>
         <div
@@ -82,7 +116,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
             type="password"
             value={apiKey}
             onChange={e => setApiKey(e.target.value)}
-            autoFocus
+            autoFocus={!!serverUrl}
             placeholder="sk-..."
             style={{
               background: "transparent",
