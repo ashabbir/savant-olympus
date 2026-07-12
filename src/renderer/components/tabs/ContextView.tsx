@@ -40,7 +40,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
 
-  const fetchRepos = async () => {
+  const fetchRepos = useCallback(async () => {
     setIsLoading(true);
     try {
       const res = await fetch(`${baseUrl}/api/context/repos`, {
@@ -54,9 +54,9 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [baseUrl, apiKey]);
 
-  const fetchIndexingStatus = async () => {
+  const fetchIndexingStatus = useCallback(async () => {
     try {
       const res = await fetch(`${baseUrl}/api/context/repos/indexing-status`, {
         headers: { "X-API-Key": apiKey },
@@ -68,14 +68,14 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     } catch (e) {
       console.error(e);
     }
-  };
+  }, [baseUrl, apiKey]);
 
   useEffect(() => {
     fetchRepos();
     fetchIndexingStatus();
     const interval = setInterval(fetchIndexingStatus, 5000);
     return () => clearInterval(interval);
-  }, [baseUrl, apiKey]);
+  }, [fetchRepos, fetchIndexingStatus]);
 
   const [astNodes, setAstNodes] = useState<any[]>([]);
   const [analysisResults, setAnalysisResults] = useState<any | null>(null);
@@ -292,7 +292,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     }
   }, [selectedRepo?.path, selectedRepo?.name, baseUrl, apiKey]);
 
-  const fetchAstAndAnalyze = async (projectName: string) => {
+  const fetchAstAndAnalyze = useCallback(async (projectName: string) => {
     try {
       const res = await fetch(`${baseUrl}/api/context/ast/list?repo=${encodeURIComponent(projectName)}`, {
         headers: { "X-API-Key": apiKey },
@@ -325,7 +325,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       console.error("Heuristics failed:", e);
       setAnalysisResults(null);
     }
-  };
+  }, [baseUrl, apiKey]);
 
   useEffect(() => {
     if (selectedProject) {
@@ -334,7 +334,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       setDetailsTab("overview");
       fetchAstAndAnalyze(selectedProject);
     }
-  }, [selectedProject]);
+  }, [selectedProject, fetchAstAndAnalyze]);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isFileBrowserOpen, setIsFileBrowserOpen] = useState(false);

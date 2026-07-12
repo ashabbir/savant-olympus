@@ -50,6 +50,7 @@ Recent UI behavior:
 - Desktop graph takes most of the page height.
 - Node details show linked nodes, relation direction, and edge type.
 - The link-node popup has search and grouped results by node type.
+- Knowledge chats are stored in the local `~/.savant/olympus.db` SQLite database with their graph-state snapshot. **Previous Chats** is launched from the extreme-right Knowledge action rail and opens as a full-screen sliding drawer; reopening a thread restores filters/selections/depth/search/view state and continues the conversation.
 
 Important endpoints:
 - `GET /api/knowledge/graph?limit=150&slim=true`

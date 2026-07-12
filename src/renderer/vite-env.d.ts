@@ -26,13 +26,22 @@ interface Window {
     }>
     getDbStatus: () => Promise<string>
     getChatHistory: (target_id: string) => Promise<any[]>
-    saveChatHistory: (target_id: string, messages: any[]) => Promise<boolean>
+    saveChatHistory: (
+      target_id: string,
+      messages: any[],
+      metadata?: { title?: string; context?: any; kind?: string },
+    ) => Promise<boolean>
     clearChatHistory: (target_id: string) => Promise<boolean>
-    loadAthenaThreads: () => Promise<any[]>
+    loadAthenaThreads: (kind?: string) => Promise<any[]>
     saveAthenaThread: (target_id: string, messages: any[]) => Promise<boolean>
     clearAthenaThread: (target_id: string) => Promise<boolean>
     readGraphifyJson: (repoPath: string) => Promise<any | null>
     runAgentViaGateway: (args: { provider: string; model: string; prompt: string }) => Promise<string>
+    exportDocument: (args: {
+      format: 'html' | 'pdf'
+      html: string
+      defaultFilename: string
+    }) => Promise<string | null>
   }
   electronAPI?: {
     pickDirectory: (defaultPath?: string) => Promise<string | null>;

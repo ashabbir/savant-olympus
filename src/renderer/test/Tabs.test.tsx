@@ -576,6 +576,22 @@ describe('RightPanel & KnowledgeView Events', () => {
           })
         } as Response)
       }
+      if (u.includes('/api/knowledge/export')) {
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+        } as Response)
+      }
+      if (u.includes('/api/knowledge/graph?slim=false')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({
+            nodes: [{ node_id: 'n1', title: 'Node 1', node_type: 'concept', description: 'Full description' }],
+            edges: [],
+          })
+        } as Response)
+      }
       return Promise.resolve({
         ok: true,
         status: 200,
@@ -603,6 +619,9 @@ describe('RightPanel & KnowledgeView Events', () => {
     const reloadBtn = screen.getByTitle("Reload Graph")
     fireEvent.click(reloadBtn)
     expect(dispatchSpy).toHaveBeenCalled()
+
+    fireEvent.click(screen.getByTitle("Previous Chats"))
+    expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({ type: "knowledge-chat-history" }))
   })
 
   it('opens the knowledge add modal when the right rail add icon is clicked', async () => {
@@ -651,15 +670,19 @@ describe('RightPanel & KnowledgeView Events', () => {
     expect(dispatchSpy.mock.calls[2][0].type).toBe("abilities-bootstrap")
   })
 
-  it('exports knowledge with workspace_id included', async () => {
+  it('downloads the loaded knowledge graph', async () => {
     const fetchSpy = vi.spyOn(window, 'fetch')
+    const createObjectURLSpy = vi.spyOn(URL, 'createObjectURL')
     fetchSpy.mockImplementation((url) => {
       const u = url.toString()
-      if (u.includes('/api/knowledge/export?workspace_id=olympus')) {
+      if (u.includes('/api/knowledge/graph')) {
         return Promise.resolve({
           ok: true,
           status: 200,
-          json: () => Promise.resolve({ nodes: [], edges: [] })
+          json: () => Promise.resolve({
+            nodes: [{ node_id: 'n1', title: 'Node 1', node_type: 'concept' }],
+            edges: [],
+          })
         } as Response)
       }
       return Promise.resolve({
@@ -671,13 +694,13 @@ describe('RightPanel & KnowledgeView Events', () => {
 
     render(<KnowledgeView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
 
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /concepts/i })).toBeInTheDocument()
+    })
     window.dispatchEvent(new CustomEvent("knowledge-download"))
 
     await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith(
-        expect.stringContaining('/api/knowledge/export?workspace_id=olympus'),
-        expect.any(Object)
-      )
+      expect(createObjectURLSpy).toHaveBeenCalled()
     })
   })
 

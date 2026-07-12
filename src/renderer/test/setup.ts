@@ -32,6 +32,7 @@ const mockSystem: any = {
   clearAthenaThread: vi.fn().mockResolvedValue(true),
   readGraphifyJson: vi.fn().mockResolvedValue(null),
   runAgentViaGateway: vi.fn().mockResolvedValue('Mock agent response'),
+  exportDocument: vi.fn().mockResolvedValue('/tmp/athena-export.html'),
 }
 
 mockSystem.getChatHistory = vi.fn().mockResolvedValue([])
@@ -45,6 +46,8 @@ const localStorageMock = (() => {
     setItem: vi.fn((key: string, value: string) => { store.set(key, value) }),
     removeItem: vi.fn((key: string) => { store.delete(key) }),
     clear: vi.fn(() => { store.clear() }),
+    key: vi.fn((index: number) => Array.from(store.keys())[index] || null),
+    get length() { return store.size },
   }
 })()
 

@@ -139,7 +139,8 @@ if (rendererProcess?.exitPromise) {
 }
 
 console.log(`[OLYMPUS] Renderer ready at ${devServerUrl}`)
-electronProcess = spawn(electron, ['.'], {
+const electronArgs = ['.', ...(process.env.ELECTRON_CDP_PORT ? [`--remote-debugging-port=${process.env.ELECTRON_CDP_PORT}`] : [])]
+electronProcess = spawn(electron, electronArgs, {
   cwd: rootDir,
   stdio: 'inherit',
   env: {

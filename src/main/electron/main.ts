@@ -38,9 +38,18 @@ async function initDb() {
       CREATE TABLE IF NOT EXISTS chat_history (
         target_id TEXT PRIMARY KEY,
         messages TEXT,
+        title TEXT,
+        context TEXT,
+        kind TEXT DEFAULT 'general',
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `)
+    const chatHistoryColumns = new Set(
+      db.prepare('PRAGMA table_info(chat_history)').all().map((column: any) => column.name)
+    )
+    if (!chatHistoryColumns.has('title')) db.exec('ALTER TABLE chat_history ADD COLUMN title TEXT')
+    if (!chatHistoryColumns.has('context')) db.exec('ALTER TABLE chat_history ADD COLUMN context TEXT')
+    if (!chatHistoryColumns.has('kind')) db.exec("ALTER TABLE chat_history ADD COLUMN kind TEXT DEFAULT 'general'")
     console.log('[OLYMPUS] SQLite engine initialized.')
   } catch (e) {
     console.error('Failed to initialize Savant Olympus database:', e)
@@ -274,15 +283,67 @@ async function runGatewayAgent(provider: string, model: string, prompt: string) 
 
 ipcMain.handle('run-agent', async (_event, { provider, model, prompt }) => runGatewayAgent(provider, model, prompt))
 
-ipcMain.handle('save-athena-thread', async (_event, { target_id, messages }) => {
+ipcMain.handle('export-document', async (event, { format, html, defaultFilename }) => {
+  if ((format !== 'html' && format !== 'pdf') || typeof html !== 'string' || !html.trim()) {
+    throw new Error('Invalid document export request.')
+  }
+
+  const extension = format === 'pdf' ? 'pdf' : 'html'
+  const filename = String(defaultFilename || `athena-export.${extension}`)
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-')
+  const owner = BrowserWindow.fromWebContents(event.sender) || undefined
+  const saveOptions = {
+    title: `Export ATHENA ${format.toUpperCase()}`,
+    defaultPath: filename.endsWith(`.${extension}`) ? filename : `${filename}.${extension}`,
+    filters: [{ name: format === 'pdf' ? 'PDF Document' : 'HTML Document', extensions: [extension] }],
+  }
+  const result = owner
+    ? await dialog.showSaveDialog(owner, saveOptions)
+    : await dialog.showSaveDialog(saveOptions)
+  if (result.canceled || !result.filePath) return null
+
+  if (format === 'html') {
+    await fs.writeFile(result.filePath, html, 'utf8')
+    return result.filePath
+  }
+
+  const exportWindow = new BrowserWindow({
+    show: false,
+    webPreferences: { sandbox: true },
+  })
+  try {
+    await exportWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+    const pdf = await exportWindow.webContents.printToPDF({
+      pageSize: 'A4',
+      printBackground: true,
+      margins: { marginType: 'default' },
+    })
+    await fs.writeFile(result.filePath, pdf)
+    return result.filePath
+  } finally {
+    exportWindow.destroy()
+  }
+})
+
+ipcMain.handle('save-athena-thread', async (_event, { target_id, messages, title, context, kind }) => {
   if (!db) return false
   try {
     const val = typeof messages === 'string' ? messages : JSON.stringify(messages)
+    const contextValue = context == null
+      ? null
+      : typeof context === 'string'
+        ? context
+        : JSON.stringify(context)
     db.prepare(`
-      INSERT INTO chat_history (target_id, messages, updated_at) 
-      VALUES (?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(target_id) DO UPDATE SET messages=excluded.messages, updated_at=CURRENT_TIMESTAMP
-    `).run(target_id, val)
+      INSERT INTO chat_history (target_id, messages, title, context, kind, updated_at)
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(target_id) DO UPDATE SET
+        messages=excluded.messages,
+        title=COALESCE(excluded.title, chat_history.title),
+        context=COALESCE(excluded.context, chat_history.context),
+        kind=COALESCE(excluded.kind, chat_history.kind),
+        updated_at=CURRENT_TIMESTAMP
+    `).run(target_id, val, title || null, contextValue, kind || null)
     return true
   } catch (e) {
     console.error('Failed to save athena thread:', target_id, e)
@@ -290,15 +351,31 @@ ipcMain.handle('save-athena-thread', async (_event, { target_id, messages }) => 
   }
 })
 
-ipcMain.handle('load-athena-threads', async () => {
+ipcMain.handle('load-athena-threads', async (_event, kind?: string) => {
   if (!db) return []
   try {
-    const rows = db.prepare('SELECT target_id, messages, updated_at FROM chat_history ORDER BY updated_at DESC').all()
+    const rows = kind
+      ? db.prepare('SELECT target_id, messages, title, context, kind, updated_at FROM chat_history WHERE kind = ? ORDER BY updated_at DESC').all(kind)
+      : db.prepare('SELECT target_id, messages, title, context, kind, updated_at FROM chat_history ORDER BY updated_at DESC').all()
     return rows.map((row: any) => {
       try {
-        return { target_id: row.target_id, messages: JSON.parse(row.messages), updated_at: row.updated_at }
+        return {
+          target_id: row.target_id,
+          title: row.title,
+          context: row.context ? JSON.parse(row.context) : null,
+          kind: row.kind,
+          messages: JSON.parse(row.messages),
+          updated_at: row.updated_at,
+        }
       } catch {
-        return { target_id: row.target_id, messages: [], updated_at: row.updated_at }
+        return {
+          target_id: row.target_id,
+          title: row.title,
+          context: null,
+          kind: row.kind,
+          messages: [],
+          updated_at: row.updated_at,
+        }
       }
     })
   } catch (e) {

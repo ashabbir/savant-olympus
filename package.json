@@ -1,7 +1,7 @@
 {
   "name": "savant-olympus",
   "version": "6.0.0",
-  "description": "Savant Olympus - Command & Control center for the Savant ecosystem.",
+  "description": "Savant Olympus",
   "author": "project-x",
   "repository": {
     "type": "git",

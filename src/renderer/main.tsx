@@ -39,6 +39,7 @@ if (!window.system) {
     clearAthenaThread: async (_target_id: string) => true,
     readGraphifyJson: async (_repoPath: string) => null,
     runAgentViaGateway: async () => '',
+    exportDocument: async () => null,
   }
 }
 

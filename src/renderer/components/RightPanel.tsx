@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Activity, GitBranch, FileText, Upload, Sparkles, Search, ListChecks, Terminal, RefreshCcw, Timer, Cpu, Zap, FileCode, Database, Trash2, Download, Plus, Check } from "lucide-react";
+import { Activity, GitBranch, FileText, Upload, Sparkles, Search, ListChecks, Terminal, RefreshCcw, Timer, Cpu, Zap, FileCode, Database, Trash2, Download, Plus, Check, History } from "lucide-react";
 import { AreaChart, Area, LineChart, Line, ResponsiveContainer } from "recharts";
 import { motion, AnimatePresence } from "motion/react";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -356,6 +356,11 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
           icon={<Download size={16} />}
           label="Download Graph"
           onClick={() => window.dispatchEvent(new CustomEvent("knowledge-download"))}
+        />
+        <NavIcon
+          icon={<History size={16} />}
+          label="Previous Chats"
+          onClick={() => window.dispatchEvent(new CustomEvent("knowledge-chat-history"))}
         />
       </aside>
     );

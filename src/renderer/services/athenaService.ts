@@ -72,7 +72,7 @@ export async function fetchAthenaKnowledgeContext(baseUrl: string, apiKey: strin
   const trimmed = query.trim()
   if (!trimmed) return []
 
-  const res = await fetch(`${normalizeBaseUrl(baseUrl)}/api/knowledge/graph?limit=50&slim=true&include_staged=false&_=${Date.now()}`, {
+  const res = await fetch(`${normalizeBaseUrl(baseUrl)}/api/knowledge/graph?slim=true&include_staged=false&_=${Date.now()}`, {
     headers: { "X-API-Key": apiKey },
   })
   if (!res.ok) return []
