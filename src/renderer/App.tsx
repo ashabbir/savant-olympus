@@ -130,12 +130,17 @@ export default function App() {
           loadedSettings["user:name"] = auth.name;
           await window.system.saveSetting("user:name", auth.name);
         }
+        if (auth?.role) {
+          loadedSettings["user:role"] = auth.role;
+          await window.system.saveSetting("user:role", auth.role);
+        }
       } catch (_e) {
         clearStoredApiKey();
         await window.system.saveSetting("user:apiKey", "");
         await window.system.saveSetting("user:id", "");
         await window.system.saveSetting("user:name", "");
-        setSettings({ ...loadedSettings, "user:apiKey": "", "user:id": "", "user:name": "" });
+        await window.system.saveSetting("user:role", "");
+        setSettings({ ...loadedSettings, "user:apiKey": "", "user:id": "", "user:name": "", "user:role": "" });
         setIsAuthenticated(false);
         setIsInitializing(false);
         return;
@@ -177,6 +182,10 @@ export default function App() {
       await window.system.saveSetting("user:name", auth.name);
       loadedSettings["user:name"] = auth.name;
     }
+    if (auth?.role) {
+      await window.system.saveSetting("user:role", auth.role);
+      loadedSettings["user:role"] = auth.role;
+    }
     loadedSettings["user:apiKey"] = trimmed;
     setIsAuthenticated(true);
     await initializeOlympus(loadedSettings);
@@ -187,9 +196,10 @@ export default function App() {
     await window.system.saveSetting("user:apiKey", "");
     await window.system.saveSetting("user:id", "");
     await window.system.saveSetting("user:name", "");
+    await window.system.saveSetting("user:role", "");
     setIsAuthenticated(false);
     setIsInitializing(false);
-    setSettings(prev => ({ ...prev, "user:apiKey": "", "user:id": "", "user:name": "" }));
+    setSettings(prev => ({ ...prev, "user:apiKey": "", "user:id": "", "user:name": "", "user:role": "" }));
     setThinking([]);
     setSelectedProject(null);
     setStatusText("IDLE");
@@ -240,9 +250,9 @@ export default function App() {
           {activeTab === "Workspace" ? (
             <WorkspaceView serverUrl={serverUrl} apiKey={apiKey} sessionId={null} />
           ) : activeTab === "Knowledge" ? (
-            <KnowledgeView serverUrl={serverUrl} apiKey={apiKey} />
+            <KnowledgeView serverUrl={serverUrl} apiKey={apiKey} isAdmin={settings["user:role"] === "admin"} />
           ) : activeTab === "Context" ? (
-            <ContextView serverUrl={serverUrl} apiKey={apiKey} selectedProject={selectedProject} onSelectProject={setSelectedProject} activeModel={activeModel} />
+            <ContextView serverUrl={serverUrl} apiKey={apiKey} selectedProject={selectedProject} onSelectProject={setSelectedProject} activeModel={activeModel} isAdmin={settings["user:role"] === "admin"} />
           ) : activeTab === "Tools" ? (
             <ToolsView serverUrl={serverUrl} apiKey={apiKey} />
           ) : activeTab === "Skills" ? (
@@ -265,6 +275,7 @@ export default function App() {
           serverUrl={serverUrl}
           apiKey={apiKey}
           selectedProject={selectedProject}
+          isAdmin={settings["user:role"] === "admin"}
         />
       </div>
 

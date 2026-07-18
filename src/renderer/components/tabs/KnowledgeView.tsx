@@ -214,6 +214,7 @@ const KNOWLEDGE_NODE_TYPES = [
 interface KnowledgeViewProps {
   serverUrl: string;
   apiKey: string;
+  isAdmin?: boolean;
 }
 
 export function getKnowledgeNodeRadius(connectionCount: number) {
@@ -452,7 +453,7 @@ export function buildFilteredKnowledgeContext(
   );
 }
 
-export function KnowledgeView({ serverUrl, apiKey }: KnowledgeViewProps) {
+export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeViewProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const zoomInRef = useRef<() => void>(() => {});
@@ -3438,7 +3439,7 @@ return (
               </button>
             </div>
           )}
-          {isInspectorOpen ? (!activeFilteredContext && selectedNodes.size >= 2 ? (
+          {isInspectorOpen ? (!activeFilteredContext && selectedNodes.size >= 2 && isAdmin ? (
             <div className="flex-1 p-4 overflow-y-auto">
               <div className="space-y-4 font-mono text-xs">
                 <div className="text-[10px] text-muted-foreground">⌘/Ctrl+Click to multiselect. First node is survivor.</div>
@@ -3527,6 +3528,7 @@ return (
                     </div>
                     {selectedNode!.status === "staged" ? <span className="text-[9px] font-mono text-yellow-500 uppercase bg-yellow-950/20 px-1 border border-yellow-500/20 rounded">staged</span> : <span className="text-[9px] font-mono text-green-500 uppercase bg-green-950/20 px-1 border border-green-500/20 rounded">committed</span>}
                   </div>
+                  {isAdmin && <>
                   <div className="space-y-2">
                     <label className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">NODE TITLE</label>
                     <input
@@ -3585,6 +3587,7 @@ return (
                       {(isSavingNodeTitle || isSavingNodeType || isSavingNodeWorkspaces) ? "Saving..." : "Update Details"}
                     </button>
                   </div>
+                  </>}
                   <div>
                     <h4 className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">CONNECTIONS</h4>
                     {selectedConnections.length ? (
@@ -3610,7 +3613,7 @@ return (
                                   [{connection.relatedNode?.node_type || "unknown"}]
                                 </span>
                               </button>
-                              <button
+                              {isAdmin && <button
                                 onClick={() =>
                                   handleDeleteEdge(
                                     connection.edge_id,
@@ -3623,7 +3626,7 @@ return (
                                 title="Remove connection edge"
                               >
                                 Remove
-                              </button>
+                              </button>}
                             </div>
                           </div>
                         ))}
@@ -3641,19 +3644,19 @@ return (
                     </div>
                   )}
                   {selectedNode!.metadata?.source && (<div><h4 className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">SOURCE</h4><p className="text-xs text-foreground/70">{selectedNode!.metadata.source}</p></div>)}
-                  {selectedNode!.status === "staged" && (
+                  {isAdmin && selectedNode!.status === "staged" && (
                     <div className="pt-2">
                       <button onClick={() => handleCommitNode(selectedNode!.node_id || selectedNode!.id)} className="w-full py-2 bg-green-600 text-white font-bold text-xs uppercase hover:bg-green-700 flex items-center justify-center gap-1.5 font-mono text-[10px]"><Check size={14} />COMMIT_NODE</button>
                     </div>
                   )}
-                  <div className="pt-2">
+                  {isAdmin && <div className="pt-2">
                     <button onClick={() => { setConnectTargetIds([]); setConnectTargetQuery(""); setIsConnectModalOpen(true); }} className="w-full py-2 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase hover:opacity-90 flex items-center justify-center gap-1.5"><GitFork size={14} />CONNECT_NODE</button>
-                  </div>
+                  </div>}
                 </div>
               </div>
-              <div className="p-4 border-t border-[var(--cp-border)] shrink-0 bg-[var(--cp-bg-2)]">
+              {isAdmin && <div className="p-4 border-t border-[var(--cp-border)] shrink-0 bg-[var(--cp-bg-2)]">
                 <button onClick={handleDeleteSelected} disabled={!selectedNode} title="Delete" className="w-full py-2 border border-red-500/30 text-red-500 disabled:opacity-40 transition-all cursor-pointer flex items-center justify-center gap-1.5 font-mono text-[10px] uppercase hover:bg-red-950/20"><Trash2 size={14} />DELETE_NODE</button>
-              </div>
+              </div>}
             </>
             )) : (
               <div className="flex flex-col h-full overflow-hidden">

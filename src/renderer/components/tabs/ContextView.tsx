@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Search, Folder, RefreshCw, Trash2, Cpu, FileCode, CheckCircle, Database, AlertTriangle, Layers, Play, Square, Trash, Zap, Clock, Upload, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Folder, RefreshCw, Download, Trash2, Cpu, FileCode, CheckCircle, Database, AlertTriangle, Layers, Play, Square, Trash, Zap, Clock, Upload, ChevronLeft, ChevronRight } from "lucide-react";
 import { ContextVisualizations, analyzeProjectSource } from "./ContextVisualizations";
 import { GraphifyVisualizer } from "./GraphifyVisualizer";
 import { FileBrowserModal } from "../FileBrowserModal";
@@ -9,6 +9,9 @@ interface Repo {
 
   name: string;
   path: string;
+  source?: "github" | "gitlab" | "git" | "directory" | "unknown";
+  source_label?: string;
+  source_origin?: string;
   status?: string;
   file_count?: number;
   memory_count?: number;
@@ -25,16 +28,19 @@ interface ContextViewProps {
   onSelectProject: (projName: string | null) => void;
   selectedProject: string | null;
   activeModel?: { provider: string; model: string };
+  isAdmin?: boolean;
 }
 
 
 
-export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProject, activeModel }: ContextViewProps) {
+export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProject, activeModel, isAdmin = false }: ContextViewProps) {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [newRepoName, setNewRepoName] = useState("");
   const [newRepoPath, setNewRepoPath] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [refreshingRepo, setRefreshingRepo] = useState<string | null>(null);
   const [indexingStatus, setIndexingStatus] = useState<Record<string, any>>({});
+  const previousIndexingStatusRef = useRef<Record<string, any>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [isRepoPaneOpen, setIsRepoPaneOpen] = useState(true);
 
@@ -63,12 +69,28 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       });
       if (res.ok) {
         const data = await res.json();
-        setIndexingStatus(data.status || {});
+        const nextStatus = data.status || data || {};
+        const previousStatus = previousIndexingStatusRef.current;
+        const changedRepos = Object.keys({ ...previousStatus, ...nextStatus }).filter((name) => {
+          const previous = previousStatus[name] || {};
+          const next = nextStatus[name] || {};
+          return ["status", "progress", "phase", "current_file", "error"].some((key) => previous[key] !== next[key]);
+        });
+        const completedRepo = changedRepos.some((name) => {
+          const previous = previousStatus[name]?.status;
+          const next = nextStatus[name]?.status;
+          const active = ["indexing", "running", "queued", "processing"].includes(next);
+          return previous && previous !== next && !active;
+        });
+
+        previousIndexingStatusRef.current = nextStatus;
+        setIndexingStatus(nextStatus);
+        if (completedRepo) fetchRepos();
       }
     } catch (e) {
       console.error(e);
     }
-  }, [baseUrl, apiKey]);
+  }, [baseUrl, apiKey, fetchRepos]);
 
   useEffect(() => {
     fetchRepos();
@@ -341,7 +363,6 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const [sources, setSources] = useState<any>(null);
   const [selectedSource, setSelectedSource] = useState("github");
   const [repoUrl, setRepoUrl] = useState("");
-  const [repoBranch, setRepoBranch] = useState("");
   const [dirPath, setDirPath] = useState("");
   const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -363,7 +384,6 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     setIsAddModalOpen(true);
     setAddError(null);
     setRepoUrl("");
-    setRepoBranch("");
     setDirPath("");
     try {
       const res = await fetch(`${baseUrl}/api/context/repos/sources`, {
@@ -410,9 +430,6 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         return;
       }
       payload.url = repoUrl.trim();
-      if (repoBranch.trim()) {
-        payload.branch = repoBranch.trim();
-      }
     }
 
     try {
@@ -455,9 +472,11 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         });
         if (!res.ok) return;
         const data = await res.json();
-        const status = (data.status || {})[repoName] || {};
+        const nextStatus = data.status || data || {};
+        const status = nextStatus[repoName] || {};
         const activeStatus = status.status || "idle";
-        setIndexingStatus(data.status || {});
+        previousIndexingStatusRef.current = nextStatus;
+        setIndexingStatus(nextStatus);
 
         if (activeStatus !== "indexing" && activeStatus !== "running" && activeStatus !== "queued" && activeStatus !== "processing") {
           if (jobPollRef.current) clearInterval(jobPollRef.current);
@@ -483,6 +502,33 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       if (jobPollRef.current) clearInterval(jobPollRef.current);
     };
   }, []);
+
+  const handleRefreshRepo = async (repoName: string) => {
+    setRefreshingRepo(repoName);
+    try {
+      const res = await fetch(`${baseUrl}/api/context/repos/${encodeURIComponent(repoName)}/refresh`, {
+        method: "POST",
+        headers: { "X-API-Key": apiKey },
+      });
+      if (!res.ok) {
+        let message = `HTTP ${res.status}`;
+        try {
+          const data = await res.json();
+          message = data.error || message;
+        } catch {}
+        throw new Error(message);
+      }
+      toast.success(`Latest code pulled for "${repoName}"`, {
+        description: "The checkout is now up to date. Queue indexing when you want to refresh Context data.",
+        duration: 5000,
+      });
+      fetchRepos();
+    } catch (e: any) {
+      toast.error(`Failed to refresh "${repoName}"`, { description: e.message });
+    } finally {
+      setRefreshingRepo(null);
+    }
+  };
 
   const handleStartIndexing = async (repoName: string) => {
     try {
@@ -582,6 +628,10 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const statusInfo = selectedProject ? indexingStatus[selectedProject] || {} : {};
   const liveStatus = (statusInfo.status || selectedRepo?.status || "ready").toLowerCase();
   const isCurrentlyIndexing = liveStatus === "indexing" || liveStatus === "running" || liveStatus === "queued" || liveStatus === "processing";
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const filteredRepos = normalizedSearchQuery
+    ? repos.filter((repo) => JSON.stringify({ ...repo, live_status: indexingStatus[repo.name] || {} }).toLowerCase().includes(normalizedSearchQuery))
+    : repos;
 
   return (
     <div className="flex flex-col h-full overflow-hidden p-4 space-y-4" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
@@ -616,26 +666,43 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
           {isRepoPaneOpen ? (
             <>
-              <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-                Actions
-              </h3>
-              <button
-                onClick={handleOpenAddModal}
-                className="w-full py-2.5 text-xs bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold hover:opacity-90 cursor-pointer font-mono tracking-wider"
-              >
-                + REGISTER REPOSITORY
-              </button>
+              {isAdmin && (
+                <>
+                  <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+                    Actions
+                  </h3>
+                  <button
+                    onClick={handleOpenAddModal}
+                    className="w-full py-2.5 text-xs bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold hover:opacity-90 cursor-pointer font-mono tracking-wider"
+                  >
+                    + REGISTER REPOSITORY
+                  </button>
+                </>
+              )}
 
               <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider pt-2" style={{ fontFamily: "'Orbitron', sans-serif" }}>
                 Registered Projects
               </h3>
+              <div className="relative">
+                <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search projects..."
+                  aria-label="Search projects"
+                  className="w-full h-7 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] pl-7 pr-2 text-[10px] text-foreground font-mono outline-none focus:border-[var(--cp-cyan)]"
+                />
+              </div>
               <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-2">
                 {isLoading ? (
                   <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REPOS...</div>
-                ) : repos.length === 0 ? (
-                  <div className="text-center py-6 text-xs text-muted-foreground opacity-40">No projects registered.</div>
+                ) : filteredRepos.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-muted-foreground opacity-40">
+                    {normalizedSearchQuery ? "No matching projects." : "No projects registered."}
+                  </div>
                 ) : (
-                  repos.map((repo) => {
+                  filteredRepos.map((repo) => {
                 const status = indexingStatus[repo.name] || {};
                 const isSelected = selectedProject === repo.name;
                 const activeStatus = (status.status || repo.status || "ready").toLowerCase();
@@ -663,13 +730,28 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                       <span className="text-xs font-semibold text-foreground truncate max-w-[180px]">
                         {repo.name}
                       </span>
-                      <div className="flex items-center gap-1.5">
+                      {isAdmin && <div className="flex items-center gap-1.5">
+                        {(repo.source === "github" || repo.source === "gitlab") && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRefreshRepo(repo.name);
+                            }}
+                            title={`Refetch latest code from ${repo.source_label || repo.source}`}
+                            aria-label={`Refetch code for ${repo.name}`}
+                            className="p-1 hover:text-[var(--cp-cyan)]"
+                            disabled={refreshingRepo === repo.name || isBusy}
+                          >
+                            <Download size={10} className={refreshingRepo === repo.name ? "animate-bounce text-[var(--cp-cyan)]" : ""} />
+                          </button>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             handleStartIndexing(repo.name);
                           }}
                           title="Trigger indexing"
+                          aria-label={`Index ${repo.name}`}
                           className="p-1 hover:text-[var(--cp-cyan)]"
                           disabled={isBusy}
                         >
@@ -684,7 +766,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         >
                           <Trash2 size={10} />
                         </button>
-                      </div>
+                      </div>}
                     </div>
                     <p className="text-[10px] text-muted-foreground font-mono truncate">{repo.path}</p>
                     <div className="flex items-center justify-between text-[9px] text-muted-foreground font-mono mt-1.5">
@@ -773,6 +855,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                 <>
                   {/* Action Buttons */}
                   <div className="flex flex-wrap gap-2">
+                    {isAdmin ? <>
                     {isCurrentlyIndexing ? (
                       <button
                         onClick={() => handleStopIndexing(selectedRepo.name)}
@@ -781,6 +864,18 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         <Square size={12} /> STOP JOB
                       </button>
                     ) : null}
+                    {(selectedRepo.source === "github" || selectedRepo.source === "gitlab") && (
+                      <button
+                        onClick={() => handleRefreshRepo(selectedRepo.name)}
+                        className="flex items-center gap-1 px-2 py-1 text-[10px] bg-cyan-950 text-[var(--cp-cyan)] border border-cyan-900 hover:bg-cyan-900 cursor-pointer font-mono font-bold"
+                        disabled={refreshingRepo === selectedRepo.name || isCurrentlyIndexing}
+                        title={`Refetch latest code from ${selectedRepo.source_label || selectedRepo.source}`}
+                        aria-label={`Refetch code for ${selectedRepo.name}`}
+                      >
+                        <Download size={11} className={refreshingRepo === selectedRepo.name ? "animate-bounce" : ""} />
+                        {refreshingRepo === selectedRepo.name ? "FETCHING..." : "REFETCH"}
+                      </button>
+                    )}
                     <button
                       onClick={() => handleStartIndexing(selectedRepo.name)}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-teal-950 text-[var(--cp-cyan)] border border-teal-900 hover:bg-teal-900 cursor-pointer font-mono font-bold"
@@ -825,6 +920,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                       style={{ display: "none" }}
                       onChange={handleFileChange}
                     />
+                    </> : <span className="text-[10px] text-muted-foreground font-mono border border-[var(--cp-border)] px-2 py-1">READ-ONLY MEMBER ACCESS</span>}
                   </div>
 
                   {/* Graphify Upload/Sync Banner */}
@@ -846,13 +942,13 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                                 : `Found graphify-out/graph.json with ${localTotal} nodes and ${(graphifyJson.links?.length || graphifyJson.edges?.length || 0)} edges.`}
                             </p>
                           </div>
-                          <button
-                            onClick={handleUploadGraphify}
-                            disabled={isUploadingGraphify}
-                            className="px-4 py-2 bg-cyan-950 text-[var(--cp-cyan)] border border-cyan-900 hover:bg-cyan-900 cursor-pointer font-bold tracking-wider uppercase text-[10px] self-start md:self-auto shrink-0 transition-all duration-300"
-                          >
-                            {isUploadingGraphify ? "Uploading..." : needsSync ? "Sync Graphify" : "Upload Graphify JSON"}
-                          </button>
+                          {isAdmin && <button
+                              onClick={handleUploadGraphify}
+                              disabled={isUploadingGraphify}
+                              className="px-4 py-2 bg-cyan-950 text-[var(--cp-cyan)] border border-cyan-900 hover:bg-cyan-900 cursor-pointer font-bold tracking-wider uppercase text-[10px] self-start md:self-auto shrink-0 transition-all duration-300"
+                            >
+                              {isUploadingGraphify ? "Uploading..." : needsSync ? "Sync Graphify" : "Upload Graphify JSON"}
+                            </button>}
                         </div>
                       );
                     }
@@ -1099,7 +1195,11 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                 </select>
               </div>
 
-              {selectedSource === "directory" ? (
+              {sources && Object.values(sources).every((cfg: any) => !cfg?.enabled) ? (
+                <div className="p-3 bg-amber-950/20 border border-amber-900/50 text-amber-400 text-xs font-mono rounded">
+                  No project sources are configured on the Savant server. Configure BASE_CODE_DIR, GITHUB_TOKEN, or GITLAB_TOKEN and try again.
+                </div>
+              ) : selectedSource === "directory" ? (
                 <div className="space-y-3">
                   <div>
                     <label htmlFor="dir-path-input" className="block text-[10px] uppercase font-mono text-muted-foreground mb-1.5">
@@ -1135,25 +1235,18 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
               ) : (
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1.5">Repository URL</label>
+                    <label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1.5">Repository URL (SSH or HTTPS)</label>
                     <input
                       type="text"
-                      placeholder="https://github.com/owner/repo.git"
+                      placeholder={selectedSource === "github" ? "git@github.com:owner/repo.git" : "git@gitlab.com:group/repo.git"}
                       value={repoUrl}
                       onChange={(e) => setRepoUrl(e.target.value)}
                       className="w-full bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5 focus:outline-none"
                       required
                     />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1.5">Branch (Optional)</label>
-                    <input
-                      type="text"
-                      placeholder="main"
-                      value={repoBranch}
-                      onChange={(e) => setRepoBranch(e.target.value)}
-                      className="w-full bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5 focus:outline-none"
-                    />
+                    <p className="text-[9px] text-muted-foreground font-mono mt-1 opacity-70">
+                      Savant downloads and authenticates the repository on the server.
+                    </p>
                   </div>
                 </div>
               )}
@@ -1169,7 +1262,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                 <button
                   type="submit"
                   className="flex-1 py-2 text-xs bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold hover:opacity-90 cursor-pointer"
-                  disabled={isSubmittingAdd || !sources}
+                  disabled={isSubmittingAdd || !sources || !Object.values(sources).some((cfg: any) => cfg?.enabled)}
                 >
                   {isSubmittingAdd ? "PREPARING..." : "REGISTER PROJECT"}
                 </button>

@@ -27,7 +27,8 @@ interface RightPanelProps {
   activeTab: string;
   serverUrl: string;
   apiKey: string;
-  selectedProject: string | null;
+  selectedProject?: string | null;
+  isAdmin?: boolean;
 }
 
 const pulseData = Array.from({ length: 20 }, (_, i) => ({
@@ -82,7 +83,7 @@ function NavIcon({
   );
 }
 
-export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey, selectedProject }: RightPanelProps) {
+export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey, selectedProject, isAdmin = false }: RightPanelProps) {
   const [activeRightTab, setActiveRightTab] = useState<TabId | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
 
@@ -327,31 +328,31 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
         }}
         className="h-full shrink-0 flex flex-col justify-start items-center py-4 gap-4 z-20"
       >
-        <NavIcon
+        {isAdmin && <NavIcon
           icon={<Plus size={16} />}
           label="Add Node"
           onClick={() => window.dispatchEvent(new CustomEvent("knowledge-add-node"))}
-        />
+        />}
         <NavIcon
           icon={<RefreshCcw size={16} />}
           label="Reload Graph"
           onClick={() => window.dispatchEvent(new CustomEvent("knowledge-reload"))}
         />
-        <NavIcon
+        {isAdmin && <NavIcon
           icon={<Check size={16} />}
           label="Commit All"
           onClick={() => window.dispatchEvent(new CustomEvent("knowledge-commit-all"))}
-        />
-        <NavIcon
+        />}
+        {isAdmin && <NavIcon
           icon={<Trash2 size={16} style={{ color: "var(--cp-magenta)" }} />}
           label="Purge Graph"
           onClick={() => window.dispatchEvent(new CustomEvent("knowledge-purge"))}
-        />
-        <NavIcon
+        />}
+        {isAdmin && <NavIcon
           icon={<Upload size={16} />}
           label="Upload Graph"
           onClick={() => window.dispatchEvent(new CustomEvent("knowledge-upload"))}
-        />
+        />}
         <NavIcon
           icon={<Download size={16} />}
           label="Download Graph"

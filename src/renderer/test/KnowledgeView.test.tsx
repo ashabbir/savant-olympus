@@ -541,7 +541,7 @@ describe('KnowledgeView', () => {
   })
 
   it('allows editing a node title and type', async () => {
-    render(<KnowledgeView serverUrl="http://savant.local" apiKey="sk-test" />)
+    render(<KnowledgeView serverUrl="http://savant.local" apiKey="sk-test" isAdmin={true} />)
     await screen.findByText('Knowledge Network')
 
     fireEvent.change(screen.getByPlaceholderText('Find knowledge node...'), { target: { value: 'Auth' } })
