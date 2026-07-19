@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { Bell, RefreshCw, X, AlertTriangle, CheckCircle2, EyeOff, ChevronLeft, ChevronRight } from "lucide-react";
 import { Calendar } from "../ui/calendar";
+import { createRemindersService } from "../../services/remindersService";
+import { createUsersService } from "../../services/usersService";
+import { ViewHeader } from "../shared/ViewHeader";
+import { StatusBadge } from "../shared/StatusBadge";
+import { EmptyState } from "../shared/EmptyState";
 
 interface Reminder {
   id: string;
@@ -31,23 +36,16 @@ export function RemindersView({ serverUrl, apiKey }: RemindersViewProps) {
   const [userFilter, setUserFilter] = useState<string>("all");
   const [isReminderPaneOpen, setIsReminderPaneOpen] = useState(true);
 
-  const baseUrl = serverUrl.replace(/\/+$/, "");
+  const remindersService = createRemindersService(serverUrl, apiKey);
+  const usersService = createUsersService(serverUrl, apiKey);
 
   const fetchReminders = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${baseUrl}/api/reminders?_=${Date.now()}`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const list = Array.isArray(data) ? data : [];
-        setReminders(list);
-      } else {
-        setError(`Failed to fetch reminders: ${res.status} ${res.statusText}`);
-        setReminders([]);
-      }
+      const data = await remindersService.listReminders();
+      const list = Array.isArray(data) ? data : [];
+      setReminders(list);
     } catch (err: any) {
       console.error(err);
       setError(err?.message || "Failed to reach server");
@@ -59,35 +57,26 @@ export function RemindersView({ serverUrl, apiKey }: RemindersViewProps) {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch(`${baseUrl}/api/users?include_inactive=true&_=${Date.now()}`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const list = Array.isArray(data) ? data : [];
-        const mapped = list.map((u: any) => {
-          const uid = u.user_id || u.username || u.id || "";
-          return {
-            user_id: uid,
-            name: u.name || uid || "Unknown User"
-          };
-        }).filter(u => u.user_id);
+      const data = await usersService.listUsers(true);
+      const list = Array.isArray(data) ? data : [];
+      const mapped = list.map((u: any) => {
+        const uid = u.user_id || u.username || u.id || "";
+        return {
+          user_id: uid,
+          name: u.name || uid || "Unknown User"
+        };
+      }).filter(u => u.user_id);
 
-        const unique: UserOption[] = [];
-        const seen = new Set<string>();
-        for (const u of mapped) {
-          if (!seen.has(u.user_id)) {
-            seen.add(u.user_id);
-            unique.push(u);
-          }
+      const unique: UserOption[] = [];
+      const seen = new Set<string>();
+      for (const u of mapped) {
+        if (!seen.has(u.user_id)) {
+          seen.add(u.user_id);
+          unique.push(u);
         }
-        setUsers(unique);
-      } else {
-        setUsers([]);
-        setError(`Failed to fetch users: ${res.status} ${res.statusText}`);
       }
+      setUsers(unique);
     } catch (err) {
-      console.error("Failed to fetch users:", err);
       setUsers([]);
       setError("Failed to reach server for users.");
     }
@@ -96,7 +85,7 @@ export function RemindersView({ serverUrl, apiKey }: RemindersViewProps) {
   useEffect(() => {
     fetchReminders();
     fetchUsers();
-  }, [baseUrl]);
+  }, [serverUrl, apiKey]);
 
   // Check if a date has any pending reminder
   const isPendingReminderDate = (date: Date) => {

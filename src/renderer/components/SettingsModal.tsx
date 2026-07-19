@@ -2,6 +2,8 @@ import { useEffect, useState, useRef } from "react";
 import { X, Plus, Trash2, GripVertical, Folder, RefreshCw, CheckCircle, XCircle, WifiOff } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { getStoredApiKey } from "../services/auth";
+import { runtimeService } from "../services/runtimeService";
+import { createAbilitiesService } from "../services/abilitiesService";
 import { TagInput } from "./ui/tag-input";
 
 interface ProviderChainItem {
@@ -122,17 +124,10 @@ function ServicePanel({
 }) {
   async function checkHealth() {
     onChange({ status: "checking" });
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000);
     try {
-      const res = await fetch(`${normalizeServiceUrl(config.url)}${healthPath}`, {
-        signal: controller.signal,
-        headers: { "X-App-Name": "savant-olympus", ...(includeApiKey && apiKey ? { "X-API-Key": apiKey } : {}) },
-      });
-      clearTimeout(timer);
-      onChange({ status: res.ok ? "connected" : "failed" });
+      const online = await runtimeService.checkHealth(config.url, healthPath, includeApiKey ? apiKey : "", 4_000);
+      onChange({ status: online ? "connected" : "failed" });
     } catch (_e) {
-      clearTimeout(timer);
       onChange({ status: "failed" });
     }
   }
@@ -418,14 +413,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
       if (!apiKey) {
         throw new Error("Savant API key is required. Add it in Profile before loading abilities.");
       }
-      const res = await fetch(`${normalizeServiceUrl(serverConfig.url)}/api/abilities/assets`, {
-        headers: {
-          "X-API-Key": apiKey || "",
-          "X-App-Name": "savant-olympus",
-        }
-      });
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      const payload = await res.json();
+      const payload = await createAbilitiesService(serverConfig.url, apiKey).listAssets();
       const assets = Array.isArray(payload)
         ? payload
         : Object.values(payload || {}).flatMap((value: any) => Array.isArray(value) ? value : []);

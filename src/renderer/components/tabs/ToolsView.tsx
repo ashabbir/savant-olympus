@@ -1,13 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Wrench, Play, Trash2, Plus, Search, ShieldCheck, ChevronLeft, ChevronRight, Download } from "lucide-react";
-
-interface Tool {
-  name: string;
-  description?: string;
-  input_schema?: Record<string, any>;
-  schema?: Record<string, any>;
-  source?: string;
-}
+import { Wrench, Play, Trash2, Plus, ShieldCheck, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { createToolsService, ToolDefinition } from "@/services/toolsService";
+import { SearchBar } from "@/components/shared/SearchBar";
 
 interface ToolsViewProps {
   serverUrl: string;
@@ -16,8 +10,8 @@ interface ToolsViewProps {
 }
 
 export function ToolsView({ serverUrl, apiKey, isAdmin }: ToolsViewProps) {
-  const [tools, setTools] = useState<Tool[]>([]);
-  const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
+  const [tools, setTools] = useState<ToolDefinition[]>([]);
+  const [selectedTool, setSelectedTool] = useState<ToolDefinition | null>(null);
   const [params, setParams] = useState<Record<string, string>>({});
   const [result, setResult] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -31,27 +25,17 @@ export function ToolsView({ serverUrl, apiKey, isAdmin }: ToolsViewProps) {
   const [newToolDesc, setNewToolDesc] = useState("");
   const [isToolPaneOpen, setIsToolPaneOpen] = useState(true);
 
-  const baseUrl = serverUrl.replace(/\/+$/, "");
+  const toolsService = React.useMemo(() => createToolsService(serverUrl, apiKey), [serverUrl, apiKey]);
 
   const fetchTools = async () => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const res = await fetch(`${baseUrl}/api/tools?_=${Date.now()}`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const list = Array.isArray(data.tools) ? data.tools : Array.isArray(data) ? data : [];
-        setTools(list);
-      } else {
-        setTools([]);
-        setLoadError(`Unable to load tools (${res.status}).`);
-      }
-    } catch (e) {
+      setTools(await toolsService.listTools());
+    } catch (e: any) {
       console.error(e);
       setTools([]);
-      setLoadError("Unable to reach Savant server for tools.");
+      setLoadError(e?.message || "Unable to reach Savant server for tools.");
     } finally {
       setIsLoading(false);
     }
@@ -59,9 +43,9 @@ export function ToolsView({ serverUrl, apiKey, isAdmin }: ToolsViewProps) {
 
   useEffect(() => {
     fetchTools();
-  }, [baseUrl, apiKey]);
+  }, [toolsService]);
 
-  const handleToolSelect = (tool: Tool) => {
+  const handleToolSelect = (tool: ToolDefinition) => {
     setSelectedTool(tool);
     setParams({});
     setResult(null);
@@ -73,19 +57,7 @@ export function ToolsView({ serverUrl, apiKey, isAdmin }: ToolsViewProps) {
     setIsCalling(true);
     setResult(null);
     try {
-      const res = await fetch(`${baseUrl}/api/mcp/tools/run`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": apiKey,
-          "X-App-Name": "savant-olympus",
-        },
-        body: JSON.stringify({
-          name: selectedTool.name,
-          arguments: params,
-        }),
-      });
-      const data = await res.json();
+      const data = await toolsService.runTool(selectedTool.name, params);
       setResult(JSON.stringify(data, null, 2));
     } catch (e: any) {
       setResult(`ERROR: ${e.message}`);
@@ -99,22 +71,11 @@ export function ToolsView({ serverUrl, apiKey, isAdmin }: ToolsViewProps) {
     if (!newToolName.trim()) return;
     setLoadError(null);
     try {
-      const res = await fetch(`${baseUrl}/api/tools`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": apiKey,
-          "X-App-Name": "savant-olympus",
-        },
-        body: JSON.stringify({
-          name: newToolName.trim(),
-          description: newToolDesc.trim(),
-          input_schema: { type: "object", properties: {} },
-        }),
+      const newTool = await toolsService.createTool({
+        name: newToolName.trim(),
+        description: newToolDesc.trim(),
+        input_schema: { type: "object", properties: {} },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Unable to create tool (${res.status}).`);
-      const newTool = data.tool as Tool;
       setTools(prev => [newTool, ...prev.filter(tool => tool.name !== newTool.name)]);
       setNewToolName("");
       setNewToolDesc("");
@@ -129,12 +90,7 @@ export function ToolsView({ serverUrl, apiKey, isAdmin }: ToolsViewProps) {
     e.stopPropagation();
     setLoadError(null);
     try {
-      const res = await fetch(`${baseUrl}/api/tools/${encodeURIComponent(name)}`, {
-        method: "DELETE",
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Unable to delete tool (${res.status}).`);
+      await toolsService.deleteTool(name);
       setTools(prev => prev.filter(t => t.name !== name));
       if (selectedTool?.name === name) setSelectedTool(null);
     } catch (error: any) {
@@ -145,11 +101,7 @@ export function ToolsView({ serverUrl, apiKey, isAdmin }: ToolsViewProps) {
   const handleDownloadTool = async (name: string) => {
     setLoadError(null);
     try {
-      const res = await fetch(`${baseUrl}/api/tools/${encodeURIComponent(name)}/archive`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (!res.ok) throw new Error(`Unable to download tool (${res.status}).`);
-      const url = URL.createObjectURL(await res.blob());
+      const url = URL.createObjectURL(await toolsService.downloadArchive(name));
       const link = document.createElement("a");
       link.href = url;
       link.download = `${name}.zip`;
@@ -234,16 +186,7 @@ export function ToolsView({ serverUrl, apiKey, isAdmin }: ToolsViewProps) {
               )}
 
               {/* Search box */}
-              <div className="flex items-center gap-1.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] px-2 py-1">
-                <Search size={11} className="text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Search tools..."
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  className="bg-transparent border-none text-foreground text-xs focus:outline-none w-full font-mono"
-                />
-              </div>
+              <SearchBar value={searchQuery} onChange={setSearchQuery} placeholder="Search tools..." />
 
               <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-2">
                 {isLoading ? (

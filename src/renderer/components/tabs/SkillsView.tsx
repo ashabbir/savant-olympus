@@ -6,6 +6,9 @@ import {
   Play, RefreshCcw, Save, HelpCircle, ChevronLeft, ChevronRight, X, Copy
 } from "lucide-react";
 import { buildAthenaPromptSections, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits } from "@/lib/athenaContext";
+import { createSkillsService } from "@/services/skillsService";
+import { AthenaMessage } from "@/components/shared/AthenaMessage";
+import { createScopedLocalAthenaThreadStore, readLocalAthenaHistory, useAthenaThread } from "@/hooks/useAthenaThread";
 
 interface Skill {
   id: string;
@@ -240,32 +243,28 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
 
   // AI Generation Chat states
   const [isAiMode, setIsAiMode] = useState(false);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isAiChatLoading, setIsAiChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
-  const readSharedAthenaHistory = () => {
-    try {
-      const stored = localStorage.getItem(ATHENA_CHAT_HISTORY_KEY);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  };
-  const writeSharedAthenaHistory = (messages: any[]) => {
-    localStorage.setItem(ATHENA_CHAT_HISTORY_KEY, JSON.stringify(messages));
-  };
+  const skillsService = createSkillsService(serverUrl, apiKey);
+  const historyStore = React.useMemo(
+    () => createScopedLocalAthenaThreadStore<ChatMessage>(ATHENA_CHAT_HISTORY_KEY, ATHENA_SKILLS_SCOPE),
+    [],
+  );
+  const { messages: chatMessages, setMessages: setChatMessages, removeMessage: removeChatMessage } = useAthenaThread<ChatMessage>({
+    threadId: ATHENA_SKILLS_SCOPE,
+    store: historyStore,
+  });
+  const readSharedAthenaHistory = () => readLocalAthenaHistory<ChatMessage>(ATHENA_CHAT_HISTORY_KEY);
   const formatAthenaHistory = (messages: any[]) =>
     messages.length > 0
       ? messages.map(msg => `[${msg.scope || "general"}] ${msg.sender.toUpperCase()}: ${msg.text}`).join("\n")
       : "No previous messages in this conversation.";
   const handleCopyMessage = (text: string) => navigator.clipboard.writeText(text);
   const handleDeleteMessage = (id: string) => {
-    const nextMessages = chatMessages.filter(msg => msg.id !== id);
-    setChatMessages(nextMessages);
-    writeSharedAthenaHistory(readSharedAthenaHistory().filter((msg: any) => msg.id !== id));
+    removeChatMessage(id);
   };
   const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
     const [codeHits, knowledgeHits, tools] = await Promise.all([
@@ -285,26 +284,23 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
   // Load initial skills
   useEffect(() => {
     fetchSkills();
-  }, [baseUrl]);
+  }, [serverUrl, apiKey]);
 
   // Listen for the redirect event to open Ask ATHENA
   useEffect(() => {
     const handleOpenAiChat = () => {
       setIsAiMode(true);
       if (chatMessages.length === 0) {
-        const sharedHistory = readSharedAthenaHistory().filter((msg: any) => msg.scope === ATHENA_SKILLS_SCOPE || !msg.scope);
-        setChatMessages(
-          sharedHistory.length > 0
-            ? sharedHistory
-            : [
+        setChatMessages((current) => current.length > 0
+          ? current
+          : [
                 {
                   id: "welcome",
                   sender: "assistant",
                   text: "Hi! I am the Savant AI Skill Assistant. Tell me what capability or skill you'd like to build, and I will generate the complete configuration, parameter schema, and implementation code for you!",
                   timestamp: new Date().toISOString()
                 }
-              ]
-        );
+              ]);
       }
     };
     window.addEventListener("open-skill-ai-chat", handleOpenAiChat);
@@ -329,16 +325,7 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
     setIsLoading(true);
     setLoadError("");
     try {
-      const res = await fetch(`${baseUrl}/api/skills?_=${Date.now()}`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (!res.ok) {
-        setSkills([]);
-        setLoadError(`Unable to load skills (${res.status}).`);
-        return;
-      }
-      const data = await res.json();
-      const fetchedList = Array.isArray(data.skills) ? data.skills : Array.isArray(data) ? data : [];
+      const fetchedList = await skillsService.listSkills();
       setSkills(fetchedList.map((skill: Partial<Skill>) => ({
         ...skill,
         files: {
@@ -348,10 +335,10 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
           "metadata.json": skill.files?.["metadata.json"] || "",
         },
       })) as Skill[]);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
       setSkills([]);
-      setLoadError("Unable to reach Savant server for skills.");
+      setLoadError(e?.message || "Unable to reach Savant server for skills.");
     } finally {
       setIsLoading(false);
     }
@@ -369,15 +356,8 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
         files: s.files
       }));
       
-      await fetch(`${baseUrl}/api/skills`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": apiKey,
-          "X-App-Name": "savant-olympus",
-        },
-        body: JSON.stringify({ skills: skillObjects })
-      }).catch(e => console.log("Failed saving to remote server gateway: ", e));
+      await skillsService.saveSkills(skillObjects)
+        .catch(e => console.log("Failed saving to remote server gateway: ", e));
 
       // Always save to SQLite locally so it works offline
       await window.system.saveSetting("savant:skills", skillObjects);
@@ -628,7 +608,6 @@ If you have a decent understanding of the core behavior and are ready to generat
           setChatMessages(prev => [...prev, {
             ...assistantMsg
           }]);
-          writeSharedAthenaHistory([...readSharedAthenaHistory(), { ...assistantMsg, scope: ATHENA_SKILLS_SCOPE }]);
         } else if (parsed.status === "ready" && parsed.name && parsed.files) {
           const newSkill: Skill = {
             id: `skill-${Date.now()}`,
@@ -657,7 +636,6 @@ If you have a decent understanding of the core behavior and are ready to generat
             suggestedSkill: newSkill
           };
           setChatMessages(prev => [...prev, assistantMsg]);
-          writeSharedAthenaHistory([...readSharedAthenaHistory(), { ...assistantMsg, scope: ATHENA_SKILLS_SCOPE }]);
 
           setIsAiMode(false);
         } else {
@@ -671,7 +649,6 @@ If you have a decent understanding of the core behavior and are ready to generat
           timestamp: new Date().toISOString()
         };
         setChatMessages(prev => [...prev, assistantMsg]);
-        writeSharedAthenaHistory([...readSharedAthenaHistory(), { ...assistantMsg, scope: ATHENA_SKILLS_SCOPE }]);
       }
     } catch (e: any) {
       console.error(e);
@@ -682,7 +659,6 @@ If you have a decent understanding of the core behavior and are ready to generat
         timestamp: new Date().toISOString()
       };
       setChatMessages(prev => [...prev, assistantMsg]);
-      writeSharedAthenaHistory([...readSharedAthenaHistory(), { ...assistantMsg, scope: ATHENA_SKILLS_SCOPE }]);
     } finally {
       setIsAiChatLoading(false);
     }
@@ -701,7 +677,6 @@ If you have a decent understanding of the core behavior and are ready to generat
 
     const nextMessages = [...chatMessages, userMsg];
     setChatMessages(nextMessages);
-    writeSharedAthenaHistory([...readSharedAthenaHistory(), { ...userMsg, scope: ATHENA_SKILLS_SCOPE }]);
     setChatInput("");
     setIsAiChatLoading(true);
 
@@ -1005,46 +980,7 @@ If you have a decent understanding of the core behavior and are ready to generat
 
               {/* Chat Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {chatMessages.map(msg => (
-                  <div 
-                    key={msg.id} 
-                    className={`flex items-start gap-2.5 max-w-[85%] ${msg.sender === "user" ? "ml-auto flex-row-reverse" : "mr-auto"}`}
-                  >
-                    <div className={`p-1 border rounded shrink-0 ${msg.sender === "user" ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.1)] text-[var(--cp-cyan)]" : "border-pink-500/30 bg-pink-950/10 text-pink-400"}`}>
-                      {msg.sender === "user" ? <HelpCircle size={14} /> : <Bot size={14} />}
-                    </div>
-                    <div className="relative group">
-                      <div className={`p-3 border text-xs leading-relaxed font-mono ${
-                        msg.sender === "user" 
-                          ? "bg-[var(--cp-bg-2)] border-[var(--cp-border)] text-foreground"
-                          : "bg-[var(--cp-bg-1)] border-pink-500/15 text-pink-50/90"
-                      }`}>
-                        <div className="absolute -top-2 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            type="button"
-                            onClick={() => handleCopyMessage(msg.text)}
-                            title="Copy message text"
-                            className="p-1 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground hover:text-[var(--cp-cyan)]"
-                          >
-                            <Copy size={9} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteMessage(msg.id)}
-                            title="Delete message"
-                            className="p-1 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground hover:text-red-400"
-                          >
-                            <Trash2 size={9} />
-                          </button>
-                        </div>
-                        <p className="whitespace-pre-wrap">{msg.text}</p>
-                        <span className="block mt-1.5 text-[9px] text-muted-foreground opacity-50 text-right">
-                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                {chatMessages.map(msg => <AthenaMessage key={msg.id} message={msg} variant="skill" onCopy={handleCopyMessage} onDelete={() => handleDeleteMessage(msg.id)} />)}
                 
                 {isAiChatLoading && (
                   <div className="flex items-center gap-2.5 mr-auto max-w-[85%]">

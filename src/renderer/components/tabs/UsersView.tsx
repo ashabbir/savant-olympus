@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { Users, Key, Shield, UserCheck, Eye, EyeOff, X, Save, Mail, Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Copy } from "lucide-react";
 import { setStoredApiKey } from "../../services/auth";
+import { createUsersService } from "../../services/usersService";
+import { SearchBar } from "../shared/SearchBar";
+import { ViewHeader } from "../shared/ViewHeader";
+import { StatusBadge } from "../shared/StatusBadge";
+import { ModalBackdrop } from "../shared/ModalBackdrop";
 
 interface User {
   id?: string;
@@ -25,113 +30,70 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
-
-  // Navigation / Selection State
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
-
-  // Temporary generation modal credentials display
-  const [generatedKeyDetails, setGeneratedKeyDetails] = useState<{
-    username: string;
-    apiKey: string;
-  } | null>(null);
-
-  // Search & Filters State
+  const [generatedKeyDetails, setGeneratedKeyDetails] = useState<{ username: string; apiKey: string } | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isUserPaneOpen, setIsUserPaneOpen] = useState(true);
-
-  // Create user form state
   const [createUsername, setCreateUsername] = useState("");
   const [createName, setCreateName] = useState("");
   const [createEmail, setCreateEmail] = useState("");
   const [createRole, setCreateRole] = useState("operator");
   const [createActive, setCreateActive] = useState(true);
-
-  // Editing state
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editRole, setEditRole] = useState("");
   const [editActive, setEditActive] = useState(true);
-
-  // Domain Assignment State
   const [userDomains, setUserDomains] = useState<{ domain_node_id: string; domain_title?: string; can_write: boolean }[]>([]);
   const [availableDomains, setAvailableDomains] = useState<{ node_id: string; title: string }[]>([]);
   const [selectedDomainToAdd, setSelectedDomainToAdd] = useState("");
-
-  const baseUrl = serverUrl.replace(/\/+$/, "");
-  const authHeaders = { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" };
+  const usersService = createUsersService(serverUrl, apiKey);
 
   const fetchUserDomains = async (uid: string) => {
     try {
-      const res = await fetch(`${baseUrl}/api/users/${uid}/domains`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUserDomains(data.domains || []);
-      }
-    } catch (e) {
-      console.error(e);
+      setUserDomains(await usersService.listUserDomains(uid));
+    } catch (error) {
+      console.error(error);
+      setUserDomains([]);
     }
   };
 
   const fetchAvailableDomains = async () => {
     try {
-      const res = await fetch(`${baseUrl}/api/knowledge/graph?node_type=domain&slim=true`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const nodes = (data.nodes || []).filter((n: any) => n.node_type === "domain");
-        setAvailableDomains(nodes);
-      }
-    } catch (e) {
-      console.error(e);
+      setAvailableDomains(await usersService.listAvailableDomains());
+    } catch (error) {
+      console.error(error);
+      setAvailableDomains([]);
     }
   };
 
   useEffect(() => {
     if (selectedUserId) {
-      fetchUserDomains(selectedUserId);
-      fetchAvailableDomains();
+      void fetchUserDomains(selectedUserId);
+      void fetchAvailableDomains();
     }
-  }, [selectedUserId, baseUrl, apiKey]);
+  }, [selectedUserId, serverUrl, apiKey]);
 
-  const handleAssignDomain = async (uid: string, targetDomainId?: string, canWrite: boolean = true) => {
+  const handleAssignDomain = async (uid: string, targetDomainId?: string, canWrite = true) => {
     const domainId = targetDomainId || selectedDomainToAdd;
     if (!domainId) return;
     try {
-      const res = await fetch(`${baseUrl}/api/users/${uid}/domains`, {
-        method: "POST",
-        headers: {
-          "X-API-Key": apiKey,
-          "X-App-Name": "savant-olympus",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ domain_node_id: domainId, can_write: canWrite }),
-      });
-      if (res.ok) {
-        if (!targetDomainId) setSelectedDomainToAdd("");
-        await fetchUserDomains(uid);
-      }
-    } catch (e) {
-      console.error(e);
+      await usersService.assignDomain(uid, domainId, canWrite);
+      if (!targetDomainId) setSelectedDomainToAdd("");
+      await fetchUserDomains(uid);
+    } catch (error) {
+      console.error(error);
     }
   };
 
   const handleRemoveDomain = async (uid: string, domainNodeId: string) => {
     try {
-      const res = await fetch(`${baseUrl}/api/users/${uid}/domains/${domainNodeId}`, {
-        method: "DELETE",
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        await fetchUserDomains(uid);
-      }
-    } catch (e) {
-      console.error(e);
+      await usersService.removeDomain(uid, domainNodeId);
+      await fetchUserDomains(uid);
+    } catch (error) {
+      console.error(error);
     }
   };
 
@@ -139,26 +101,18 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
     setIsLoading(true);
     setLoadError("");
     try {
-      const res = await fetch(`${baseUrl}/api/users?include_inactive=true&_=${Date.now()}`, {
-        headers: authHeaders,
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const mapped = (data || []).map((u: any) => ({
-          ...u,
-          id: u.id || u.user_id,
-          username: u.username || u.user_id,
-          active: u.active !== undefined ? u.active : (u.is_active === 1 || u.is_active === true)
-        }));
-        setUsers(mapped);
-      } else {
-        setUsers([]);
-        setLoadError(`Unable to load users (${res.status}).`);
-      }
-    } catch (e) {
+      const data = await usersService.listUsers(true);
+      const mapped = (data || []).map((u: any) => ({
+        ...u,
+        id: u.id || u.user_id,
+        username: u.username || u.user_id,
+        active: u.active !== undefined ? u.active : (u.is_active === 1 || u.is_active === true)
+      }));
+      setUsers(mapped);
+    } catch (e: any) {
       console.error(e);
       setUsers([]);
-      setLoadError("Unable to reach Savant server for user records.");
+      setLoadError(e?.message || "Unable to reach Savant server for user records.");
     } finally {
       setIsLoading(false);
     }
@@ -166,7 +120,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
 
   useEffect(() => {
     fetchUsers();
-  }, [baseUrl, apiKey]);
+  }, [serverUrl, apiKey]);
 
   // Auto-select first user if selection invalid/empty and not on create form
   useEffect(() => {
@@ -187,23 +141,13 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
   const handleSaveEdit = async (e: React.FormEvent, userId: string) => {
     e.preventDefault();
     try {
-      const res = await fetch(`${baseUrl}/api/users/${userId}`, {
-        method: "PUT",
-        headers: {
-          "X-API-Key": apiKey,
-          "X-App-Name": "savant-olympus",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: editName,
-          email: editEmail,
-          role: editRole,
-          is_active: editActive,
-        }),
+      await usersService.updateUser(userId, {
+        name: editName,
+        email: editEmail,
+        role: editRole,
+        is_active: editActive,
       });
-      if (res.ok) {
-        await fetchUsers();
-      }
+      await fetchUsers();
     } catch (err) {
       console.error(err);
     }
@@ -212,47 +156,33 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch(`${baseUrl}/api/users`, {
-        method: "POST",
-        headers: {
-          "X-API-Key": apiKey,
-          "X-App-Name": "savant-olympus",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          user_id: createUsername,
-          username: createUsername,
-          name: createName,
-          email: createEmail,
-          role: createRole,
-          is_active: createActive,
-        }),
+      const data = await usersService.createUser({
+        user_id: createUsername,
+        username: createUsername,
+        name: createName,
+        email: createEmail,
+        role: createRole,
+        is_active: createActive,
       });
-      if (res.ok) {
-        const data = await res.json();
-        const key = data.api_key || (data.api_keys && data.api_keys[0]);
-        if (key) {
-          setGeneratedKeyDetails({
-            username: data.username || data.user_id || data.id || "",
-            apiKey: key
-          });
-        }
-        setCreateUsername("");
-        setCreateName("");
-        setCreateEmail("");
-        setCreateRole("operator");
-        setCreateActive(true);
-        setShowCreateForm(false);
-        const newUid = data.id || data.username || data.user_id;
-        if (newUid) {
-          setSelectedUserId(newUid);
-          setEditName(data.name);
-          setEditEmail(data.email || "");
-          setEditRole(data.role);
-          setEditActive(data.active !== undefined ? data.active : true);
-        }
-        await fetchUsers();
+      const key = data.api_key || (data.api_keys && data.api_keys[0]);
+      if (key) {
+        setGeneratedKeyDetails({ username: data.username || data.user_id || data.id || "", apiKey: key });
       }
+      setCreateUsername("");
+      setCreateName("");
+      setCreateEmail("");
+      setCreateRole("operator");
+      setCreateActive(true);
+      setShowCreateForm(false);
+      const newUid = data.id || data.username || data.user_id;
+      if (newUid) {
+        setSelectedUserId(newUid);
+        setEditName(data.name);
+        setEditEmail(data.email || "");
+        setEditRole(data.role);
+        setEditActive(data.active !== undefined ? data.active : true);
+      }
+      await fetchUsers();
     } catch (err) {
       console.error(err);
     }
@@ -260,16 +190,8 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
 
   const handleDeleteUser = async (userId: string) => {
     try {
-      const res = await fetch(`${baseUrl}/api/users/${userId}`, {
-        method: "DELETE",
-        headers: {
-          "X-API-Key": apiKey,
-          "X-App-Name": "savant-olympus",
-        },
-      });
-      if (res.ok) {
-        await fetchUsers();
-      }
+      await usersService.deleteUser(userId);
+      await fetchUsers();
     } catch (err) {
       console.error(err);
     }
@@ -277,15 +199,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
 
   const handleRegenerateKey = async (userId: string) => {
     try {
-      const res = await fetch(`${baseUrl}/api/users/${userId}/api-key`, {
-        method: "POST",
-        headers: {
-          "X-API-Key": apiKey,
-          "X-App-Name": "savant-olympus",
-        },
-      });
-      if (res.ok) {
-        const data = await res.json();
+      const data = await usersService.rotateApiKey(userId);
         
         // If the rotated user key is the active user's key, update local settings and auth token
         const isSelf = activeUserId && (
@@ -306,8 +220,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
         if (isSelf && onSettingsChanged) {
           onSettingsChanged();
         }
-        await fetchUsers();
-      }
+      await fetchUsers();
     } catch (err) {
       console.error(err);
     }

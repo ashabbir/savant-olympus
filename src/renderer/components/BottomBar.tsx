@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Circle, Activity, X, Terminal, StopCircle, RefreshCcw, AlertTriangle, CheckCircle } from "lucide-react";
+import { runtimeService } from "@/services/runtimeService";
 
 interface StatusDot {
   label: string;
@@ -12,7 +13,6 @@ const STATUS_COLORS = {
   offline: "#ff2244",
   warning: "#ffe600",
 };
-const APP_HEADERS = { "X-App-Name": "savant-olympus" };
 
 export function BottomBar() {
   const [userName, setUserName] = useState("operator");
@@ -75,31 +75,16 @@ export function BottomBar() {
       if (gEnabled) {
         // Health check
         try {
-          const controller = new AbortController();
-          const id = setTimeout(() => controller.abort(), 1500);
-          const res = await fetch(`${gUrl.replace(/\/$/, "")}/health`, { signal: controller.signal, headers: APP_HEADERS });
-          clearTimeout(id);
-          setGatewayStatus(res.ok ? "online" : "offline");
+          setGatewayStatus(await runtimeService.checkGateway(gUrl) ? "online" : "offline");
         } catch (e) {
           setGatewayStatus("offline");
         }
 
         // Fetch recent runs
         try {
-          const controller = new AbortController();
-          const id = setTimeout(() => controller.abort(), 1500);
-          const res = await fetch(`${gUrl.replace(/\/$/, "")}/runs`, { signal: controller.signal, headers: APP_HEADERS });
-          clearTimeout(id);
-          if (res.ok) {
-            const data = await res.json();
-            const validData = Array.isArray(data) ? data : [];
-            setRuns(validData);
-            const active = validData.filter((r: any) => r.status === "running").length;
-            setActiveRunsCount(active);
-          } else {
-            setRuns([]);
-            setActiveRunsCount(0);
-          }
+          const validData = await runtimeService.listGatewayRuns(gUrl);
+          setRuns(validData);
+          setActiveRunsCount(validData.filter((r: any) => r.status === "running").length);
         } catch (e) {
           console.error("Failed to fetch runs in BottomBar:", e);
           setRuns([]);
@@ -112,11 +97,7 @@ export function BottomBar() {
       }
 
       try {
-        const controller = new AbortController();
-        const id = setTimeout(() => controller.abort(), 1500);
-        const res = await fetch(`${sUrl.replace(/\/+$/, "")}/health/ready`, { signal: controller.signal, headers: APP_HEADERS });
-        clearTimeout(id);
-        setSavantStatus(res.ok ? "online" : "offline");
+        setSavantStatus(await runtimeService.checkSavant(sUrl) ? "online" : "offline");
       } catch (e) {
         setSavantStatus("offline");
       }
@@ -144,12 +125,7 @@ export function BottomBar() {
     const fetchEvents = async () => {
       setIsPollingEvents(true);
       try {
-        const cleanUrl = gatewayUrl.replace(/\/$/, "");
-        const res = await fetch(`${cleanUrl}/runs/${selectedRunId}/events`, { headers: APP_HEADERS });
-        if (res.ok) {
-          const data = await res.json();
-          setSelectedRunEvents(data);
-        }
+        setSelectedRunEvents(await runtimeService.getGatewayRunEvents(gatewayUrl, selectedRunId));
       } catch (e) {
         console.error("Failed to fetch run events:", e);
       } finally {
@@ -166,26 +142,11 @@ export function BottomBar() {
   const handleKillRun = async (runId: string) => {
     if (!window.confirm("Are you sure you want to terminate this prompt run?")) return;
     try {
-      const cleanUrl = gatewayUrl.replace(/\/$/, "");
-      const res = await fetch(`${cleanUrl}/runs/${runId}`, {
-        method: "DELETE",
-        headers: APP_HEADERS,
-      });
-      if (res.ok) {
-        // Refresh run list and events
-        const runsRes = await fetch(`${cleanUrl}/runs`, { headers: APP_HEADERS });
-        if (runsRes.ok) {
-          const data = await runsRes.json();
-          const validData = Array.isArray(data) ? data : [];
-          setRuns(validData);
-          const active = validData.filter((r: any) => r.status === "running").length;
-          setActiveRunsCount(active);
-        }
-        const eventsRes = await fetch(`${cleanUrl}/runs/${runId}/events`, { headers: APP_HEADERS });
-        if (eventsRes.ok) {
-          setSelectedRunEvents(await eventsRes.json());
-        }
-      }
+      await runtimeService.cancelGatewayRun(gatewayUrl, runId);
+      const validData = await runtimeService.listGatewayRuns(gatewayUrl, 4_000);
+      setRuns(validData);
+      setActiveRunsCount(validData.filter((r: any) => r.status === "running").length);
+      setSelectedRunEvents(await runtimeService.getGatewayRunEvents(gatewayUrl, runId));
     } catch (e) {
       alert("Failed to terminate run: " + e);
     }

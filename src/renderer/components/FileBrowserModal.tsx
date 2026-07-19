@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Folder, ChevronRight, ChevronLeft, X, Check } from "lucide-react";
+import { createContextService } from "@/services/contextService";
 
 interface FileEntry {
   name: string;
@@ -22,6 +23,7 @@ export function FileBrowserModal({ isOpen, onClose, onSelect, initialPath, baseP
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const contextService = React.useMemo(() => createContextService(serverUrl, apiKey), [serverUrl, apiKey]);
 
   useEffect(() => {
     if (isOpen) {
@@ -33,17 +35,7 @@ export function FileBrowserModal({ isOpen, onClose, onSelect, initialPath, baseP
     setIsLoading(true);
     setError(null);
     try {
-      const baseUrl = serverUrl.replace(/\/+$/, "");
-      const res = await fetch(`${baseUrl}/api/context/repos/browse?path=${encodeURIComponent(path)}`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const results = await res.json();
-        setEntries(results || []);
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error || `Failed to load directory: ${res.status} ${res.statusText}`);
-      }
+      setEntries(await contextService.browseDirectory(path));
     } catch (e: any) {
       setError(e.message || "Failed to load directory from server");
     } finally {

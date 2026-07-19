@@ -6,6 +6,7 @@ import { BottomBar } from "./components/BottomBar";
 import StartupScreen from "./components/StartupScreen";
 import { LoginScreen } from "./components/LoginScreen";
 import { clearStoredApiKey, getStoredApiKey, setStoredApiKey } from "./services/auth";
+import { runtimeService } from "./services/runtimeService";
 import { WorkspaceView } from "./components/tabs/WorkspaceView";
 import { KnowledgeView } from "./components/tabs/KnowledgeView";
 import { ContextView } from "./components/tabs/ContextView";
@@ -64,18 +65,7 @@ export default function App() {
 
   const validateSavantApiKey = async (candidateApiKey: string, loadedSettings: Record<string, any>) => {
     const targetServerUrl = loadedSettings["server:config"]?.url || "http://127.0.0.1:8090";
-    let res: Response;
-    try {
-      res = await fetch(`${targetServerUrl.replace(/\/+$/, "")}/api/auth/validate`, {
-        headers: { "X-API-Key": candidateApiKey, "X-App-Name": "savant-olympus" },
-      });
-    } catch (_e) {
-      throw new Error("Cannot reach Savant server auth. Check that savant-server is running and allows X-API-Key CORS preflight.");
-    }
-    if (!res.ok) {
-      throw new Error(res.status === 401 ? "Invalid Savant API key." : `Savant auth failed with ${res.status}.`);
-    }
-    return await res.json();
+    return runtimeService.validateApiKey(targetServerUrl, candidateApiKey);
   };
 
   const initializeOlympus = async (loadedSettings: Record<string, any>) => {
@@ -90,10 +80,8 @@ export default function App() {
 
     if (gatewayEnabled) {
       try {
-        const res = await fetch(`${gatewayUrl.replace(/\/$/, "")}/health`, {
-          headers: { "X-App-Name": "savant-olympus" },
-        });
-        addThinking("System", res.ok ? `GATEWAY_LINK_ESTABLISHED (${gatewayUrl})` : `GATEWAY_RESPONDED_WITH_ERROR (${res.status})`, res.ok ? "mcp_response" : "timeout");
+        const online = await runtimeService.checkGateway(gatewayUrl, 4_000);
+        addThinking("System", online ? `GATEWAY_LINK_ESTABLISHED (${gatewayUrl})` : `GATEWAY_RESPONDED_WITH_ERROR (${gatewayUrl})`, online ? "mcp_response" : "timeout");
       } catch (_e) {
         addThinking("System", `GATEWAY_OFFLINE: ${gatewayUrl}`, "timeout");
       }

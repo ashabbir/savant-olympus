@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { Cpu, Save, Plus, Trash2, Shield, RefreshCcw, Sparkles, Folder, FileText, Check, ChevronLeft, ChevronRight } from "lucide-react";
+import { createAbilitiesService } from "../../services/abilitiesService";
+import { SearchBar } from "../shared/SearchBar";
+import { ViewHeader } from "../shared/ViewHeader";
+import { StatusBadge } from "../shared/StatusBadge";
+import { ModalBackdrop } from "../shared/ModalBackdrop";
 
 interface AbilityAsset {
   id: string;
@@ -31,6 +36,9 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
     "type:rule": true,
   });
 
+  const abilitiesService = createAbilitiesService(serverUrl, apiKey);
+
+
   // Edit fields
   const [editBody, setEditBody] = useState("");
   const [editPriority, setEditPriority] = useState(900);
@@ -55,26 +63,15 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
   const [newBuildTag, setNewBuildTag] = useState("");
   const [resolutionResult, setResolutionResult] = useState<{ manifest?: any; prompt?: string } | null>(null);
 
-  const baseUrl = serverUrl.replace(/\/+$/, "");
-
   const fetchAssets = async () => {
     setIsLoading(true);
     setLoadError("");
     try {
-      const res = await fetch(`${baseUrl}/api/abilities/assets?_=${Date.now()}`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setAssets(data);
-      } else {
-        setAssets({});
-        setLoadError(`Unable to load assets (${res.status}).`);
-      }
-    } catch (e) {
+      setAssets(await abilitiesService.listAssets());
+    } catch (e: any) {
       console.error("fetchAssets failed:", e);
       setAssets({});
-      setLoadError("Unable to reach Savant server for ability assets.");
+      setLoadError(e?.message || "Unable to reach Savant server for ability assets.");
     } finally {
       setIsLoading(false);
     }
@@ -82,24 +79,19 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
 
   useEffect(() => {
     fetchAssets();
-  }, [baseUrl, apiKey]);
+  }, [serverUrl, apiKey]);
 
   const loadAsset = async (id: string) => {
     if (isDirty && !window.confirm("Discard unsaved changes?")) return;
     try {
-      const res = await fetch(`${baseUrl}/api/abilities/assets/${encodeURIComponent(id)}`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const asset: AbilityAsset = await res.json();
-        setSelectedId(id);
-        setSelectedAsset(asset);
-        setEditBody(asset.body || "");
-        setEditPriority(asset.priority);
-        setEditTags(asset.tags || []);
-        setEditIncludes(asset.includes || []);
-        setIsDirty(false);
-      }
+      const asset: AbilityAsset = await abilitiesService.readAsset(id);
+      setSelectedId(id);
+      setSelectedAsset(asset);
+      setEditBody(asset.body || "");
+      setEditPriority(asset.priority);
+      setEditTags(asset.tags || []);
+      setEditIncludes(asset.includes || []);
+      setIsDirty(false);
     } catch (e) {
       console.error("loadAsset failed:", e);
     }
@@ -114,22 +106,9 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
         includes: editIncludes,
         body: editBody,
       };
-      const res = await fetch(`${baseUrl}/api/abilities/assets/${encodeURIComponent(selectedId)}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": apiKey,
-          "X-App-Name": "savant-olympus",
-        },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        setIsDirty(false);
-        fetchAssets();
-      } else {
-        const err = await res.json();
-        alert(`Save failed: ${err.error || "Unknown error"}`);
-      }
+      await abilitiesService.updateAsset(selectedId, payload);
+      setIsDirty(false);
+      await fetchAssets();
     } catch (e: any) {
       alert(`Save error: ${e.message}`);
     }
@@ -139,16 +118,11 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
     if (!selectedId) return;
     if (!window.confirm(`Delete ${selectedId}? This cannot be undone.`)) return;
     try {
-      const res = await fetch(`${baseUrl}/api/abilities/assets/${encodeURIComponent(selectedId)}`, {
-        method: "DELETE",
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        setSelectedId(null);
-        setSelectedAsset(null);
-        setIsDirty(false);
-        fetchAssets();
-      }
+      await abilitiesService.deleteAsset(selectedId);
+      setSelectedId(null);
+      setSelectedAsset(null);
+      setIsDirty(false);
+      await fetchAssets();
     } catch (e: any) {
       alert(`Delete error: ${e.message}`);
     }
@@ -166,25 +140,12 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
         tags,
         body: `# ${newId.split(".").pop()}\n\nContent here...\n`,
       };
-      const res = await fetch(`${baseUrl}/api/abilities/assets`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": apiKey,
-          "X-App-Name": "savant-olympus",
-        },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        setNewId("");
-        setNewTagsString("");
-        setShowNewModal(false);
-        await fetchAssets();
-        loadAsset(payload.id);
-      } else {
-        const err = await res.json();
-        alert(`Create failed: ${err.error}`);
-      }
+      await abilitiesService.createAsset(payload);
+      setNewId("");
+      setNewTagsString("");
+      setShowNewModal(false);
+      await fetchAssets();
+      await loadAsset(payload.id);
     } catch (e: any) {
       alert(`Create error: ${e.message}`);
     }
@@ -201,19 +162,7 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
         tags: buildTags,
         repo_id: buildRepo || undefined,
       };
-      const res = await fetch(`${baseUrl}/api/abilities/resolve`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": apiKey,
-          "X-App-Name": "savant-olympus",
-        },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setResolutionResult(data);
-      }
+      setResolutionResult(await abilitiesService.resolve(payload));
     } catch (e: any) {
       alert(`Resolve failed: ${e.message}`);
     }
@@ -221,13 +170,8 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
 
   const handleBootstrap = async () => {
     try {
-      const res = await fetch(`${baseUrl}/api/abilities/bootstrap`, {
-        method: "POST",
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        fetchAssets();
-      }
+      await abilitiesService.bootstrap();
+      await fetchAssets();
     } catch (e) {
       console.error(e);
     }
@@ -235,13 +179,8 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
 
   const handleValidate = async () => {
     try {
-      const res = await fetch(`${baseUrl}/api/abilities/validate`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        alert(data.ok ? "✓ Assets valid!" : `Validation failed: ${data.error}`);
-      }
+      const data = await abilitiesService.validate();
+      alert(data.ok ? "✓ Assets valid!" : `Validation failed: ${data.error}`);
     } catch (e) {
       console.error(e);
     }
@@ -259,7 +198,7 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
       window.removeEventListener("abilities-bootstrap", handleBoot);
       window.removeEventListener("abilities-resolver-toggle", handleResolveToggle);
     };
-  }, [baseUrl, apiKey]);
+  }, [serverUrl, apiKey]);
 
   const toggleNode = (node: string) => {
     setExpandedNodes(prev => ({ ...prev, [node]: !prev[node] }));

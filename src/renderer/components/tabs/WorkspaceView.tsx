@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Wrench, Play, CheckCircle, AlertTriangle, RefreshCcw, ChevronLeft, ChevronRight } from "lucide-react";
+import { createWorkspaceMcpService } from "../../services/workspaceMcpService";
+
 
 interface ParamDef {
   key: string;
@@ -88,18 +90,14 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
   const [isRunning, setIsRunning] = useState(false);
   const [isToolPaneOpen, setIsToolPaneOpen] = useState(true);
 
-  const baseUrl = serverUrl.replace(/\/+$/, "");
+  const workspaceMcpService = React.useMemo(() => createWorkspaceMcpService(serverUrl, apiKey), [serverUrl, apiKey]);
 
   const testMcpConnection = async () => {
     try {
       setMcpStatusText("Checking...");
-      const res = await fetch(`${baseUrl}/api/mcp/health/workspace`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" }
-      });
-      const data = await res.json();
-      const isUp = !!(data && (data.ok || data.status === "ok" || data.alive));
-      setMcpOnline(isUp);
-      setMcpStatusText(isUp ? "Online" : "Offline");
+      const health = await workspaceMcpService.getHealth();
+      setMcpOnline(health.online);
+      setMcpStatusText(health.online ? "Online" : "Offline");
     } catch (e) {
       setMcpOnline(false);
       setMcpStatusText("Offline");
@@ -108,7 +106,7 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
 
   useEffect(() => {
     testMcpConnection();
-  }, [baseUrl, apiKey]);
+  }, [workspaceMcpService]);
 
   const handleToolSelect = (tool: McpTool) => {
     setSelectedTool(tool);
@@ -131,19 +129,6 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
     setIsRunning(true);
 
     try {
-      let port = 8091;
-      try {
-        const res = await fetch(`${baseUrl}/api/mcp/health/workspace`, {
-          headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.port) port = data.port;
-        }
-      } catch (err) {
-        console.error("Failed to query port dynamically, using default 8091:", err);
-      }
-
       const formattedArguments: Record<string, any> = {};
       selectedTool.params.forEach(p => {
         const value = params[p.key] || "";
@@ -156,94 +141,11 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
         }
       });
 
-      const urlObj = new URL(baseUrl);
-      const host = urlObj.hostname;
-      const protocol = urlObj.protocol;
-
-      const runResult = await new Promise<any>((resolve, reject) => {
-        const sseUrl = `${protocol}//${host}:${port}/sse?api_key=${encodeURIComponent(apiKey)}&session_id=${encodeURIComponent(sessionId || "default")}`;
-        const eventSource = new EventSource(sseUrl);
-        let messageUrl = "";
-        let requestId = 1;
-        let initId = 2;
-
-        const cleanUp = () => {
-          eventSource.close();
-        };
-
-        const timeout = setTimeout(() => {
-          cleanUp();
-          reject(new Error("Timeout waiting for MCP execution results"));
-        }, 15000);
-
-        eventSource.addEventListener("endpoint", (ev: any) => {
-          messageUrl = `${protocol}//${host}:${port}${ev.data}`;
-          
-          const initPayload = {
-            jsonrpc: "2.0",
-            id: initId,
-            method: "initialize",
-            params: {
-              protocolVersion: "2024-11-05",
-              capabilities: {},
-              clientInfo: { name: "savant-olympus-client", version: "1.0.0" }
-            }
-          };
-
-          fetch(messageUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-App-Name": "savant-olympus" },
-            body: JSON.stringify(initPayload)
-          }).catch(err => {
-            clearTimeout(timeout);
-            cleanUp();
-            reject(err);
-          });
-        });
-
-        eventSource.addEventListener("message", async (ev: any) => {
-          try {
-            const response = JSON.parse(ev.data);
-            if (response.id === initId) {
-              const callPayload = {
-                jsonrpc: "2.0",
-                id: requestId,
-                method: "tools/call",
-                params: {
-                  name: selectedTool.name,
-                  arguments: formattedArguments
-                }
-              };
-
-              fetch(messageUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-App-Name": "savant-olympus" },
-                body: JSON.stringify(callPayload)
-              }).catch(err => {
-                clearTimeout(timeout);
-                cleanUp();
-                reject(err);
-              });
-            } else if (response.id === requestId) {
-              clearTimeout(timeout);
-              cleanUp();
-              if (response.error) {
-                reject(new Error(response.error.message || JSON.stringify(response.error)));
-              } else {
-                resolve(response.result);
-              }
-            }
-          } catch (err) {
-            console.error("SSE message parse failed:", err);
-          }
-        });
-
-        eventSource.onerror = () => {
-          clearTimeout(timeout);
-          cleanUp();
-          reject(new Error("SSE endpoint connection failed. Make sure savant-server is running."));
-        };
-      });
+      const runResult = await workspaceMcpService.runTool(
+        selectedTool.name,
+        formattedArguments,
+        sessionId || "default",
+      );
 
       setResult(JSON.stringify(runResult, null, 2));
 

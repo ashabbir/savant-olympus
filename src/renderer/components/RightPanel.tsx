@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Activity, GitBranch, FileText, Upload, Sparkles, Search, ListChecks, Terminal, RefreshCcw, Timer, Cpu, Zap, FileCode, Database, Trash2, Download, Plus, Check, History } from "lucide-react";
 import { AreaChart, Area, LineChart, Line, ResponsiveContainer } from "recharts";
 import { motion, AnimatePresence } from "motion/react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { Thinking } from "../App";
+import { createContextService } from "@/services/contextService";
 
 const TABS = [
   { id: "pulse", icon: Activity, label: "pulse" },
@@ -110,7 +111,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
   const [isLoadingFileContent, setIsLoadingFileContent] = useState(false);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
 
-  const baseUrl = serverUrl.replace(/\/+$/, "");
+  const contextService = useMemo(() => createContextService(serverUrl, apiKey), [serverUrl, apiKey]);
 
   // Reset drawer state when active tab changes
   useEffect(() => {
@@ -121,16 +122,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
   const fetchMemoryBanks = async () => {
     setIsLoadingMemory(true);
     try {
-      const url = selectedProject 
-        ? `${baseUrl}/api/context/memory/list?repo=${encodeURIComponent(selectedProject)}`
-        : `${baseUrl}/api/context/memory/list`;
-      const res = await fetch(url, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setMemoryBanks(data.resources || data.banks || data || []);
-      }
+      setMemoryBanks(await contextService.listMemoryResources(selectedProject || undefined));
     } catch (e) {
       console.error(e);
     } finally {
@@ -141,13 +133,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
   const readMemoryResource = async (uri: string) => {
     setIsLoadingMemoryContent(true);
     try {
-      const res = await fetch(`${baseUrl}/api/context/memory/read?uri=${encodeURIComponent(uri)}`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSelectedMemoryContent(data.content || data.text || JSON.stringify(data, null, 2));
-      }
+      setSelectedMemoryContent(await contextService.readMemoryResource(uri));
     } catch (e) {
       console.error(e);
     } finally {
@@ -160,13 +146,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
     if (!selectedProject) return;
     setIsLoadingCodeFiles(true);
     try {
-      const res = await fetch(`${baseUrl}/api/context/code/list?repo=${encodeURIComponent(selectedProject)}`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setCodeFiles(data.files || data || []);
-      }
+      setCodeFiles(await contextService.listCodeFiles(selectedProject));
     } catch (e) {
       console.error(e);
     } finally {
@@ -177,13 +157,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
   const readCodeFile = async (uri: string) => {
     setIsLoadingFileContent(true);
     try {
-      const res = await fetch(`${baseUrl}/api/context/code/read?uri=${encodeURIComponent(uri)}`, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSelectedFileContent(data.content || data.text || JSON.stringify(data, null, 2));
-      }
+      setSelectedFileContent(await contextService.readCodeContent(uri));
     } catch (e) {
       console.error(e);
     } finally {
@@ -195,13 +169,13 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
     if (activeTab === "Context" && contextSubTab === "memory") {
       fetchMemoryBanks();
     }
-  }, [activeTab, contextSubTab, selectedProject, baseUrl, apiKey]);
+  }, [activeTab, contextSubTab, selectedProject, contextService]);
 
   useEffect(() => {
     if (activeTab === "Context" && contextSubTab === "ast" && selectedProject) {
       fetchCodeFiles();
     }
-  }, [activeTab, contextSubTab, selectedProject, baseUrl, apiKey]);
+  }, [activeTab, contextSubTab, selectedProject, contextService]);
 
   useEffect(() => {
     if (selectedMemoryUri) {
@@ -224,16 +198,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
     if (!semanticQuery.trim()) return;
     setIsSearching(true);
     try {
-      const url = selectedProject
-        ? `${baseUrl}/api/context/search?q=${encodeURIComponent(semanticQuery)}&repo=${encodeURIComponent(selectedProject)}`
-        : `${baseUrl}/api/context/search?q=${encodeURIComponent(semanticQuery)}`;
-      const res = await fetch(url, {
-        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSearchResults(data.results || data || []);
-      }
+      setSearchResults(await contextService.search(semanticQuery, selectedProject || undefined));
     } catch (e) {
       console.error(e);
     } finally {

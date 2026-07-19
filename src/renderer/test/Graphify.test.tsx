@@ -41,7 +41,7 @@ describe('ContextView - Code Graph Integration', () => {
           status: 200,
           json: () => Promise.resolve({
             repos: [
-              { id: "1", name: "savant-olympus", path: "/Users/home/code/savant-olympus", file_count: 5 }
+              { id: "1", name: "savant-olympus", path: "/Users/home/code/savant-olympus", source: "directory", file_count: 5, memory_bank_count: 9 }
             ]
           })
         } as Response)
@@ -94,7 +94,10 @@ describe('ContextView - Code Graph Integration', () => {
       />
     )
 
-    expect(await screen.findByText('SYNC CODE GRAPH')).toBeInTheDocument()
+    expect(await screen.findByText('GENERATE GRAPH')).toBeInTheDocument()
+    expect(screen.queryByText('REFETCH')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Last Fetched:/)).not.toBeInTheDocument()
+    expect(screen.getByText('9')).toBeInTheDocument()
     expect(screen.queryByText(/graphify/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/purge index/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/push local graph/i)).not.toBeInTheDocument()
@@ -104,29 +107,50 @@ describe('ContextView - Code Graph Integration', () => {
   it('uses explicit repo identity and native code graph sync for CodeGraph repositories', async () => {
     vi.mocked(window.fetch).mockImplementation((url, init) => {
       const u = url.toString()
-      if (u.endsWith('/api/context/repos')) return Promise.resolve({ ok: true, json: async () => ({ repos: [{ id: 'repo-42', name: 'codegraph-repo', path: '/base-code/codegraph-repo', provider: 'codegraph', freshness: 'stale' }] }) } as Response)
+      if (u.endsWith('/api/context/repos')) return Promise.resolve({ ok: true, json: async () => ({ repos: [{ id: 'repo-42', name: 'codegraph-repo', path: '/base-code/codegraph-repo', source: 'github', last_fetched_at: '2026-07-19T14:00:00Z', provider: 'codegraph', freshness: 'stale' }] }) } as Response)
       if (u.includes('/api/context/repos/indexing-status')) return Promise.resolve({ ok: true, json: async () => ({ status: {} }) } as Response)
-      if (u.includes('/api/context/code-intelligence/repos/repo-42/health')) return Promise.resolve({ ok: true, json: async () => ({ provider: 'codegraph', freshness: 'stale', graph_version: '1.4.1' }) } as Response)
       if (u.includes('/api/context/code-intelligence/repos/repo-42/sync')) return Promise.resolve({ ok: true, json: async () => ({ job_id: 'job-1', provider: 'codegraph' }) } as Response)
-      if (u.includes('/api/graphify/stats')) return Promise.resolve({ ok: true, json: async () => ({ total: 2, stats: {}, edges: {} }) } as Response)
+      if (u.includes('/api/context/code-intelligence/repos/repo-42/health')) return Promise.resolve({ ok: true, json: async () => ({ provider: 'codegraph', freshness: 'stale', graph_version: '1.4.1', nodes: 4217, edges: 6300, indexed_at: '2026-07-19T14:30:00Z' }) } as Response)
       if (u.includes('/api/context/ast/list')) return Promise.resolve({ ok: true, json: async () => ({ nodes: [] }) } as Response)
-      if (u.includes('/api/graphify/main-entities')) return Promise.resolve({ ok: true, json: async () => ({ nodes: [], edges: [] }) } as Response)
+      if (u.includes('/symbols?limit=250')) return Promise.resolve({ ok: true, json: async () => ({ items: [
+        { id: 'codegraph:1', kind: 'file', name: 'app.py', location: { file_path: 'app.py' } },
+        { id: 'codegraph:2', kind: 'class', name: 'Application', location: { file_path: 'app.py' } },
+        { id: 'codegraph:3', kind: 'function', name: 'main', location: { file_path: 'app.py' } },
+      ] }) } as Response)
+      if (u.includes('/subgraph')) return Promise.resolve({ ok: true, json: async () => ({ symbols: [
+        { id: 'codegraph:1', kind: 'file', name: 'app.py', location: { file_path: 'app.py' } },
+        { id: 'codegraph:2', kind: 'class', name: 'Application', location: { file_path: 'app.py' } },
+        { id: 'codegraph:3', kind: 'function', name: 'main', location: { file_path: 'app.py' } },
+      ], edges: [
+        { source_id: 'codegraph:1', target_id: 'codegraph:2', kind: 'contains' },
+        { source_id: 'codegraph:2', target_id: 'codegraph:3', kind: 'contains' },
+      ] }) } as Response)
       return Promise.resolve({ ok: true, json: async () => ({}) } as Response)
     })
 
     render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject="codegraph-repo" isAdmin />)
 
-    expect(await screen.findByText('SYNC CODE GRAPH')).toBeInTheDocument()
+    expect(await screen.findByText('GENERATE GRAPH')).toBeInTheDocument()
     expect(screen.queryByText(/graphify/i)).not.toBeInTheDocument()
     expect(await screen.findByText(/The code graph is stale/i)).toBeInTheDocument()
+    expect(screen.getByText('4217')).toBeInTheDocument()
+    expect(screen.getByText('SEMANTIC: DONE')).toBeInTheDocument()
+    expect(screen.getByText('STRUCTURAL: STALE')).toBeInTheDocument()
+    expect(screen.getByText(/Last Graph Generated:/)).toBeInTheDocument()
+    expect(screen.getByText(/Last Fetched:/)).toBeInTheDocument()
     expect(screen.queryByText('SELECT GRAPHIFY DIR')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('SYNC CODE GRAPH'))
+    fireEvent.click(screen.getByText('GENERATE GRAPH'))
     await waitFor(() => expect(vi.mocked(window.fetch).mock.calls.some(([url]) => url.toString().includes('/api/context/code-intelligence/repos/repo-42/sync'))).toBe(true))
+    expect(screen.getByTestId('graph-generation-progress')).toHaveTextContent('Graph Generation Queued')
+    expect(screen.getByText('STRUCTURAL: QUEUED')).toBeInTheDocument()
 
-    const statsCall = vi.mocked(window.fetch).mock.calls.find(([url]) => url.toString().includes('/api/graphify/stats'))
-    expect(statsCall?.[0].toString()).toContain('repo_id=repo-42')
+    const healthCall = vi.mocked(window.fetch).mock.calls.find(([url]) => url.toString().includes('/api/context/code-intelligence/repos/repo-42/health'))
+    expect(healthCall).toBeTruthy()
     const astCall = vi.mocked(window.fetch).mock.calls.find(([url]) => url.toString().includes('/api/context/ast/list'))
     expect(astCall?.[0].toString()).toContain('repo_id=repo-42')
+
+    fireEvent.click(screen.getByText('Project Graph'))
+    expect(await screen.findByText(/VISIBLE:/)).toHaveTextContent('3 NODES / 2 EDGES')
   })
 })

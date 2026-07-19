@@ -2,196 +2,68 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
 import { GitFork, Network, Layers, RefreshCw, ZoomIn, ZoomOut, Maximize, Plus, Trash2, Search, ArrowRight, ArrowLeft, Download, Upload, Info, Check, Copy, Box, ChevronDown, ChevronLeft, ChevronRight, History, FileCode2, FileText } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { AthenaMessage } from "@/components/shared/AthenaMessage";
+import { createKnowledgeService } from "@/services/knowledgeService";
+import { createWorkspaceService } from "@/services/workspaceService";
 import { buildAthenaPromptSections, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits } from "@/lib/athenaContext";
+import {
+  Node,
+  Edge,
+  ChatMessage,
+  AthenaExportEntry,
+  KnowledgeChatContextSnapshot,
+  AthenaThread,
+  KnowledgeGraphIndex,
+  KnowledgeViewProps,
+} from "./knowledge/types";
+import {
+  getKnowledgeNodeRadius,
+  buildKnowledgeExportPayload,
+  validateKnowledgeImportPayload,
+  buildKnowledgeImportDiff,
+  buildKnowledgeGraphIndex,
+  inferNodeDomainsFromIndex,
+  inferNodeDomains,
+  buildFilteredKnowledgeContextFromIndex,
+  buildFilteredKnowledgeContext,
+  deriveKnowledgeVisibility,
+} from "./knowledge/utils/graphUtils";
+import {
+  buildAuthHeaders,
+  importKnowledgePayload,
+  fetchKnowledgeExportData,
+} from "./knowledge/utils/api";
+import {
+  buildAthenaExportDocument,
+  downloadHtmlDocument,
+  printHtmlDocument,
+} from "./knowledge/utils/chatExport";
+import {
+  buildKnowledgeChatContextSnapshot,
+  restoreKnowledgeFocals,
+} from "./knowledge/utils/chatContext";
 
-interface Node extends d3.SimulationNodeDatum {
-  id: string;
-  node_id: string;
-  title?: string;
-  node_type: string;
-  content?: string;
-  status?: string;
-  created_at?: string;
-  metadata?: {
-    repo?: string;
-    files?: string[] | string;
-    workspaces?: string[];
-    workspace_id?: string;
-    source?: string;
-  };
-  z?: number;
-  vz?: number;
-  px?: number;
-  py?: number;
-  pScale?: number;
-  depth?: number;
-  connections?: number;
-}
-
-interface Edge extends d3.SimulationLinkDatum<Node> {
-  source: string | Node;
-  target: string | Node;
-  edge_type?: string;
-  edge_id?: string;
-  weight?: number;
-}
-
-interface ChatMessage {
-  id: string;
-  sender: "user" | "assistant";
-  text: string;
-  timestamp: string;
-}
+export type { Node, Edge, ChatMessage, AthenaExportEntry, KnowledgeChatContextSnapshot, AthenaThread, KnowledgeGraphIndex, KnowledgeViewProps };
+export {
+  getKnowledgeNodeRadius,
+  buildKnowledgeExportPayload,
+  validateKnowledgeImportPayload,
+  buildKnowledgeImportDiff,
+  buildKnowledgeGraphIndex,
+  inferNodeDomainsFromIndex,
+  inferNodeDomains,
+  buildFilteredKnowledgeContextFromIndex,
+  buildFilteredKnowledgeContext,
+  deriveKnowledgeVisibility,
+  buildAuthHeaders,
+  importKnowledgePayload,
+  fetchKnowledgeExportData,
+  buildKnowledgeChatContextSnapshot,
+  restoreKnowledgeFocals,
+};
 
 const KNOWLEDGE_CHAT_HISTORY_PREFIX = "savant_knowledge_chat_history_";
 const KNOWLEDGE_CHAT_THREAD_PREFIX = "savant_knowledge_chat_thread_";
-
-interface AthenaExportEntry {
-  sender: ChatMessage["sender"];
-  timestamp: string;
-  html: string;
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function buildAthenaExportDocument(title: string, entries: AthenaExportEntry[]) {
-  const safeTitle = escapeHtml(title);
-  const messages = entries.map((entry) => `
-    <article class="message ${entry.sender}">
-      <header>
-        <strong>${entry.sender === "user" ? "USER" : "ATHENA"}</strong>
-        <time>${escapeHtml(new Date(entry.timestamp).toLocaleString())}</time>
-      </header>
-      <div class="content">${entry.html}</div>
-    </article>
-  `).join("");
-
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${safeTitle}</title>
-  <style>
-    :root { color-scheme: light; font-family: Inter, Arial, sans-serif; color: #172033; background: #f7f9fc; }
-    body { max-width: 900px; margin: 0 auto; padding: 40px; }
-    h1 { margin: 0 0 28px; font-size: 24px; }
-    .message { margin: 0 0 20px; padding: 18px; border: 1px solid #d8e0ec; border-radius: 10px; background: #fff; break-inside: avoid; }
-    .message.user { border-left: 4px solid #00a7b5; }
-    .message.assistant { border-left: 4px solid #6957d9; }
-    header { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 12px; color: #556176; font-size: 11px; letter-spacing: .08em; }
-    .content { font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
-    .content > :first-child { margin-top: 0; }
-    .content > :last-child { margin-bottom: 0; }
-    table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 12px; }
-    th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; vertical-align: top; }
-    th { background: #eef3f8; }
-    pre { overflow-x: auto; padding: 12px; background: #101827; color: #e5edf7; border-radius: 6px; white-space: pre-wrap; }
-    code { font-family: "SFMono-Regular", Consolas, monospace; }
-    blockquote { margin-left: 0; padding-left: 14px; border-left: 3px solid #94a3b8; color: #475569; }
-    @page { size: A4; margin: 14mm; }
-    @media print { body { padding: 0; } }
-  </style>
-</head>
-<body>
-  <h1>${safeTitle}</h1>
-  ${messages}
-</body>
-</html>`;
-}
-
-function downloadHtmlDocument(html: string, filename: string) {
-  const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
-function printHtmlDocument(html: string) {
-  const frame = document.createElement("iframe");
-  frame.style.position = "fixed";
-  frame.style.width = "1px";
-  frame.style.height = "1px";
-  frame.style.opacity = "0";
-  frame.style.pointerEvents = "none";
-  document.body.appendChild(frame);
-  const frameDocument = frame.contentDocument;
-  if (!frameDocument || !frame.contentWindow) {
-    frame.remove();
-    throw new Error("Unable to open the PDF print view.");
-  }
-  frame.onload = () => {
-    frame.contentWindow?.focus();
-    frame.contentWindow?.print();
-    window.setTimeout(() => frame.remove(), 1000);
-  };
-  frameDocument.open();
-  frameDocument.write(html);
-  frameDocument.close();
-}
-
-interface KnowledgeChatContextSnapshot {
-  version: 1;
-  selectedNodeId: string | null;
-  selectedNodeIds: string[];
-  focalsByType: Record<string, string[]>;
-  exploreDepth: number;
-  isExploreActive: boolean;
-  searchQuery: string;
-  searchTags: string[];
-  filterSearch: string;
-  typeFilter: string | null;
-  openType: string | null;
-  is3DMode: boolean;
-}
-
-interface AthenaThread {
-  target_id: string;
-  title?: string | null;
-  context?: KnowledgeChatContextSnapshot | null;
-  kind?: string;
-  messages: ChatMessage[];
-  updated_at: string;
-}
-
-export function buildKnowledgeChatContextSnapshot(input: Omit<KnowledgeChatContextSnapshot, "version" | "focalsByType"> & {
-  focalsByType: Record<string, Iterable<string>>;
-}): KnowledgeChatContextSnapshot {
-  return {
-    ...input,
-    version: 1,
-    focalsByType: Object.fromEntries(
-      Object.entries(input.focalsByType)
-        .map(([nodeType, nodeIds]) => [nodeType, Array.from(nodeIds)] as [string, string[]])
-        .filter(([, nodeIds]) => nodeIds.length > 0),
-    ),
-  };
-}
-
-export function restoreKnowledgeFocals(
-  snapshot: KnowledgeChatContextSnapshot,
-  validNodeIds: Set<string>,
-): Record<string, Set<string>> {
-  return Object.fromEntries(
-    Object.entries(snapshot.focalsByType || {})
-      .map(([nodeType, nodeIds]) => [
-        nodeType,
-        new Set(nodeIds.filter((nodeId) => validNodeIds.has(nodeId))),
-      ] as [string, Set<string>])
-      .filter(([, nodeIds]) => nodeIds.size > 0),
-  );
-}
 
 const ATHENA_CHAT_HISTORY_KEY = "savant_athena_chat_history";
 const ATHENA_KNOWLEDGE_SCOPE = "knowledge";
@@ -210,255 +82,6 @@ const KNOWLEDGE_NODE_TYPES = [
   "insight",
 ];
 
-
-interface KnowledgeViewProps {
-  serverUrl: string;
-  apiKey: string;
-  isAdmin?: boolean;
-}
-
-export function getKnowledgeNodeRadius(connectionCount: number) {
-  const safeConnectionCount = Number.isFinite(connectionCount)
-    ? Math.max(0, connectionCount)
-    : 0;
-  return 7 + Math.log2(safeConnectionCount + 1) * 6;
-}
-
-function stripWorkspaceAssociations(value: any): any {
-  if (Array.isArray(value)) return value.map(stripWorkspaceAssociations);
-  if (!value || typeof value !== "object") return value;
-
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([key]) => key !== "workspace_id" && key !== "workspaces")
-      .map(([key, entry]) => [key, stripWorkspaceAssociations(entry)])
-  );
-}
-
-export function buildKnowledgeExportPayload(
-  exportData: Record<string, any>,
-  selectedNodeIds: Iterable<string>,
-) {
-  const nodes = Array.isArray(exportData.nodes) ? exportData.nodes : [];
-  const edges = Array.isArray(exportData.edges) ? exportData.edges : [];
-  const selectedIds = new Set(selectedNodeIds);
-  const exportedNodes = selectedIds.size === 0
-    ? nodes
-    : nodes.filter((node) => selectedIds.has(node.node_id || node.id));
-  const exportedNodeIds = new Set(exportedNodes.map((node) => node.node_id || node.id));
-  const exportedEdges = selectedIds.size === 0
-    ? edges
-    : edges.filter((edge) => exportedNodeIds.has(edge.source_id) && exportedNodeIds.has(edge.target_id));
-
-  return stripWorkspaceAssociations({ nodes: exportedNodes, edges: exportedEdges });
-}
-
-export function validateKnowledgeImportPayload(payload: any) {
-  if (!payload || !Array.isArray(payload.nodes) || !Array.isArray(payload.edges)) {
-    throw new Error("Knowledge export must contain nodes and edges arrays.");
-  }
-  payload.nodes.forEach((node: any, index: number) => {
-    const missing = ["node_id", "title", "node_type"].filter(
-      (field) => typeof node?.[field] !== "string" || node[field].trim() === ""
-    );
-    if (missing.length > 0) {
-      throw new Error(`Node ${index + 1} is missing required fields: ${missing.join(", ")}.`);
-    }
-  });
-  payload.edges.forEach((edge: any, index: number) => {
-    const missing = ["source_id", "target_id", "edge_type"].filter(
-      (field) => typeof edge?.[field] !== "string" || edge[field].trim() === ""
-    );
-    if (missing.length > 0) {
-      throw new Error(`Edge ${index + 1} is missing required fields: ${missing.join(", ")}.`);
-    }
-  });
-  return payload;
-}
-
-function buildAuthHeaders(apiKey: string, contentType = "application/json") {
-  const h: Record<string, string> = { "X-App-Name": "savant-olympus" };
-  if (apiKey) h["X-API-Key"] = apiKey;
-  if (contentType) h["Content-Type"] = contentType;
-  return h;
-}
-
-export async function importKnowledgePayload(baseUrl: string, apiKey: string, payload: any) {
-  const validatedPayload = validateKnowledgeImportPayload(payload);
-  const response = await fetch(`${baseUrl}/api/knowledge/import`, {
-    method: "POST",
-    headers: buildAuthHeaders(apiKey),
-    body: JSON.stringify(validatedPayload),
-  });
-  if (!response.ok) throw new Error("Failed to import knowledge graph.");
-  return response;
-}
-
-export async function fetchKnowledgeExportData(baseUrl: string, apiKey: string) {
-  const headers = buildAuthHeaders(apiKey, "");
-  const exportResponse = await fetch(`${baseUrl}/api/knowledge/export`, { headers });
-  if (exportResponse.ok) return exportResponse.json();
-
-  const graphResponse = await fetch(
-    `${baseUrl}/api/knowledge/graph?slim=false&include_staged=true`,
-    { headers },
-  );
-  if (!graphResponse.ok) {
-    throw new Error(`Failed to export knowledge graph (${graphResponse.status}).`);
-  }
-  return graphResponse.json();
-}
-
-export function buildKnowledgeImportDiff(currentNodes: any[], currentEdges: any[], payload: any) {
-  const validated = validateKnowledgeImportPayload(payload);
-  const currentNodeIds = new Set(currentNodes.map((node) => node.node_id || node.id));
-  const currentEdgeIds = new Set(currentEdges.map((edge) => edge.edge_id).filter(Boolean));
-  const currentEdgeKeys = new Set(
-    currentEdges.map((edge) => `${edge.source_id}:${edge.target_id}:${edge.edge_type || "relates_to"}`)
-  );
-  const newNodes = validated.nodes.filter((node: any) => !currentNodeIds.has(node.node_id || node.id));
-  const newEdges = validated.edges.filter((edge: any) => {
-    const edgeKey = `${edge.source_id}:${edge.target_id}:${edge.edge_type || "relates_to"}`;
-    return !(edge.edge_id && currentEdgeIds.has(edge.edge_id)) && !currentEdgeKeys.has(edgeKey);
-  });
-
-  return {
-    newNodes,
-    newEdges,
-    existingNodeCount: validated.nodes.length - newNodes.length,
-    existingEdgeCount: validated.edges.length - newEdges.length,
-  };
-}
-
-interface KnowledgeGraphIndex {
-  nodesById: Map<string, any>;
-  adjacency: Record<string, string[]>;
-  edgesByNode: Map<string, any[]>;
-  nodesByType: Map<string, any[]>;
-}
-
-export function buildKnowledgeGraphIndex(nodes: any[], edges: any[]): KnowledgeGraphIndex {
-  const nodesById = new Map<string, any>();
-  const adjacency: Record<string, string[]> = {};
-  const edgesByNode = new Map<string, any[]>();
-  const nodesByType = new Map<string, any[]>();
-
-  for (const node of nodes) {
-    const nodeId = node.node_id || node.id;
-    if (!nodeId) continue;
-    nodesById.set(nodeId, node);
-    adjacency[nodeId] = [];
-    const typeNodes = nodesByType.get(node.node_type) || [];
-    typeNodes.push(node);
-    nodesByType.set(node.node_type, typeNodes);
-  }
-  for (const edge of edges) {
-    const sourceId = edge.source_id;
-    const targetId = edge.target_id;
-    if (adjacency[sourceId]) adjacency[sourceId].push(targetId);
-    if (adjacency[targetId]) adjacency[targetId].push(sourceId);
-    if (nodesById.has(sourceId)) {
-      const sourceEdges = edgesByNode.get(sourceId) || [];
-      sourceEdges.push(edge);
-      edgesByNode.set(sourceId, sourceEdges);
-    }
-    if (nodesById.has(targetId)) {
-      const targetEdges = edgesByNode.get(targetId) || [];
-      targetEdges.push(edge);
-      edgesByNode.set(targetId, targetEdges);
-    }
-  }
-  return { nodesById, adjacency, edgesByNode, nodesByType };
-}
-
-function inferNodeDomainsFromIndex(nodeId: string, index: KnowledgeGraphIndex, maxDepth = 2) {
-  const queue: Array<{ id: string; depth: number }> = [{ id: nodeId, depth: 0 }];
-  const visited = new Set([nodeId]);
-  const domains: Array<{ node: any; distance: number }> = [];
-  for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
-    const current = queue[queueIndex];
-    const node = index.nodesById.get(current.id);
-    if (node?.node_type === "domain") domains.push({ node, distance: current.depth });
-    if (current.depth >= maxDepth) continue;
-    for (const neighborId of index.adjacency[current.id] || []) {
-      if (visited.has(neighborId)) continue;
-      visited.add(neighborId);
-      queue.push({ id: neighborId, depth: current.depth + 1 });
-    }
-  }
-
-  return domains.sort(
-    (left, right) =>
-      left.distance - right.distance ||
-      (left.node.title || left.node.node_id).localeCompare(right.node.title || right.node.node_id)
-  );
-}
-
-export function inferNodeDomains(nodeId: string, nodes: any[], edges: any[], maxDepth = 2) {
-  return inferNodeDomainsFromIndex(nodeId, buildKnowledgeGraphIndex(nodes, edges), maxDepth);
-}
-
-function buildFilteredKnowledgeContextFromIndex(
-  focalsByType: Record<string, Set<string>>,
-  nodes: any[],
-  edges: any[],
-  depth: number,
-  index: KnowledgeGraphIndex,
-) {
-  const activeBuckets = Object.values(focalsByType).filter((bucket) => bucket.size > 0);
-  const selectedCount = activeBuckets.reduce((total, bucket) => total + bucket.size, 0);
-  if (selectedCount < 1) return null;
-
-  const reachableFrom = (seeds: Set<string>) => {
-    const distances = new Map<string, number>();
-    const queue = [...seeds];
-    seeds.forEach((nodeId) => distances.set(nodeId, 0));
-    for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
-      const current = queue[queueIndex];
-      const currentDepth = distances.get(current)!;
-      if (currentDepth >= depth) continue;
-      for (const neighborId of index.adjacency[current] || []) {
-        if (distances.has(neighborId)) continue;
-        distances.set(neighborId, currentDepth + 1);
-        queue.push(neighborId);
-      }
-    }
-    return new Set(distances.keys());
-  };
-
-  const reachSets = activeBuckets.map(reachableFrom);
-  const visibleIds = reachSets.reduce(
-    (current, reachable, reachIndex) =>
-      reachIndex === 0
-        ? new Set(reachable)
-        : new Set([...current].filter((nodeId) => reachable.has(nodeId))),
-    new Set<string>(),
-  );
-  const visibleNodes = nodes.filter((node) => visibleIds.has(node.node_id || node.id));
-  const visibleEdges = edges.filter(
-    (edge) => visibleIds.has(edge.source_id) && visibleIds.has(edge.target_id)
-  );
-  let hash = 0;
-  for (const character of [...visibleIds].sort().join("|")) {
-    hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0;
-  }
-  return { nodes: visibleNodes, edges: visibleEdges, scopeId: `filtered-context-${Math.abs(hash)}` };
-}
-
-export function buildFilteredKnowledgeContext(
-  focalsByType: Record<string, Set<string>>,
-  nodes: any[],
-  edges: any[],
-  depth: number,
-) {
-  return buildFilteredKnowledgeContextFromIndex(
-    focalsByType,
-    nodes,
-    edges,
-    depth,
-    buildKnowledgeGraphIndex(nodes, edges),
-  );
-}
 
 export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeViewProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -546,10 +169,19 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
     for (const bucket of Object.values(focalsByType)) for (const id of bucket) s.add(id);
     return s;
   }, [focalsByType]);
+  const focalSelectionKey = useMemo(
+    () => [...focalNodes].sort().join("|"),
+    [focalNodes],
+  );
   const [exploreDepth, setExploreDepth] = useState(2);
   const [isExploreActive, setIsExploreActive] = useState(false);
+  const [showInsights, setShowInsights] = useState(false);
   const [rawNodes, setRawNodes] = useState<any[]>([]);
   const [rawEdges, setRawEdges] = useState<any[]>([]);
+
+  useEffect(() => {
+    setShowInsights(false);
+  }, [selectedNodeId, focalSelectionKey]);
 
   // Shared indexes keep render, filtering, selection, and D3 updates linear in graph size.
   const graphIndex = useMemo(() => buildKnowledgeGraphIndex(rawNodes, rawEdges), [rawNodes, rawEdges]);
@@ -716,6 +348,8 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
   const [bulkEdgeType, setBulkEdgeType] = useState<string>("relates_to");
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
+  const knowledgeService = useMemo(() => createKnowledgeService(serverUrl, apiKey), [serverUrl, apiKey]);
+  const workspaceService = useMemo(() => createWorkspaceService(serverUrl, apiKey), [serverUrl, apiKey]);
   // Track which nodes have had their labels loaded
   const loadedLabelsRef = useRef<Set<string>>(new Set());
   const nodeLabelsRef = useRef<Map<string, string>>(new Map());
@@ -809,6 +443,19 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
   }, [filterReachability, rawEdges]);
 
   const activeFilteredContext = selectedNode || selectedNodes.size > 0 ? null : filteredContext;
+  const activeVisibility = useMemo(
+    () => activeFilteredContext
+      ? deriveKnowledgeVisibility(activeFilteredContext, showInsights)
+      : null,
+    [activeFilteredContext, showInsights],
+  );
+  const activeAthenaContext = activeFilteredContext && activeVisibility
+    ? {
+        nodes: activeVisibility.visualNodes,
+        edges: activeVisibility.visualEdges,
+        scopeId: activeFilteredContext.scopeId,
+      }
+    : null;
   const activeChatScopeId = activeFilteredContext?.scopeId || selectedNode?.node_id || selectedNode?.id || null;
   const currentChatContext = useMemo(
     () => buildKnowledgeChatContextSnapshot({
@@ -823,6 +470,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
       typeFilter,
       openType,
       is3DMode,
+      showInsights,
     }),
     [
       exploreDepth,
@@ -835,6 +483,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
       searchTags,
       selectedNodeId,
       selectedNodes,
+      showInsights,
       typeFilter,
     ],
   );
@@ -858,9 +507,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
     setIsLoading(true);
 
     try {
-      let url = `${baseUrl}/api/knowledge/graph?slim=true&include_staged=true&_=${Date.now()}`;
-      const res = await fetch(url, { headers: buildAuthHeaders(apiKey, "") });
-      const raw = await res.json();
+      const raw = await knowledgeService.fetchGraph(true, true);
       if (loadId !== graphLoadIdRef.current) return;
 
       setRawNodes(raw.nodes || []);
@@ -1392,6 +1039,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
       .enter()
       .append("g")
       .attr("class", "node")
+      .attr("data-node-id", (node) => node.node_id)
       .call(d3.drag<SVGGElement, Node>()
         .on("start", (event, d) => {
         if (!event.active) {
@@ -1432,10 +1080,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
           setSelectedNode(d);
           handleExploreNode(d.node_id);
           try {
-            const res = await fetch(`${baseUrl}/api/knowledge/nodes/${d.node_id}`, {
-              headers: buildAuthHeaders(apiKey, "")
-            });
-            if (res.ok) setSelectedNode(await res.json());
+            setSelectedNode(await knowledgeService.getNode(d.node_id));
           } catch (e) {
             console.error("Failed to fetch node details", e);
           }
@@ -1798,10 +1443,7 @@ const selectNodeById = async (nodeId: string) => {
   setSelectedNode(node as any);
   handleExploreNode(nodeId);
   try {
-    const res = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
-      headers: buildAuthHeaders(apiKey, "")
-    });
-    if (res.ok) setSelectedNode(await res.json());
+    setSelectedNode(await knowledgeService.getNode(nodeId));
   } catch (e) {
     console.error("Failed to fetch node details", e);
   }
@@ -2032,7 +1674,25 @@ useEffect(() => {
       });
     }
   }
-}, [exploreDepth, isExploreActive, focalNodes, focalsByType, graphIndex, rawNodes, rawEdges, selectedNodes, selectedNodeId, searchQuery, searchTags, intelligentFiltering, typeFilter]);
+  if (!showInsights) {
+      svg.selectAll(".node")
+        .filter((node: any) => node.node_type === "insight")
+        .attr("opacity", 0)
+        .attr("pointer-events", "none");
+      svg.selectAll(".node text")
+        .filter((node: any) => node.node_type === "insight")
+        .attr("opacity", 0);
+      svg.selectAll("line")
+        .filter((edge: any) => {
+          const sourceId = edge.source?.node_id || edge.source;
+          const targetId = edge.target?.node_id || edge.target;
+          return graphIndex.nodesById.get(sourceId)?.node_type === "insight" ||
+            graphIndex.nodesById.get(targetId)?.node_type === "insight";
+        })
+        .attr("opacity", 0)
+        .attr("pointer-events", "none");
+  }
+}, [exploreDepth, isExploreActive, focalNodes, focalsByType, graphIndex, rawNodes, rawEdges, selectedNodes, selectedNodeId, searchQuery, searchTags, intelligentFiltering, showInsights, typeFilter]);
 
 useEffect(() => {
   exploreDepthRef.current = exploreDepth;
@@ -2052,19 +1712,14 @@ useEffect(() => {
 useEffect(() => {
   const fetchWorkspacesList = async () => {
     try {
-      const res = await fetch(`${baseUrl}/api/workspaces`, {
-        headers: buildAuthHeaders(apiKey, ""),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setAvailableWorkspaces(Array.isArray(data) ? data : (data?.workspaces || []));
-      }
+      const data = await workspaceService.listWorkspaces();
+      setAvailableWorkspaces(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error("Failed to load workspaces:", e);
     }
   };
   fetchWorkspacesList();
-}, [baseUrl, apiKey]);
+}, [workspaceService]);
 
 const handleMergeSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
@@ -2074,20 +1729,10 @@ const handleMergeSubmit = async (e: React.FormEvent) => {
   if (!confirm(`Merge ${nodeIds.length} nodes into "${survivorTitle}"? This cannot be undone.`)) return;
   setIsLoading(true);
   try {
-    const res = await fetch(`${baseUrl}/api/knowledge/nodes/merge`, {
-      method: "POST",
-      headers: buildAuthHeaders(apiKey),
-      body: JSON.stringify({ node_ids: nodeIds, node_type: mergeNodeType }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setSelectedNodes(new Map());
-      setSelectedNode(data);
-      await loadGraph();
-    } else {
-      const err = await res.json();
-      alert("Error: " + (err.error || "Merge failed"));
-    }
+    const data = await knowledgeService.mergeNodes(nodeIds, mergeNodeType);
+    setSelectedNodes(new Map());
+    setSelectedNode(data);
+    await loadGraph();
   } catch (e: any) { alert("Failed: " + e.message); } finally { setIsLoading(false); }
 };
 
@@ -2096,16 +1741,10 @@ const handleBulkConnect = async () => {
   if (ids.length < 2) return;
   setIsLoading(true);
   try {
-    const res = await fetch(`${baseUrl}/api/knowledge/edges/bulk`, {
-      method: "POST",
-      headers: buildAuthHeaders(apiKey),
-      body: JSON.stringify({ source_id: ids[0], target_ids: ids.slice(1), edge_type: bulkEdgeType }),
-    });
-    if (res.ok) {
-      setSelectedNodes(new Map());
-      setSelectedNode(null);
-      await loadGraph();
-    } else alert("Failed to connect nodes");
+    await knowledgeService.bulkConnect(ids[0], ids.slice(1), bulkEdgeType);
+    setSelectedNodes(new Map());
+    setSelectedNode(null);
+    await loadGraph();
   } catch (e: any) { alert("Failed: " + e.message); } finally { setIsLoading(false); }
 };
 
@@ -2115,11 +1754,7 @@ const handleBulkConnect = async () => {
     setIsLoading(true);
     try {
       await Promise.all(ids.map(async (nodeId) => {
-        const nodeRes = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
-          headers: buildAuthHeaders(apiKey, ""),
-        });
-        if (nodeRes.ok) {
-          const nodeData = await nodeRes.json();
+          const nodeData = await knowledgeService.getNode(nodeId);
           const updatedMetadata = {
             ...(nodeData.metadata || {}),
             workspaces: bulkWorkspace ? [bulkWorkspace] : [],
@@ -2129,12 +1764,7 @@ const handleBulkConnect = async () => {
           } else {
             delete updatedMetadata.workspace_id;
           }
-          await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
-            method: "PUT",
-            headers: buildAuthHeaders(apiKey),
-            body: JSON.stringify({ metadata: updatedMetadata }),
-          });
-        }
+          await knowledgeService.updateNode(nodeId, { metadata: updatedMetadata });
       }));
       setSelectedNodes(new Map());
       setSelectedNode(null);
@@ -2154,14 +1784,7 @@ const handleBulkConnect = async () => {
     setIsLoading(true);
     try {
       await Promise.all(sourceIds.map(async (sourceId) => {
-        const res = await fetch(`${baseUrl}/api/knowledge/edges/bulk`, {
-          method: "POST",
-          headers: buildAuthHeaders(apiKey),
-          body: JSON.stringify({ source_id: sourceId, target_ids: connectTargetIds, edge_type: connectType }),
-        });
-        if (!res.ok) {
-          throw new Error(`Failed to connect node: ${sourceId}`);
-        }
+        await knowledgeService.bulkConnect(sourceId, connectTargetIds, connectType);
       }));
       setIsConnectModalOpen(false);
       setConnectTargetIds([]);
@@ -2180,24 +1803,12 @@ const handleDeleteEdge = async (edgeId: string | undefined, sourceId: string, ta
   if (!confirm("Are you sure you want to remove this connection edge?")) return;
   setIsLoading(true);
   try {
-    let res;
     if (edgeId) {
-      res = await fetch(`${baseUrl}/api/knowledge/edges/${edgeId}`, {
-        method: "DELETE",
-        headers: buildAuthHeaders(apiKey, ""),
-      });
+      await knowledgeService.deleteEdge(edgeId);
     } else {
-      res = await fetch(`${baseUrl}/api/knowledge/edges/disconnect`, {
-        method: "POST",
-        headers: buildAuthHeaders(apiKey),
-        body: JSON.stringify({ source_id: sourceId, target_id: targetId, edge_type: edgeType }),
-      });
+      await knowledgeService.disconnectEdge(sourceId, targetId, edgeType);
     }
-    if (res.ok) {
-      await loadGraph();
-    } else {
-      alert("Failed to remove edge");
-    }
+    await loadGraph();
   } catch (err: any) {
     alert("Failed: " + err.message);
   } finally {
@@ -2211,38 +1822,19 @@ const handleBulkDelete = async () => {
   if (!confirm(`Delete ${ids.length} node(s)? This cannot be undone.`)) return;
   setIsLoading(true);
   try {
-    const res = await fetch(`${baseUrl}/api/knowledge/nodes/bulk-delete`, {
-      method: "POST",
-      headers: buildAuthHeaders(apiKey),
-      body: JSON.stringify({ node_ids: ids }),
-    });
-    if (res.ok) {
-      setSelectedNodes(new Map());
-      setSelectedNode(null);
-      await loadGraph();
-    } else alert("Bulk delete failed");
+    await knowledgeService.bulkDeleteNodes(ids);
+    setSelectedNodes(new Map());
+    setSelectedNode(null);
+    await loadGraph();
   } catch (e: any) { alert("Failed: " + e.message); } finally { setIsLoading(false); }
 };
 
 const handleCommitNode = async (nodeId: string) => {
   setIsLoading(true);
   try {
-    const res = await fetch(`${baseUrl}/api/knowledge/nodes/commit`, {
-      method: "POST",
-      headers: buildAuthHeaders(apiKey),
-      body: JSON.stringify({ node_ids: [nodeId] }),
-    });
-    if (res.ok) {
-      await loadGraph();
-      const detailRes = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
-        headers: buildAuthHeaders(apiKey, "")
-      });
-      if (detailRes.ok) {
-        setSelectedNode(await detailRes.json());
-      }
-    } else {
-      alert("Failed to commit node");
-    }
+    await knowledgeService.commitNodes([nodeId]);
+    await loadGraph();
+    setSelectedNode(await knowledgeService.getNode(nodeId));
   } catch (err: any) {
     alert("Failed: " + err.message);
   } finally {
@@ -2289,17 +1881,7 @@ const handleUpdateNodeMeta = async () => {
   setIsSavingNodeType(true);
   setIsSavingNodeWorkspaces(true);
   try {
-    const res = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
-      method: "PUT",
-      headers: buildAuthHeaders(apiKey),
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      alert(err.error || "Failed to update node");
-      return;
-    }
-    const updated = await res.json();
+    const updated = await knowledgeService.updateNode(nodeId, payload);
     setSelectedNode(updated);
     await loadGraph();
   } catch (err: any) {
@@ -2315,16 +1897,8 @@ const handleCommitAll = async () => {
   if (!confirm("Are you sure you want to commit all staged nodes in this workspace?")) return;
   setIsLoading(true);
   try {
-    const res = await fetch(`${baseUrl}/api/knowledge/nodes/commit`, {
-      method: "POST",
-      headers: buildAuthHeaders(apiKey),
-      body: JSON.stringify({ workspace_id: "olympus" }),
-    });
-    if (res.ok) {
-      await loadGraph();
-    } else {
-      alert("Failed to commit all nodes");
-    }
+    await knowledgeService.commitWorkspace("olympus");
+    await loadGraph();
   } catch (e: any) {
     alert("Failed: " + e.message);
   } finally {
@@ -2338,14 +1912,9 @@ const handleDeleteSelected = async () => {
   if (!confirm(`Delete node "${selectedNode.title || nodeId}"? This cannot be undone.`)) return;
   setIsLoading(true);
   try {
-    const res = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
-      method: "DELETE",
-      headers: buildAuthHeaders(apiKey, ""),
-    });
-    if (res.ok) {
-      setSelectedNode(null);
-      await loadGraph();
-    } else alert("Delete failed");
+    await knowledgeService.deleteNode(nodeId);
+    setSelectedNode(null);
+    await loadGraph();
   } catch (e: any) { alert("Failed: " + e.message); } finally { setIsLoading(false); }
 };
 
@@ -2354,39 +1923,20 @@ const handleAddNode = async (e: React.FormEvent) => {
   if (!newNodeTitle.trim()) return;
   setIsSubmittingNode(true);
   try {
-    const res = await fetch(`${baseUrl}/api/knowledge/nodes`, {
-      method: "POST",
-      headers: buildAuthHeaders(apiKey),
-      body: JSON.stringify({ title: newNodeTitle, node_type: newNodeType, content: newNodeContent, metadata: { workspaces: ["olympus"] } }),
-    });
-    if (res.ok) {
-      const created = await res.json();
-      setNewNodeTitle(""); setNewNodeContent("");
-      setIsAddModalOpen(false);
-      await loadGraph();
-      setSelectedNode(created);
-    } else alert("Failed to create node");
+    const created = await knowledgeService.createNode({ title: newNodeTitle, node_type: newNodeType, content: newNodeContent, metadata: { workspaces: ["olympus"] } });
+    setNewNodeTitle(""); setNewNodeContent("");
+    setIsAddModalOpen(false);
+    await loadGraph();
+    setSelectedNode(created);
   } catch (e: any) { alert(e.message); } finally { setIsSubmittingNode(false); }
 };
 
 const handlePurgeGraph = async () => {
   setIsLoading(true);
   try {
-    const previewRes = await fetch(`${baseUrl}/api/knowledge/purge-workspace-preview`, {
-      method: "POST",
-      headers: buildAuthHeaders(apiKey),
-      body: JSON.stringify({ workspace_id: "olympus" }),
-    });
-    if (!previewRes.ok) {
-      alert("Failed to preview purge.");
-      return;
-    }
-    const preview = await previewRes.json();
+    const preview = await knowledgeService.previewWorkspacePurge("olympus");
     const deleteNodeIds: string[] = preview.delete_node_ids || [];
-    const graphRes = await fetch(`${baseUrl}/api/knowledge/graph?workspace_id=olympus&slim=true&include_staged=true`, {
-      headers: buildAuthHeaders(apiKey, ""),
-    });
-    const graph = graphRes.ok ? await graphRes.json() : { edges: [] };
+    const graph = await knowledgeService.fetchGraph(true, true, "olympus");
     const edgeIds = new Set(
       (graph.edges || [])
         .filter((edge: any) => deleteNodeIds.includes(edge.source_id) || deleteNodeIds.includes(edge.target_id))
@@ -2404,11 +1954,7 @@ const handlePurgeGraph = async () => {
   }
   setIsLoading(true);
   try {
-    await fetch(`${baseUrl}/api/knowledge/purge-workspace`, {
-      method: "POST",
-      headers: buildAuthHeaders(apiKey),
-      body: JSON.stringify({ workspace_id: "olympus" }),
-    });
+    await knowledgeService.purgeWorkspace("olympus");
     setSelectedNode(null);
     await loadGraph();
   } catch (e: any) { alert("Purge workspace failed: " + e.message); } finally { setIsLoading(false); }
@@ -2418,11 +1964,7 @@ const handlePruneGraph = async () => {
   if (!confirm("Are you sure you want to prune dangling edges and orphaned nodes?")) return;
   setIsLoading(true);
   try {
-    await fetch(`${baseUrl}/api/knowledge/prune`, {
-      method: "POST",
-      headers: buildAuthHeaders(apiKey),
-      body: JSON.stringify({ workspace_id: "olympus" }),
-    });
+    await knowledgeService.pruneWorkspace("olympus");
     setSelectedNode(null);
     await loadGraph();
   } catch (e: any) { alert("Prune failed: " + e.message); } finally { setIsLoading(false); }
@@ -2785,6 +2327,7 @@ const confirmImport = async () => {
     setTypeFilter(snapshot.typeFilter || null);
     setOpenType(snapshot.openType || null);
     setIs3DMode(Boolean(snapshot.is3DMode));
+    setShowInsights(Boolean(snapshot.showInsights));
     setSelectedNodes(restoredSelectedNodes);
     setSelectedNode(restoredSelectedNode as Node | null);
     setChatMessages(thread.messages || []);
@@ -2799,10 +2342,7 @@ const confirmImport = async () => {
     if (restoredSelectedNode) {
       try {
         const nodeId = restoredSelectedNode.node_id || restoredSelectedNode.id;
-        const response = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
-          headers: buildAuthHeaders(apiKey, ""),
-        });
-        if (response.ok) setSelectedNode(await response.json());
+        setSelectedNode(await knowledgeService.getNode(nodeId));
       } catch (error) {
         console.error("Failed to restore selected node details:", error);
       }
@@ -2964,17 +2504,21 @@ const confirmImport = async () => {
         console.error("Failed to load settings:", err);
       }
 
-      const isFilteredChat = Boolean(activeFilteredContext);
+      const isFilteredChat = Boolean(activeAthenaContext);
       const adj = graphIndex.adjacency;
       const distances = isFilteredChat
-        ? new Map(activeFilteredContext!.nodes.map((node) => [node.node_id, 0]))
+        ? new Map(activeAthenaContext!.nodes.map((node) => [node.node_id, 0]))
         : bfs(new Set([activeNodeId]), exploreDepth, adj);
-      const neighborNodes = isFilteredChat
-        ? activeFilteredContext!.nodes
-        : rawNodes.filter(n => n.node_id !== activeNodeId && distances.has(n.node_id));
-      const neighborEdges = isFilteredChat
-        ? activeFilteredContext!.edges
-        : rawEdges.filter(e => distances.has(e.source_id) && distances.has(e.target_id));
+      const neighborNodes = (isFilteredChat
+        ? activeAthenaContext!.nodes
+        : rawNodes.filter(n => n.node_id !== activeNodeId && distances.has(n.node_id)))
+        .filter((node) => showInsights || node.node_type !== "insight");
+      const visibleAthenaNodeIds = new Set(neighborNodes.map((node) => node.node_id || node.id));
+      if (!isFilteredChat && activeNodeId) visibleAthenaNodeIds.add(activeNodeId);
+      const neighborEdges = (isFilteredChat
+        ? activeAthenaContext!.edges
+        : rawEdges.filter(e => distances.has(e.source_id) && distances.has(e.target_id)))
+        .filter((edge) => visibleAthenaNodeIds.has(edge.source_id) && visibleAthenaNodeIds.has(edge.target_id));
 
       const neighborsText = neighborNodes.map(n => {
         const dist = distances.get(n.node_id);
@@ -2992,6 +2536,7 @@ The user is asking questions about a node in the Knowledge Graph and its neighbo
 - Use the provided graph nodes, adjacent relationships, and edges to reference and understand the underlying LOGIC, facts, code architecture, and software relationships they represent.
 - Answer the user's question directly by focusing on these logical relationships, engineering logic, facts, and code concepts.
 - Do NOT talk about the layout, visual structure, node IDs, edge weights, or graph theory terminology unless explicitly requested. Speak in terms of actual code architecture, functionalities, and logical concepts.
+- Treat the canvas-visible graph as the complete context. Do not infer from or mention hidden insight nodes. Insights are context only when the user explicitly enables Show insights.
 
 [${isFilteredChat ? "FILTERED GRAPH CONTEXT" : "SELECTED NODE"}]
 - ID: ${activeNodeId}
@@ -3133,8 +2678,7 @@ return (
                       setSelectedNode(n);
                       handleExploreNode(n.node_id);
                       try {
-                        const res = await fetch(`${baseUrl}/api/knowledge/nodes/${n.node_id}`, { headers: buildAuthHeaders(apiKey, "") });
-                        if (res.ok) setSelectedNode(await res.json());
+                        setSelectedNode(await knowledgeService.getNode(n.node_id));
                       } catch (e) { console.error(e); }
                       setSearchQuery("");
                     }}
@@ -3396,6 +2940,20 @@ return (
             <button onClick={() => setExploreDepth((d) => Math.max(1, d - 1))} className="w-5 h-5 flex items-center justify-center bg-[var(--cp-bg-2)] border border-[var(--cp-border)] hover:bg-[var(--cp-bg-3)] rounded font-bold cursor-pointer">-</button>
             <span className="text-foreground font-bold px-1">{exploreDepth}</span>
             <button onClick={() => setExploreDepth((d) => d + 1)} className="w-5 h-5 flex items-center justify-center bg-[var(--cp-bg-2)] border border-[var(--cp-border)] hover:bg-[var(--cp-bg-3)] rounded font-bold cursor-pointer">+</button>
+            {filterReachability.visibleNodes.some((node) => node.node_type === "insight") && (
+              <button
+                type="button"
+                onClick={() => setShowInsights((current) => !current)}
+                aria-pressed={showInsights}
+                className={`ml-2 px-2 py-0.5 border rounded text-[10px] uppercase tracking-wider transition-colors ${
+                  showInsights
+                    ? "border-amber-400/70 bg-amber-400/15 text-amber-300"
+                    : "border-amber-400/30 bg-amber-950/20 text-amber-300/80 hover:border-amber-400/70"
+                }`}
+              >
+                {showInsights ? "Hide insights" : "Show insights"}
+              </button>
+            )}
             <button onClick={clearExploreMode} className="ml-2 px-2 py-0.5 border border-red-950 text-red-500 rounded bg-red-950/20 hover:bg-red-900/40 text-[10px] cursor-pointer">✕ CLEAR</button>
           </div>
         )}
@@ -3506,6 +3064,13 @@ return (
                     <div className="text-[10px] text-muted-foreground mt-1">
                       {activeFilteredContext.nodes.length} nodes · {activeFilteredContext.edges.length} edges
                     </div>
+                    {activeVisibility && activeVisibility.insightCount > 0 && (
+                      <div className="text-[9px] text-amber-300/80 mt-2 uppercase tracking-wider">
+                        {showInsights
+                          ? `${activeVisibility.insightCount} insights visible on canvas`
+                          : `${activeVisibility.insightCount} insights listed · hidden from canvas and Athena`}
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-1">
                     {activeFilteredContext.nodes.map((node) => (
@@ -3595,6 +3160,26 @@ return (
                     </button>
                   </div>
                   </>}
+                  {filterReachability.visibleNodes.length > 0 && (
+                    <div>
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <h4 className="text-[10px] font-mono uppercase text-muted-foreground tracking-wider">
+                          Visible nodes ({filterReachability.visibleNodes.length})
+                        </h4>
+                        {!showInsights && filterReachability.visibleNodes.some((node) => node.node_type === "insight") && (
+                          <span className="text-[8px] font-mono uppercase text-amber-300/80">Insights listed, canvas hidden</span>
+                        )}
+                      </div>
+                      <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
+                        {filterReachability.visibleNodes.map((node) => (
+                          <div key={node.node_id || node.id} className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] px-2.5 py-1.5 font-mono">
+                            <div className="text-xs text-foreground">{node.title || node.node_id}</div>
+                            <div className="text-[9px] text-muted-foreground uppercase">{node.node_type}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <h4 className="text-[10px] font-mono uppercase text-muted-foreground mb-1 tracking-wider">CONNECTIONS</h4>
                     {selectedConnections.length ? (
@@ -3684,48 +3269,24 @@ return (
                   {chatMessages.length === 0 ? (
                     <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground p-8 text-center leading-relaxed">
                       {activeFilteredContext
-                        ? `Ask questions about all ${activeFilteredContext.nodes.length} filtered nodes and ${activeFilteredContext.edges.length} visible edges.`
+                        ? `Ask questions about the ${activeAthenaContext?.nodes.length || 0} nodes and ${activeAthenaContext?.edges.length || 0} edges currently visible on the canvas.`
                         : "Ask questions about this knowledge node and its neighborhood. ATHENA will look at its connections and metadata to answer."}
                     </div>
                   ) : (
                     chatMessages.map((msg, i) => (
-                      <div key={msg.id || i} data-athena-message-index={i} className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}>
-                        <div className="relative group max-w-[85%]">
-                          <div className={`rounded px-3 py-2 text-xs font-mono border ${
-                            msg.sender === "user"
-                              ? "bg-[var(--cp-cyan)]/10 border-[var(--cp-cyan)]/25 text-foreground"
-                              : "bg-[var(--cp-bg-2)] border-[var(--cp-border)] text-foreground/90"
-                          }`}>
-                            <div className="absolute -top-2 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button type="button" onClick={() => handleCopyMessage(msg.text)} title="Copy message text" aria-label="Copy message text" className="p-1 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground hover:text-[var(--cp-cyan)]">
-                                <Copy size={9} />
-                              </button>
-                              <button type="button" onClick={() => void handleExportMessage("html", msg, i)} title="Download message as HTML" aria-label="Download message as HTML" className="p-1 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground hover:text-[var(--cp-cyan)]">
-                                <FileCode2 size={9} />
-                              </button>
-                              <button type="button" onClick={() => void handleExportMessage("pdf", msg, i)} title="Download message as PDF" aria-label="Download message as PDF" className="p-1 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground hover:text-[var(--cp-cyan)]">
-                                <FileText size={9} />
-                              </button>
-                              <button type="button" onClick={() => handleDeleteMessage(msg.id)} title="Delete message" aria-label="Delete message" className="p-1 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground hover:text-red-400">
-                                <Trash2 size={9} />
-                              </button>
-                            </div>
-                            {msg.sender === "assistant" ? (
-                              <div
-                                data-athena-export-content
-                                className="font-sans leading-relaxed [&>p]:my-2 [&>p:first-child]:mt-0 [&>p:last-child]:mb-0 [&_h1]:text-lg [&_h1]:font-bold [&_h1]:my-3 [&_h2]:text-base [&_h2]:font-bold [&_h2]:my-3 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2 [&_li]:my-1 [&_table]:w-full [&_table]:border-collapse [&_table]:my-3 [&_th]:border [&_th]:border-[var(--cp-border)] [&_th]:bg-[var(--cp-bg-1)] [&_th]:p-2 [&_th]:text-left [&_td]:border [&_td]:border-[var(--cp-border)] [&_td]:p-2 [&_td]:align-top [&_pre]:bg-[var(--cp-bg-0)] [&_pre]:border [&_pre]:border-[var(--cp-border)] [&_pre]:p-2 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_code]:font-mono [&_code]:text-[10px] [&_blockquote]:border-l-2 [&_blockquote]:border-[var(--cp-cyan)] [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground"
-                              >
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
-                              </div>
-                            ) : (
-                              <p data-athena-export-content className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
-                            )}
-                          </div>
-                        </div>
-                        <span className="text-[8px] text-muted-foreground mt-1 px-1 font-mono uppercase">
-                          {msg.sender === "user" ? "USER" : "ATHENA"} • {new Date(msg.timestamp).toLocaleTimeString()}
-                        </span>
-                      </div>
+                      <AthenaMessage
+                        key={msg.id || i}
+                        message={msg}
+                        messageIndex={i}
+                        onCopy={handleCopyMessage}
+                        onDelete={() => handleDeleteMessage(msg.id)}
+                        actions={(
+                          <>
+                            <button type="button" onClick={() => void handleExportMessage("html", msg, i)} title="Download message as HTML" aria-label="Download message as HTML" className="p-1 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground hover:text-[var(--cp-cyan)]"><FileCode2 size={9} /></button>
+                            <button type="button" onClick={() => void handleExportMessage("pdf", msg, i)} title="Download message as PDF" aria-label="Download message as PDF" className="p-1 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground hover:text-[var(--cp-cyan)]"><FileText size={9} /></button>
+                          </>
+                        )}
+                      />
                     ))
                   )}
                   {isAiLoading && (

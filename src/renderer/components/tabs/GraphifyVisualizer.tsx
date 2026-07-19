@@ -1,14 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
-import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Info, Sparkles, Send, Copy, Trash } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import {
-  buildAthenaPromptSections,
-  fetchAthenaCodeContext,
-  fetchAthenaKnowledgeContext,
-  fetchAthenaMcpTools,
-  formatAthenaContextHits,
-} from "@/lib/athenaContext";
+import { ZoomIn, ZoomOut, Maximize2, Search, Loader2, Info } from "lucide-react";
+import { createContextService } from "@/services/contextService";
+import { GraphEntityChatPanel } from "./context/components/GraphEntityChatPanel";
 
 interface GraphifyVisualizerProps {
   repoId: string;
@@ -16,13 +10,6 @@ interface GraphifyVisualizerProps {
   baseUrl: string;
   apiKey: string;
   activeModel?: { provider: string; model: string };
-}
-
-interface ChatMessage {
-  id?: string;
-  sender: "user" | "assistant";
-  text: string;
-  timestamp: string;
 }
 
 interface GraphNode extends d3.SimulationNodeDatum {
@@ -66,151 +53,7 @@ export const GraphifyVisualizer: React.FC<GraphifyVisualizerProps> = ({
   const [isExpanding, setIsExpanding] = useState(false);
 
   const [activeTab, setActiveTab] = useState<"details" | "chat">("details");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputValue, setInputValue] = useState("");
-  const [isAthenaThinking, setIsAthenaThinking] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
-
-  const getStorageKey = () => `savant_chat_history_graphify_${repoName}_${selectedNode?.node_id}`;
-
-  useEffect(() => {
-    if (!selectedNode) {
-      setMessages([]);
-      return;
-    }
-    async function load() {
-      try {
-        const key = getStorageKey();
-        const stored = await window.system.getChatHistory(key);
-        if (stored) {
-          setMessages(stored);
-        } else {
-          setMessages([]);
-        }
-      } catch (err) {
-        console.error("Error loading chat history:", err);
-        setMessages([]);
-      }
-    }
-    load();
-  }, [selectedNode?.node_id, repoName]);
-
-  const saveMessages = (newMessages: ChatMessage[]) => {
-    setMessages(newMessages);
-    try {
-      window.system.saveChatHistory(getStorageKey(), newMessages);
-    } catch (err) {
-      console.error("Error saving chat history:", err);
-    }
-  };
-
-  const handleClearHistory = () => {
-    saveMessages([]);
-  };
-
-  // Scroll to bottom helper
-  useEffect(() => {
-    if (chatEndRef.current && typeof chatEndRef.current.scrollIntoView === "function") {
-      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages, isAthenaThinking, activeTab]);
-
-  const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
-    const baseUrlClean = baseUrl.replace(/\/+$/, "");
-    const [codeHits, knowledgeHits, tools] = await Promise.all([
-      fetchAthenaCodeContext(baseUrlClean, apiKey, query, repoName),
-      fetchAthenaKnowledgeContext(baseUrlClean, apiKey, query),
-      fetchAthenaMcpTools(baseUrlClean, apiKey),
-    ]);
-
-    return buildAthenaPromptSections([
-      ["BASE PROMPT", basePrompt],
-      ["RETRIEVED CODE CONTEXT", formatAthenaContextHits(codeHits)],
-      ["RETRIEVED KNOWLEDGE CONTEXT", formatAthenaContextHits(knowledgeHits)],
-      ["AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools available."],
-    ]);
-  };
-
-  const handleSendMessage = async (textToSend: string) => {
-    if (!textToSend.trim() || isAthenaThinking || !selectedNode) return;
-
-    const newUserMessage: ChatMessage = {
-      id: Math.random().toString(),
-      sender: "user",
-      text: textToSend,
-      timestamp: new Date().toISOString(),
-    };
-
-    const updatedMessages = [...messages, newUserMessage];
-    saveMessages(updatedMessages);
-    setInputValue("");
-    setIsAthenaThinking(true);
-
-    try {
-      let provider = "gemini";
-      let model = "3.5";
-      if (activeModel) {
-        provider = activeModel.provider;
-        model = activeModel.model;
-      } else {
-        const s = await window.system.getSettings();
-        const chain = s?.["provider:chain"] || [];
-        if (chain.length > 0) {
-          provider = chain[0].provider;
-          model = chain[0].model;
-        }
-      }
-
-      const contextPrompt = `You are ATHENA, an AI assistant integrated into the Savant Olympus app.
-The user is having a conversation with you regarding a Project Graph entity:
-- Name: ${selectedNode.title}
-- Node Type: ${(selectedNode.node_type || "").toUpperCase()}
-- Node ID: ${selectedNode.node_id}
-${selectedNode.content ? `- Docstring / Content: \n${selectedNode.content}\n` : ""}
-${selectedNode.metadata ? `- Metadata: ${JSON.stringify(selectedNode.metadata)}\n` : ""}
-
-Goal: Help the user analyze, explain, query, and refactor code related to this entity.
-
-[CONVERSATION HISTORY]
-${updatedMessages.slice(0, -1).map(msg => `${msg.sender === "user" ? "User" : "ATHENA"}: ${msg.text}`).join("\n")}
-
-[NEW USER MESSAGE]
-${textToSend}
-
-Please analyze the project graph entity details, the context, and the history, then respond to the user's message.
-Explain how it fits into the repository structure, its dependencies/relationships, and suggest code changes or architectural insights.
-
-[INSTRUCTIONS FOR MCP USAGE]
-You have access to a variety of Savant MCP tools. Use them to investigate code, query knowledge, or perform actions as needed. 
-Always prefer using a tool if it can provide more accurate or deep information.
-`;
-
-      const responseText = await window.ipcRenderer.invoke("run-agent", {
-        provider,
-        model,
-        prompt: await buildAthenaAugmentedPrompt(contextPrompt, `${selectedNode.title} ${textToSend} ${selectedNode.content || ""}`),
-      });
-
-      const newAiMessage: ChatMessage = {
-        id: Math.random().toString(),
-        sender: "assistant",
-        text: responseText || "No response received from the gateway.",
-        timestamp: new Date().toISOString(),
-      };
-
-      saveMessages([...updatedMessages, newAiMessage]);
-    } catch (error: any) {
-      const errorMsg: ChatMessage = {
-        id: Math.random().toString(),
-        sender: "assistant",
-        text: `Error calling ATHENA agent: ${error.message || "Unknown error"}. Make sure Savant Gateway is running.`,
-        timestamp: new Date().toISOString(),
-      };
-      saveMessages([...updatedMessages, errorMsg]);
-    } finally {
-      setIsAthenaThinking(false);
-    }
-  };
+  const contextService = React.useMemo(() => createContextService(baseUrl, apiKey), [baseUrl, apiKey]);
 
   // D3 zoom reference
   const zoomBehaviorRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
@@ -221,16 +64,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
     setError(null);
     setSelectedNode(null);
     try {
-      const res = await fetch(
-        `${baseUrl}/api/graphify/main-entities?repo_id=${encodeURIComponent(repoId)}&workspace_id=${encodeURIComponent(
-          repoName
-        )}&limit=40`,
-        {
-          headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-        }
-      );
-      if (!res.ok) throw new Error("Failed to load codebase graph structure");
-      const data = await res.json();
+      const data = await contextService.getGraphifyMainEntities(repoId, repoName);
 
       const formattedNodes: GraphNode[] = (data.nodes || []).map((n: any) => ({
         ...n,
@@ -255,22 +89,13 @@ Always prefer using a tool if it can provide more accurate or deep information.
 
   useEffect(() => {
     loadMainEntities();
-  }, [repoId, repoName, baseUrl, apiKey]);
+  }, [repoId, repoName, contextService]);
 
   // 2. Fetch direct neighbors on select
   const expandNodeNeighbors = async (node: GraphNode) => {
     setIsExpanding(true);
     try {
-      const res = await fetch(
-        `${baseUrl}/api/graphify/neighbors?repo_id=${encodeURIComponent(repoId)}&workspace_id=${encodeURIComponent(
-          repoName
-        )}&node_id=${encodeURIComponent(node.node_id)}`,
-        {
-          headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
-        }
-      );
-      if (!res.ok) throw new Error("Failed to expand neighbors");
-      const data = await res.json();
+      const data = await contextService.getGraphifyNeighbors(repoId, repoName, node.node_id);
 
       setNodes((prevNodes) => {
         const existingIds = new Set(prevNodes.map((n) => n.node_id));
@@ -315,23 +140,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
 
     setIsLoading(true);
     try {
-      const res = await fetch(`${baseUrl}/api/graphify/search`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": apiKey,
-          "X-App-Name": "savant-olympus",
-        },
-        body: JSON.stringify({
-          repo_id: repoId,
-          workspace_id: repoName,
-          query: searchQuery,
-          limit: 10,
-        }),
-      });
-
-      if (res.ok) {
-        const results = await res.json();
+        const results = await contextService.searchGraphify(repoId, repoName, searchQuery);
         if (results && results.length > 0) {
           const match = results[0];
           const matchNode: GraphNode = { ...match, id: match.node_id };
@@ -349,7 +158,6 @@ Always prefer using a tool if it can provide more accurate or deep information.
         } else {
           setError(`No entities matching "${searchQuery}" found.`);
         }
-      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -366,6 +174,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
 
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove(); // Clean container
+    svg.attr("viewBox", `0 0 ${width} ${height}`);
 
     // Add main group for zoom/pan
     const mainGroup = svg.append("g").attr("class", "graph-content");
@@ -373,6 +182,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
     // Configure zoom behaviour
     const zoom = d3
       .zoom<SVGSVGElement, unknown>()
+      .extent([[0, 0], [width, height]])
       .scaleExtent([0.1, 8])
       .on("zoom", (event) => {
         mainGroup.attr("transform", event.transform);
@@ -420,7 +230,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
     svg
       .append("defs")
       .selectAll("marker")
-      .data(["calls", "imports", "inherits", "depends_on"])
+      .data(["calls", "imports", "inherits", "depends_on", "defines"])
       .enter()
       .append("marker")
       .attr("id", (d) => `arrow-${d}`)
@@ -432,7 +242,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
       .attr("orient", "auto")
       .append("path")
       .attr("fill", (d) =>
-        d === "calls" ? "#00e5ff" : d === "imports" ? "#b388ff" : d === "inherits" ? "#81c784" : "#90a4ae"
+        d === "calls" ? "#00e5ff" : d === "imports" ? "#b388ff" : d === "inherits" ? "#81c784" : d === "defines" ? "#38bdf8" : "#90a4ae"
       )
       .attr("d", "M0,-5L10,0L0,5");
 
@@ -452,6 +262,8 @@ Always prefer using a tool if it can provide more accurate or deep information.
           ? "#b388ff"
           : d.edge_type === "inherits"
           ? "#81c784"
+          : d.edge_type === "defines"
+          ? "#38bdf8"
           : "#455a64"
       )
       .attr("marker-end", (d) => `url(#arrow-${d.edge_type})`)
@@ -497,7 +309,11 @@ Always prefer using a tool if it can provide more accurate or deep information.
     // Draw node circles with glowing shadows
     node
       .append("circle")
-      .attr("r", (d) => (d.id === selectedNode?.id ? 14 : 10))
+      .attr("r", (d) => {
+        const members = Number(d.metadata?.member_count || 0);
+        const base = d.node_type === "class" ? Math.min(24, 11 + Math.sqrt(members) * 2.2) : 9;
+        return d.id === selectedNode?.id ? base + 4 : base;
+      })
       .attr("fill", (d) =>
         d.node_type === "class"
           ? "#00e5ff"
@@ -609,6 +425,9 @@ Always prefer using a tool if it can provide more accurate or deep information.
         </div>
 
         {/* Zoom Controls */}
+        <div className="absolute top-3 right-3 z-10 px-2 py-1 bg-black/60 border border-[var(--cp-border)] rounded text-[9px] font-mono text-muted-foreground">
+          VISIBLE: <strong className="text-foreground">{nodes.length}</strong> NODES / <strong className="text-foreground">{edges.length}</strong> EDGES
+        </div>
         <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-1.5">
           <button
             onClick={() => handleZoom(1.3)}
@@ -635,7 +454,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
 
         {/* Loader */}
         {(isLoading || isExpanding) && (
-          <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5 px-2 py-1 bg-black/60 border border-[var(--cp-border)] rounded text-[9px] font-mono text-[var(--cp-cyan)] animate-pulse">
+          <div className="absolute top-10 right-3 z-10 flex items-center gap-1.5 px-2 py-1 bg-black/60 border border-[var(--cp-border)] rounded text-[9px] font-mono text-[var(--cp-cyan)] animate-pulse">
             <Loader2 size={10} className="animate-spin" />
             <span>{isLoading ? "Loading Graph..." : "Expanding Neighbors..."}</span>
           </div>
@@ -653,8 +472,9 @@ Always prefer using a tool if it can provide more accurate or deep information.
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-[#38bdf8]" />
-            <span>File</span>
+            <span>Module / File</span>
           </div>
+          <div className="pt-1 border-t border-[var(--cp-border)]/50">Class size = member count</div>
         </div>
 
         {/* Render Error */}
@@ -673,9 +493,9 @@ Always prefer using a tool if it can provide more accurate or deep information.
             />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center text-center opacity-35">
-              <Loader2 size={24} className="animate-spin mb-1.5 text-[var(--cp-cyan)]" />
+              {isLoading && <Loader2 size={24} className="animate-spin mb-1.5 text-[var(--cp-cyan)]" />}
               <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
-                initializing_project_graph
+                {isLoading ? "initializing_project_graph" : "no_graph_entities_returned"}
               </span>
             </div>
           )}
@@ -774,139 +594,13 @@ Always prefer using a tool if it can provide more accurate or deep information.
                 </div>
               </div>
             ) : (
-              <div className="flex-1 flex flex-col min-h-0 space-y-3">
-                <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2 space-y-3 min-h-0 flex flex-col pr-1">
-                  {messages.length === 0 ? (
-                    <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-4 my-auto">
-                      <Sparkles className="w-8 h-8 text-[var(--cp-cyan)] animate-pulse" />
-                      <div className="space-y-1">
-                        <h4 className="text-[11px] font-bold text-foreground uppercase tracking-wider font-mono">ATHENA</h4>
-                        <p className="text-[9px] text-muted-foreground max-w-[200px] leading-relaxed font-sans">
-                          Ask ATHENA questions about this entity. ATHENA has full context of this node.
-                        </p>
-                      </div>
-
-                      {/* Quick actions */}
-                      <div className="w-full flex flex-col gap-1.5 pt-2">
-                        <button
-                          onClick={() => handleSendMessage(`Explain what the entity "${selectedNode.title}" does.`)}
-                          className="w-full text-left py-1.5 px-2 bg-[var(--cp-bg-3)] hover:bg-[var(--cp-border)] border border-[var(--cp-border)] text-muted-foreground hover:text-foreground rounded transition-all text-[9px] cursor-pointer"
-                        >
-                          🔍 Explain this entity
-                        </button>
-                        <button
-                          onClick={() => handleSendMessage(`How does "${selectedNode.title}" relate to the rest of the codebase?`)}
-                          className="w-full text-left py-1.5 px-2 bg-[var(--cp-bg-3)] hover:bg-[var(--cp-border)] border border-[var(--cp-border)] text-muted-foreground hover:text-foreground rounded transition-all text-[9px] cursor-pointer"
-                        >
-                          🕸️ How does it relate to others?
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-3 flex-1">
-                      {messages.map((msg, i) => (
-                        <div
-                          key={i}
-                          className={`flex flex-col space-y-1 group relative ${
-                            msg.sender === "user" ? "items-end" : "items-start"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 text-[8px] text-muted-foreground opacity-60">
-                            <span>{msg.sender === "user" ? "USER" : "ATHENA"}</span>
-                            {/* Copy & Delete action buttons */}
-                            <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button
-                                onClick={() => navigator.clipboard.writeText(msg.text)}
-                                title="Copy message text"
-                                className="hover:text-[var(--cp-cyan)] cursor-pointer"
-                              >
-                                <Copy size={9} />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  const newMessages = messages.filter((_, idx) => idx !== i);
-                                  saveMessages(newMessages);
-                                }}
-                                title="Delete message"
-                                className="hover:text-red-400 cursor-pointer"
-                              >
-                                <Trash size={9} />
-                              </button>
-                            </div>
-                          </div>
-                          <div
-                            className={`p-2 rounded border max-w-full overflow-hidden font-mono text-[10px] leading-relaxed break-words text-foreground ${
-                              msg.sender === "user"
-                                ? "bg-[rgba(0,229,255,0.06)] border-[rgba(0,229,255,0.25)] text-right"
-                                : "bg-[rgba(167,139,250,0.06)] border-[rgba(167,139,250,0.2)] text-left"
-                            }`}
-                          >
-                            {msg.sender === "user" ? (
-                              <span className="whitespace-pre-wrap">{msg.text}</span>
-                            ) : (
-                              <div className="prose prose-invert max-w-none text-[10px] leading-relaxed [&>p]:mb-2 [&>p:last-child]:mb-0 [&>pre]:bg-[var(--cp-bg-1)] [&>pre]:p-1.5 [&>pre]:rounded [&>pre]:my-1.5 [&>pre]:border [&>pre]:border-[var(--cp-border)] [&>pre>code]:text-[9px] [&>pre]:overflow-x-auto [&>pre]:max-w-full [&>ul]:list-disc [&>ul]:pl-4 [&>ul]:mb-2 [&>ol]:list-decimal [&>ol]:pl-4 [&>ol]:mb-2 [&_code]:break-all [&_code]:whitespace-pre-wrap font-sans font-medium text-foreground antialiased">
-                                <ReactMarkdown>{msg.text}</ReactMarkdown>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                      {isAthenaThinking && (
-                        <div className="flex flex-col space-y-1 items-start">
-                          <span className="text-[8px] text-[var(--cp-cyan)] uppercase tracking-wider animate-pulse">ATHENA IS THINKING...</span>
-                          <div className="p-2 rounded border border-[var(--cp-border)] bg-[var(--cp-bg-3)] flex items-center gap-2">
-                            <Loader2 size={12} className="animate-spin text-[var(--cp-cyan)]" />
-                            <span className="text-muted-foreground text-[10px] font-sans">Consulting Savant Gateway...</span>
-                          </div>
-                        </div>
-                      )}
-                      <div ref={chatEndRef} />
-                    </div>
-                  )}
-                </div>
-
-                {/* Input Form */}
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleSendMessage(inputValue);
-                  }}
-                  className="flex gap-2 shrink-0"
-                >
-                  <textarea
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        if (inputValue.trim() && !isAthenaThinking) {
-                          handleSendMessage(inputValue);
-                        }
-                      }
-                    }}
-                    placeholder="Ask ATHENA about this entity..."
-                    disabled={isAthenaThinking}
-                    rows={1}
-                    className="flex-1 bg-[var(--cp-bg-0)] border border-[var(--cp-border)] px-3 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:border-[var(--cp-cyan)] resize-none min-h-[32px] max-h-[120px] overflow-y-auto"
-                  />
-                  <button
-                    type="submit"
-                    disabled={isAthenaThinking || !inputValue.trim()}
-                    className="px-4 py-1.5 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase hover:opacity-90 disabled:opacity-50 font-mono"
-                  >
-                    ASK
-                  </button>
-                  {messages.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleClearHistory}
-                      className="px-2 py-1.5 border border-red-500/20 text-red-400 hover:bg-red-950/20 text-xs font-mono"
-                    >
-                      CLEAR
-                    </button>
-                  )}
-                </form>
-              </div>
+              <GraphEntityChatPanel
+                node={selectedNode}
+                repoName={repoName}
+                serverUrl={baseUrl}
+                apiKey={apiKey}
+                activeModel={activeModel}
+              />
             )}
           </div>
         ) : (

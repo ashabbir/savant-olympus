@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { buildFilteredKnowledgeContext, buildKnowledgeChatContextSnapshot, buildKnowledgeExportPayload, buildKnowledgeImportDiff, fetchKnowledgeExportData, getKnowledgeNodeRadius, importKnowledgePayload, inferNodeDomains, KnowledgeView, restoreKnowledgeFocals, validateKnowledgeImportPayload } from '../components/tabs/KnowledgeView'
+import { buildFilteredKnowledgeContext, buildKnowledgeChatContextSnapshot, buildKnowledgeExportPayload, buildKnowledgeImportDiff, deriveKnowledgeVisibility, fetchKnowledgeExportData, getKnowledgeNodeRadius, importKnowledgePayload, inferNodeDomains, KnowledgeView, restoreKnowledgeFocals, validateKnowledgeImportPayload } from '../components/tabs/KnowledgeView'
 
 const graphPayload = {
   nodes: [
@@ -13,6 +13,7 @@ const graphPayload = {
     { edge_id: 'e2', source_id: 'd1', target_id: 'n1', edge_type: 'contains', weight: 1 },
   ],
 }
+let currentGraphPayload = graphPayload
 
 describe('KnowledgeView', () => {
   it('increases node size as linked edge count grows', () => {
@@ -28,6 +29,7 @@ describe('KnowledgeView', () => {
     vi.clearAllMocks()
     window.localStorage.clear()
     window.localStorage.setItem('savant_api_key', 'sk-test-key')
+    currentGraphPayload = graphPayload
     vi.mocked(window.system.loadAthenaThreads).mockResolvedValue([])
     vi.mocked(window.system.getChatHistory).mockResolvedValue([])
     vi.stubGlobal('confirm', vi.fn(() => true))
@@ -49,7 +51,7 @@ describe('KnowledgeView', () => {
     vi.mocked(window.fetch).mockImplementation((url, init) => {
       const u = url.toString()
       if (u.includes('/api/knowledge/graph')) {
-        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(graphPayload) } as Response)
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(currentGraphPayload) } as Response)
       }
       if (u.includes('/api/knowledge/nodes/n1') && (init as RequestInit | undefined)?.method === 'PUT') {
         const body = JSON.parse(String((init as RequestInit | undefined)?.body || '{}'))
@@ -341,6 +343,74 @@ describe('KnowledgeView', () => {
     expect(context?.edges).toHaveLength(1)
   })
 
+  it('keeps insights in the visible-node list but hides them from canvas and Athena until requested', () => {
+    const context = {
+      nodes: [
+        { node_id: 'p1', title: 'Person One', node_type: 'person' },
+        { node_id: 'i1', title: 'Private signal', node_type: 'insight' },
+      ],
+      edges: [{ source_id: 'p1', target_id: 'i1', edge_type: 'relates_to' }],
+      scopeId: 'filtered-context-1',
+    }
+
+    const hidden = deriveKnowledgeVisibility(context, false)
+    expect(hidden.listedNodes.map((node) => node.node_id)).toEqual(['p1', 'i1'])
+    expect(hidden.visualNodes.map((node) => node.node_id)).toEqual(['p1'])
+    expect(hidden.visualEdges).toEqual([])
+    expect(hidden.hiddenInsightCount).toBe(1)
+
+    const revealed = deriveKnowledgeVisibility(context, true)
+    expect(revealed.visualNodes.map((node) => node.node_id)).toEqual(['p1', 'i1'])
+    expect(revealed.visualEdges).toHaveLength(1)
+    expect(revealed.hiddenInsightCount).toBe(0)
+  })
+
+  it('reveals listed insights on the canvas only after explicit request', async () => {
+    currentGraphPayload = {
+      nodes: [
+        ...graphPayload.nodes,
+        { node_id: 'i1', title: 'Private signal', node_type: 'insight', content: 'Sensitive insight', status: 'committed', metadata: {} },
+      ],
+      edges: [
+        ...graphPayload.edges,
+        { edge_id: 'e3', source_id: 'd1', target_id: 'i1', edge_type: 'contains', weight: 1 },
+      ],
+    }
+    const { container } = render(<KnowledgeView serverUrl="http://savant.local/" apiKey="sk-test" />)
+    await screen.findByText('Knowledge Network')
+
+    fireEvent.change(screen.getByPlaceholderText('Find knowledge node...'), { target: { value: 'Auth' } })
+    fireEvent.click((await screen.findAllByText('Auth Service'))[0])
+    fireEvent.click(await screen.findByRole('button', { name: /expand node details/i }))
+
+    expect(screen.getByText('Visible nodes (4)')).toBeInTheDocument()
+    expect(screen.getAllByText('Private signal').length).toBeGreaterThan(0)
+    expect(screen.getByText(/Insights listed, canvas hidden/i)).toBeInTheDocument()
+    const insightNode = container.querySelector('g.node[data-node-id="i1"]')
+    expect(insightNode).toHaveAttribute('opacity', '0')
+    const depthControls = screen.getByText('DEPTH').parentElement!
+    expect(within(depthControls).getByRole('button', { name: 'Show insights' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /ask athena/i }))
+    fireEvent.change(screen.getByPlaceholderText('Ask ATHENA about this node...'), {
+      target: { value: 'Summarize what is visible.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'ASK' }))
+    await waitFor(() => expect(window.ipcRenderer.invoke).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(window.ipcRenderer.invoke).mock.calls[0][1].prompt).not.toContain('Private signal')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show insights' }))
+
+    await waitFor(() => expect(insightNode).toHaveAttribute('opacity', '1'))
+    expect(screen.getByRole('button', { name: 'Hide insights' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.change(screen.getByPlaceholderText('Ask ATHENA about this node...'), {
+      target: { value: 'Now include visible insights.' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'ASK' }))
+    await waitFor(() => expect(window.ipcRenderer.invoke).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(window.ipcRenderer.invoke).mock.calls[1][1].prompt).toContain('Private signal')
+  })
+
   it('loads and renders graph nodes, filters search, and shows selected details', async () => {
     render(<KnowledgeView serverUrl="http://savant.local/" apiKey="sk-test" />)
 
@@ -406,6 +476,7 @@ describe('KnowledgeView', () => {
     fireEvent.click(screen.getByRole('button', { name: /expand node details/i }))
     expect(await screen.findByText('Node Details')).toBeInTheDocument()
     expect(screen.getAllByText('Auth Domain').length).toBeGreaterThan(0)
+    expect(screen.getByText('Visible nodes (3)')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /ask athena/i }))
     fireEvent.change(screen.getByPlaceholderText('Ask ATHENA about this node...'), {
       target: { value: 'What belongs to this domain?' },
