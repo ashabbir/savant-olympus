@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Search, Folder, RefreshCw, Download, Trash2, Cpu, FileCode, CheckCircle, Database, AlertTriangle, Layers, Play, Square, Trash, Zap, Clock, Upload, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Folder, RefreshCw, Download, Trash2, Cpu, FileCode, CheckCircle, Database, AlertTriangle, Layers, Play, Square, Trash, Zap, Clock, Upload, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { ContextVisualizations, analyzeProjectSource } from "./ContextVisualizations";
 import { GraphifyVisualizer } from "./GraphifyVisualizer";
 import { FileBrowserModal } from "../FileBrowserModal";
@@ -68,6 +68,8 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const [periodicLogs, setPeriodicLogs] = useState<any[]>([]);
   const [isLoadingSyncLogs, setIsLoadingSyncLogs] = useState(false);
   const [isTriggeringPeriodicSync, setIsTriggeringPeriodicSync] = useState(false);
+  const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
+  const [isSyncHistoryCollapsed, setIsSyncHistoryCollapsed] = useState(false);
 
   const contextService = React.useMemo(() => createContextService(serverUrl, apiKey), [serverUrl, apiKey]);
 
@@ -76,7 +78,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     try {
       const [statusRes, logsRes] = await Promise.all([
         contextService.getPeriodicSyncStatus().catch(() => null),
-        contextService.getPeriodicSyncLogs(undefined, 50).catch(() => ({ logs: [] })),
+        contextService.getPeriodicSyncLogs(undefined, 10).catch(() => ({ logs: [] })),
       ]);
       if (statusRes) setPeriodicStatus(statusRes);
       if (logsRes?.logs) setPeriodicLogs(logsRes.logs);
@@ -963,7 +965,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   )}
 
                   {/* 6-Hour Background Sync Runner & Audit Logs Section */}
-                  <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-4 rounded-lg space-y-3 font-mono text-xs" data-testid="periodic-sync-history-panel">
+                  <div className="order-last bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-4 rounded-lg space-y-3 font-mono text-xs" data-testid="periodic-sync-history-panel">
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--cp-border)] pb-2">
                       <div className="flex items-center gap-2">
                         <Clock className="w-4 h-4 text-[var(--cp-cyan)] animate-pulse" />
@@ -973,6 +975,15 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsSyncHistoryCollapsed(value => !value)}
+                          className="p-1 hover:bg-[var(--cp-bg-3)] rounded text-muted-foreground transition"
+                          aria-expanded={!isSyncHistoryCollapsed}
+                          title={isSyncHistoryCollapsed ? "Expand last sync" : "Collapse last sync"}
+                        >
+                          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isSyncHistoryCollapsed ? "-rotate-90" : ""}`} />
+                        </button>
                         <button
                           onClick={handleManualPeriodicSyncRun}
                           disabled={isTriggeringPeriodicSync}
@@ -992,8 +1003,9 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                       </div>
                     </div>
 
+                    {!isSyncHistoryCollapsed && <>
                     {/* Status info bar */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px] bg-[var(--cp-bg-3)]/60 p-2.5 rounded border border-[var(--cp-border)]/50">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] bg-[var(--cp-bg-3)]/60 p-2.5 rounded border border-[var(--cp-border)]/50">
                       <div>
                         <span className="text-muted-foreground block text-[10px] uppercase">Last Sync Run</span>
                         <span className="text-foreground font-medium">
@@ -1010,6 +1022,32 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         <span className="text-muted-foreground block text-[10px] uppercase">Projects Processed</span>
                         <span className="text-foreground font-medium">
                           {periodicStatus?.last_run_summary?.count ?? repos.length} Projects Checked
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[10px] uppercase">Last Indexed</span>
+                        <span className="text-foreground font-medium">
+                          {selectedRepo.indexed_at ? new Date(selectedRepo.indexed_at).toLocaleString() : "Never"}
+                        </span>
+                      </div>
+                      {(selectedRepo.source === "github" || selectedRepo.source === "gitlab") && (
+                        <div>
+                          <span className="text-muted-foreground block text-[10px] uppercase">Last Fetched</span>
+                          <span className="text-foreground font-medium">
+                            {selectedRepo.last_fetched_at ? new Date(selectedRepo.last_fetched_at).toLocaleString() : "Never"}
+                          </span>
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-muted-foreground block text-[10px] uppercase">Last Graph Generated</span>
+                        <span className="text-foreground font-medium">
+                          {graphifyStats?.generated_at ? new Date(graphifyStats.generated_at).toLocaleString() : "Never"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[10px] uppercase">Registered</span>
+                        <span className="text-foreground font-medium">
+                          {selectedRepo.created_at ? new Date(selectedRepo.created_at).toLocaleString() : "Unknown"}
                         </span>
                       </div>
                     </div>
@@ -1036,7 +1074,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-[var(--cp-border)]/40 font-mono">
-                              {periodicLogs.map((log: any) => (
+                              {periodicLogs.slice(0, 10).map((log: any) => (
                                 <tr key={log.id} className="hover:bg-[var(--cp-bg-2)]/80 transition">
                                   <td className="py-1.5 px-2 text-muted-foreground whitespace-nowrap">
                                     {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
@@ -1067,6 +1105,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         )}
                       </div>
                     </div>
+                    </>}
                   </div>
 
                   {/* Stats Grid */}
@@ -1141,31 +1180,6 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                       </div>
                     </div>
                   )}
-
-                  {/* Timeline */}
-                  <div className="space-y-2">
-                    <h4 className="text-[11px] uppercase font-mono text-[var(--section-label)] tracking-wider">Timeline</h4>
-                    <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded text-xs font-mono text-muted-foreground space-y-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <Clock size={12} className="text-muted-foreground/60" />
-                        <span>Last Indexed: <strong className="text-foreground">{selectedRepo.indexed_at ? new Date(selectedRepo.indexed_at).toLocaleString() : "Never"}</strong></span>
-                      </div>
-                      {(selectedRepo.source === "github" || selectedRepo.source === "gitlab") && (
-                        <div className="flex items-center gap-1.5">
-                          <Clock size={12} className="text-muted-foreground/60" />
-                          <span>Last Fetched: <strong className="text-foreground">{selectedRepo.last_fetched_at ? new Date(selectedRepo.last_fetched_at).toLocaleString() : "Never"}</strong></span>
-                        </div>
-                      )}
-                      <div className="flex items-center gap-1.5">
-                        <Clock size={12} className="text-muted-foreground/60" />
-                        <span>Last Graph Generated: <strong className="text-foreground">{graphifyStats?.generated_at ? new Date(graphifyStats.generated_at).toLocaleString() : "Never"}</strong></span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Clock size={12} className="text-muted-foreground/60" />
-                        <span>Registered: <strong className="text-foreground">{selectedRepo.created_at ? new Date(selectedRepo.created_at).toLocaleString() : "Unknown"}</strong></span>
-                      </div>
-                    </div>
-                  </div>
                 </>
               ) : detailsTab === "visuals" ? (
                 <ContextVisualizations nodes={astNodes} repoName={selectedRepo.name} analysis={analysisResults} activeModel={activeModel} serverUrl={serverUrl} apiKey={apiKey} />
