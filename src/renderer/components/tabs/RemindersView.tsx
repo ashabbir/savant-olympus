@@ -21,33 +21,6 @@ interface RemindersViewProps {
   apiKey: string;
 }
 
-const DEFAULT_REMINDERS: Reminder[] = [
-  {
-    id: "rem-1",
-    text: "Backup savant database",
-    description: "Perform full backup of SQLite instances",
-    due_date: "2026-06-20T12:00:00Z",
-    status: "pending",
-    user_id: "ahmed"
-  },
-  {
-    id: "rem-2",
-    text: "Update firewall rules",
-    description: "Audit security groups and close unused ports",
-    due_date: "2026-06-15T15:00:00Z",
-    status: "done",
-    user_id: "lex"
-  },
-  {
-    id: "rem-3",
-    text: "Review user access logs",
-    description: "Perform weekly audit of login activities",
-    due_date: "2026-06-14T09:00:00Z",
-    status: "dismissed",
-    user_id: "ahmed"
-  }
-];
-
 export function RemindersView({ serverUrl, apiKey }: RemindersViewProps) {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [users, setUsers] = useState<UserOption[]>([]);
@@ -65,20 +38,20 @@ export function RemindersView({ serverUrl, apiKey }: RemindersViewProps) {
     setError(null);
     try {
       const res = await fetch(`${baseUrl}/api/reminders?_=${Date.now()}`, {
-        headers: { "X-API-Key": apiKey },
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         const data = await res.json();
         const list = Array.isArray(data) ? data : [];
-        setReminders(list.length > 0 ? list : DEFAULT_REMINDERS);
+        setReminders(list);
       } else {
         setError(`Failed to fetch reminders: ${res.status} ${res.statusText}`);
-        setReminders(DEFAULT_REMINDERS);
+        setReminders([]);
       }
     } catch (err: any) {
       console.error(err);
       setError(err?.message || "Failed to reach server");
-      setReminders(DEFAULT_REMINDERS);
+      setReminders([]);
     } finally {
       setIsLoading(false);
     }
@@ -87,7 +60,7 @@ export function RemindersView({ serverUrl, apiKey }: RemindersViewProps) {
   const fetchUsers = async () => {
     try {
       const res = await fetch(`${baseUrl}/api/users?include_inactive=true&_=${Date.now()}`, {
-        headers: { "X-API-Key": apiKey },
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         const data = await res.json();
@@ -110,17 +83,13 @@ export function RemindersView({ serverUrl, apiKey }: RemindersViewProps) {
         }
         setUsers(unique);
       } else {
-        setUsers([
-          { user_id: "ahmed", name: "Ahmed Shabbir" },
-          { user_id: "lex", name: "Lex Friedman" }
-        ]);
+        setUsers([]);
+        setError(`Failed to fetch users: ${res.status} ${res.statusText}`);
       }
     } catch (err) {
       console.error("Failed to fetch users:", err);
-      setUsers([
-        { user_id: "ahmed", name: "Ahmed Shabbir" },
-        { user_id: "lex", name: "Lex Friedman" }
-      ]);
+      setUsers([]);
+      setError("Failed to reach server for users.");
     }
   };
 

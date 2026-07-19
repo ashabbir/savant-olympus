@@ -16,13 +16,15 @@ interface User {
 interface UsersViewProps {
   serverUrl: string;
   apiKey: string;
+  isAdmin: boolean;
   activeUserId?: string;
   onSettingsChanged?: () => void;
 }
 
-export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }: UsersViewProps) {
+export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, isAdmin }: UsersViewProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   // Navigation / Selection State
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
@@ -53,13 +55,92 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
   const [editRole, setEditRole] = useState("");
   const [editActive, setEditActive] = useState(true);
 
+  // Domain Assignment State
+  const [userDomains, setUserDomains] = useState<{ domain_node_id: string; domain_title?: string; can_write: boolean }[]>([]);
+  const [availableDomains, setAvailableDomains] = useState<{ node_id: string; title: string }[]>([]);
+  const [selectedDomainToAdd, setSelectedDomainToAdd] = useState("");
+
   const baseUrl = serverUrl.replace(/\/+$/, "");
+  const authHeaders = { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" };
+
+  const fetchUserDomains = async (uid: string) => {
+    try {
+      const res = await fetch(`${baseUrl}/api/users/${uid}/domains`, {
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUserDomains(data.domains || []);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchAvailableDomains = async () => {
+    try {
+      const res = await fetch(`${baseUrl}/api/knowledge/graph?node_type=domain&slim=true`, {
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const nodes = (data.nodes || []).filter((n: any) => n.node_type === "domain");
+        setAvailableDomains(nodes);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedUserId) {
+      fetchUserDomains(selectedUserId);
+      fetchAvailableDomains();
+    }
+  }, [selectedUserId, baseUrl, apiKey]);
+
+  const handleAssignDomain = async (uid: string, targetDomainId?: string, canWrite: boolean = true) => {
+    const domainId = targetDomainId || selectedDomainToAdd;
+    if (!domainId) return;
+    try {
+      const res = await fetch(`${baseUrl}/api/users/${uid}/domains`, {
+        method: "POST",
+        headers: {
+          "X-API-Key": apiKey,
+          "X-App-Name": "savant-olympus",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ domain_node_id: domainId, can_write: canWrite }),
+      });
+      if (res.ok) {
+        if (!targetDomainId) setSelectedDomainToAdd("");
+        await fetchUserDomains(uid);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleRemoveDomain = async (uid: string, domainNodeId: string) => {
+    try {
+      const res = await fetch(`${baseUrl}/api/users/${uid}/domains/${domainNodeId}`, {
+        method: "DELETE",
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
+      });
+      if (res.ok) {
+        await fetchUserDomains(uid);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const fetchUsers = async () => {
     setIsLoading(true);
+    setLoadError("");
     try {
       const res = await fetch(`${baseUrl}/api/users?include_inactive=true&_=${Date.now()}`, {
-        headers: { "X-API-Key": apiKey },
+        headers: authHeaders,
       });
       if (res.ok) {
         const data = await res.json();
@@ -71,23 +152,13 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
         }));
         setUsers(mapped);
       } else {
-        // Fallback mock users
-        setUsers([
-          { id: "usr-1", username: "ahmed", name: "Ahmed Shabbir", email: "ahmed@savant.ai", role: "admin", active: true, api_keys: ["sk-ahmed-savant-001"] },
-          { id: "usr-2", username: "lex", name: "Lex Friedman", email: "lex@savant.ai", role: "operator", active: true, api_keys: ["sk-lex-savant-001"] },
-          { id: "usr-3", username: "inactive_admin", name: "Inactive Admin", email: "inactive_admin@savant.ai", role: "admin", active: false, api_keys: ["sk-inactive-admin-001"] },
-          { id: "usr-4", username: "inactive_user", name: "Inactive User", email: "inactive_user@savant.ai", role: "operator", active: false, api_keys: ["sk-inactive-user-001"] },
-        ]);
+        setUsers([]);
+        setLoadError(`Unable to load users (${res.status}).`);
       }
     } catch (e) {
       console.error(e);
-      // Fallback mock users
-      setUsers([
-        { id: "usr-1", username: "ahmed", name: "Ahmed Shabbir", email: "ahmed@savant.ai", role: "admin", active: true, api_keys: ["sk-ahmed-savant-001"] },
-        { id: "usr-2", username: "lex", name: "Lex Friedman", email: "lex@savant.ai", role: "operator", active: true, api_keys: ["sk-lex-savant-001"] },
-        { id: "usr-3", username: "inactive_admin", name: "Inactive Admin", email: "inactive_admin@savant.ai", role: "admin", active: false, api_keys: ["sk-inactive-admin-001"] },
-        { id: "usr-4", username: "inactive_user", name: "Inactive User", email: "inactive_user@savant.ai", role: "operator", active: false, api_keys: ["sk-inactive-user-001"] },
-      ]);
+      setUsers([]);
+      setLoadError("Unable to reach Savant server for user records.");
     } finally {
       setIsLoading(false);
     }
@@ -120,6 +191,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
         method: "PUT",
         headers: {
           "X-API-Key": apiKey,
+          "X-App-Name": "savant-olympus",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -144,6 +216,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
         method: "POST",
         headers: {
           "X-API-Key": apiKey,
+          "X-App-Name": "savant-olympus",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -191,6 +264,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
         method: "DELETE",
         headers: {
           "X-API-Key": apiKey,
+          "X-App-Name": "savant-olympus",
         },
       });
       if (res.ok) {
@@ -207,6 +281,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
         method: "POST",
         headers: {
           "X-API-Key": apiKey,
+          "X-App-Name": "savant-olympus",
         },
       });
       if (res.ok) {
@@ -392,6 +467,18 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
 
   const renderEditPage = (user: User) => {
     const userId = user.id || user.username;
+    if (!isAdmin) {
+      return (
+        <div className="space-y-3 max-w-xl font-mono text-xs">
+          <h3 className="text-sm font-bold text-[var(--cp-cyan)]">USER_{user.username}</h3>
+          <p className="text-muted-foreground">Read-only user record. Administrator access is required to modify users.</p>
+          <div>Name: {user.name}</div>
+          <div>Email: {user.email || "—"}</div>
+          <div>Role: {user.role}</div>
+          <div>Status: {user.active ? "active" : "inactive"}</div>
+        </div>
+      );
+    }
     return (
       <div className="space-y-6 max-w-xl font-mono text-xs">
         {/* Profile Details Header Block for Test Inspections */}
@@ -521,6 +608,87 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
             Regenerating the API key invalidates the current key instantly. Connected clients, services, or agents using the old key will be denied access.
           </p>
         </div>
+
+        {/* Domain Access Control Section */}
+        <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] p-4 space-y-4">
+          <div className="text-[11px] font-bold text-[var(--cp-cyan)] tracking-wider uppercase flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Shield size={14} /> Domain Access & Write Permissions
+            </span>
+            <span className="text-[10px] text-muted-foreground font-mono font-normal">
+              {user.role === "admin" ? "ADMIN: Full Read & Write to All Domains" : `${userDomains.length} Assigned Domains`}
+            </span>
+          </div>
+
+          {user.role === "admin" ? (
+            <div className="p-3 border border-[var(--cp-green)]/30 bg-[rgba(0,255,136,0.05)] text-xs text-[var(--cp-green)] font-mono">
+              ★ ADMIN ROLE ACTIVE: Admin users have unrestricted Read and Write access across all domains and knowledge nodes.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Assigned Domains List */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">Assigned Domain Permissions</label>
+                {userDomains.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic bg-[var(--cp-bg-3)] border border-[var(--cp-border)]/50 p-2.5">
+                    No domain nodes assigned. User has Read-Only access for general/unassigned knowledge graph nodes.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {userDomains.map((ud) => (
+                      <div key={ud.domain_node_id} className="flex items-center gap-2 bg-[var(--cp-bg-3)] border border-[var(--cp-cyan)]/40 px-2.5 py-1.5 rounded text-xs font-mono">
+                        <span className="text-foreground font-medium">{ud.domain_title || ud.domain_node_id}</span>
+                        <button
+                          onClick={() => handleAssignDomain(userId, ud.domain_node_id, !ud.can_write)}
+                          className={`text-[9px] px-2 py-0.5 border rounded font-semibold cursor-pointer transition-all ${
+                            ud.can_write
+                              ? "bg-[rgba(0,255,136,0.15)] text-[var(--cp-green)] border-[var(--cp-green)]/40 hover:bg-[rgba(0,255,136,0.25)]"
+                              : "bg-[rgba(255,170,0,0.15)] text-amber-400 border-amber-500/40 hover:bg-[rgba(255,170,0,0.25)]"
+                          }`}
+                          title="Click to toggle between Write and Read-Only permission"
+                        >
+                          {ud.can_write ? "✓ WRITE" : "👁 READ ONLY"}
+                        </button>
+                        <button
+                          onClick={() => handleRemoveDomain(userId, ud.domain_node_id)}
+                          className="text-red-400 hover:text-red-300 ml-1 cursor-pointer"
+                          title="Remove domain assignment"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Assign New Domain Dropdown */}
+              <div className="flex items-center gap-2 pt-1">
+                <select
+                  value={selectedDomainToAdd}
+                  onChange={(e) => setSelectedDomainToAdd(e.target.value)}
+                  className="bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-3 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono cursor-pointer flex-1"
+                >
+                  <option value="">-- Select Domain Node to Assign Write Access --</option>
+                  {availableDomains
+                    .filter((ad) => !userDomains.some((ud) => ud.domain_node_id === ad.node_id))
+                    .map((ad) => (
+                      <option key={ad.node_id} value={ad.node_id}>
+                        {ad.title} ({ad.node_id})
+                      </option>
+                    ))}
+                </select>
+                <button
+                  onClick={() => handleAssignDomain(userId)}
+                  disabled={!selectedDomainToAdd}
+                  className="px-3 py-1.5 border border-[var(--cp-cyan)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] disabled:opacity-40 disabled:cursor-not-allowed text-xs font-mono flex items-center gap-1 cursor-pointer transition-all"
+                >
+                  <Plus size={12} /> ASSIGN
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -535,7 +703,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
           </h2>
           <p className="text-xs text-muted-foreground opacity-60">Provisioned identities and authorization keys</p>
         </div>
-        <button
+        {isAdmin && <button
           onClick={() => {
             setShowCreateForm(true);
             setSelectedUserId(null);
@@ -547,7 +715,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
           }`}
         >
           <Plus size={14} /> ADD_USER
-        </button>
+        </button>}
       </div>
 
       {/* Main Two-Column Layout */}
@@ -606,6 +774,8 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged }
               <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-3 overflow-y-auto space-y-2">
                 {isLoading ? (
                   <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse font-mono">RESOLVING_USERS...</div>
+                ) : loadError ? (
+                  <div className="text-center py-6 text-xs text-red-400 font-mono">{loadError}</div>
                 ) : filteredUsers.length === 0 ? (
                   <div className="text-center py-6 text-xs text-muted-foreground opacity-50 font-mono">NO USERS RECORDED</div>
                 ) : (

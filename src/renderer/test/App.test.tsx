@@ -7,6 +7,14 @@ describe('App Component', () => {
     vi.clearAllMocks()
     // Mock scrollIntoView
     window.HTMLElement.prototype.scrollIntoView = vi.fn()
+    Object.defineProperty(SVGSVGElement.prototype, 'width', {
+      configurable: true,
+      value: { baseVal: { value: 800 } },
+    })
+    Object.defineProperty(SVGSVGElement.prototype, 'height', {
+      configurable: true,
+      value: { baseVal: { value: 500 } },
+    })
   })
 
   const waitForAppReady = async () => {
@@ -41,7 +49,7 @@ describe('App Component', () => {
     expect(remindersTabBtn).toBeInTheDocument()
     fireEvent.click(remindersTabBtn)
     await waitFor(() => {
-      expect(screen.getByText(/\/\/ SYSTEM REMINDERS/i)).toBeInTheDocument()
+      expect(screen.getByText(/SYSTEM REMINDERS/i)).toBeInTheDocument()
     })
   })
 
@@ -61,12 +69,42 @@ describe('App Component', () => {
 
     fireEvent.click(screen.getByTitle('Knowledge'))
     await waitFor(() => {
-      expect(screen.getByText(/\/\/ knowledge network/i)).toBeInTheDocument()
+      expect(screen.getByText(/knowledge network/i)).toBeInTheDocument()
     })
 
     fireEvent.click(screen.getByTitle('Workspace'))
     await waitFor(() => {
       expect(screen.getByText(/SAVANT-WORKSPACE/i)).toBeInTheDocument()
+    })
+  })
+
+  it('uses the live server role instead of a stale persisted role', async () => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!
+    let serverRole = 'operator'
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (String(input).includes('/api/auth/validate')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ valid: true, user_id: 'test-user', name: 'test-user', role: serverRole }),
+        } as Response)
+      }
+      return originalFetch(input, init)
+    })
+    vi.mocked(window.system.getSettings).mockResolvedValue({
+      'user:apiKey': 'sk-test-key',
+      'user:name': 'test-user',
+      'user:role': 'admin',
+    })
+
+    await waitForAppReady()
+    fireEvent.click(screen.getByTitle('Knowledge'))
+    expect(screen.queryByTitle('Add Node')).not.toBeInTheDocument()
+
+    serverRole = 'admin'
+    fireEvent.focus(window)
+    await waitFor(() => {
+      expect(screen.getByTitle('Add Node')).toBeInTheDocument()
     })
   })
 })

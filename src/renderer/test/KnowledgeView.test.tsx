@@ -254,7 +254,7 @@ describe('KnowledgeView', () => {
       'http://savant.local/api/knowledge/import',
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-API-Key': 'sk-test' },
+        headers: { 'X-App-Name': 'savant-olympus', 'X-API-Key': 'sk-test', 'Content-Type': 'application/json' },
         body: JSON.stringify(downloaded),
       }
     )
@@ -273,7 +273,7 @@ describe('KnowledgeView', () => {
     expect(window.fetch).toHaveBeenNthCalledWith(
       2,
       'http://savant.local/api/knowledge/graph?slim=false&include_staged=true',
-      { headers: { 'X-API-Key': 'sk-test' } }
+      { headers: { 'X-App-Name': 'savant-olympus', 'X-API-Key': 'sk-test' } }
     )
   })
 
@@ -345,7 +345,7 @@ describe('KnowledgeView', () => {
     render(<KnowledgeView serverUrl="http://savant.local/" apiKey="sk-test" />)
 
     expect(await screen.findByText('Knowledge Network')).toBeInTheDocument()
-    await waitFor(() => expect(window.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/knowledge/graph'), expect.objectContaining({ headers: { 'X-API-Key': 'sk-test' } })))
+    await waitFor(() => expect(window.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/knowledge/graph'), expect.objectContaining({ headers: { 'X-App-Name': 'savant-olympus', 'X-API-Key': 'sk-test' } })))
     const graphSvg = document.querySelector('#kb-graph-svg') as SVGSVGElement & { __zoom?: { k: number; x: number; y: number } }
     await waitFor(() => expect(graphSvg.__zoom).toMatchObject({ k: 1.7, x: -110, y: -90 }))
 

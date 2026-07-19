@@ -94,7 +94,7 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
     try {
       setMcpStatusText("Checking...");
       const res = await fetch(`${baseUrl}/api/mcp/health/workspace`, {
-        headers: { "X-API-Key": apiKey }
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" }
       });
       const data = await res.json();
       const isUp = !!(data && (data.ok || data.status === "ok" || data.alive));
@@ -134,7 +134,7 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
       let port = 8091;
       try {
         const res = await fetch(`${baseUrl}/api/mcp/health/workspace`, {
-          headers: { "X-API-Key": apiKey }
+          headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" }
         });
         if (res.ok) {
           const data = await res.json();
@@ -192,7 +192,7 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
 
           fetch(messageUrl, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", "X-App-Name": "savant-olympus" },
             body: JSON.stringify(initPayload)
           }).catch(err => {
             clearTimeout(timeout);
@@ -217,7 +217,7 @@ export function WorkspaceView({ serverUrl, apiKey, sessionId }: WorkspaceViewPro
 
               fetch(messageUrl, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", "X-App-Name": "savant-olympus" },
                 body: JSON.stringify(callPayload)
               }).catch(err => {
                 clearTimeout(timeout);

@@ -125,7 +125,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
         ? `${baseUrl}/api/context/memory/list?repo=${encodeURIComponent(selectedProject)}`
         : `${baseUrl}/api/context/memory/list`;
       const res = await fetch(url, {
-        headers: { "X-API-Key": apiKey },
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         const data = await res.json();
@@ -142,7 +142,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
     setIsLoadingMemoryContent(true);
     try {
       const res = await fetch(`${baseUrl}/api/context/memory/read?uri=${encodeURIComponent(uri)}`, {
-        headers: { "X-API-Key": apiKey },
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         const data = await res.json();
@@ -161,7 +161,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
     setIsLoadingCodeFiles(true);
     try {
       const res = await fetch(`${baseUrl}/api/context/code/list?repo=${encodeURIComponent(selectedProject)}`, {
-        headers: { "X-API-Key": apiKey },
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         const data = await res.json();
@@ -178,7 +178,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
     setIsLoadingFileContent(true);
     try {
       const res = await fetch(`${baseUrl}/api/context/code/read?uri=${encodeURIComponent(uri)}`, {
-        headers: { "X-API-Key": apiKey },
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         const data = await res.json();
@@ -228,7 +228,7 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
         ? `${baseUrl}/api/context/search?q=${encodeURIComponent(semanticQuery)}&repo=${encodeURIComponent(selectedProject)}`
         : `${baseUrl}/api/context/search?q=${encodeURIComponent(semanticQuery)}`;
       const res = await fetch(url, {
-        headers: { "X-API-Key": apiKey },
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         const data = await res.json();

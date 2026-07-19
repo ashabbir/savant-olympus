@@ -127,7 +127,7 @@ function ServicePanel({
     try {
       const res = await fetch(`${normalizeServiceUrl(config.url)}${healthPath}`, {
         signal: controller.signal,
-        headers: includeApiKey && apiKey ? { "X-API-Key": apiKey } : undefined,
+        headers: { "X-App-Name": "savant-olympus", ...(includeApiKey && apiKey ? { "X-API-Key": apiKey } : {}) },
       });
       clearTimeout(timer);
       onChange({ status: res.ok ? "connected" : "failed" });
@@ -421,6 +421,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
       const res = await fetch(`${normalizeServiceUrl(serverConfig.url)}/api/abilities/assets`, {
         headers: {
           "X-API-Key": apiKey || "",
+          "X-App-Name": "savant-olympus",
         }
       });
       if (!res.ok) throw new Error(`Server returned ${res.status}`);

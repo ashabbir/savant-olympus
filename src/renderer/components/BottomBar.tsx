@@ -12,6 +12,7 @@ const STATUS_COLORS = {
   offline: "#ff2244",
   warning: "#ffe600",
 };
+const APP_HEADERS = { "X-App-Name": "savant-olympus" };
 
 export function BottomBar() {
   const [userName, setUserName] = useState("operator");
@@ -76,7 +77,7 @@ export function BottomBar() {
         try {
           const controller = new AbortController();
           const id = setTimeout(() => controller.abort(), 1500);
-          const res = await fetch(`${gUrl.replace(/\/$/, "")}/health`, { signal: controller.signal });
+          const res = await fetch(`${gUrl.replace(/\/$/, "")}/health`, { signal: controller.signal, headers: APP_HEADERS });
           clearTimeout(id);
           setGatewayStatus(res.ok ? "online" : "offline");
         } catch (e) {
@@ -87,7 +88,7 @@ export function BottomBar() {
         try {
           const controller = new AbortController();
           const id = setTimeout(() => controller.abort(), 1500);
-          const res = await fetch(`${gUrl.replace(/\/$/, "")}/runs`, { signal: controller.signal });
+          const res = await fetch(`${gUrl.replace(/\/$/, "")}/runs`, { signal: controller.signal, headers: APP_HEADERS });
           clearTimeout(id);
           if (res.ok) {
             const data = await res.json();
@@ -113,7 +114,7 @@ export function BottomBar() {
       try {
         const controller = new AbortController();
         const id = setTimeout(() => controller.abort(), 1500);
-        const res = await fetch(`${sUrl.replace(/\/+$/, "")}/health/ready`, { signal: controller.signal });
+        const res = await fetch(`${sUrl.replace(/\/+$/, "")}/health/ready`, { signal: controller.signal, headers: APP_HEADERS });
         clearTimeout(id);
         setSavantStatus(res.ok ? "online" : "offline");
       } catch (e) {
@@ -144,7 +145,7 @@ export function BottomBar() {
       setIsPollingEvents(true);
       try {
         const cleanUrl = gatewayUrl.replace(/\/$/, "");
-        const res = await fetch(`${cleanUrl}/runs/${selectedRunId}/events`);
+        const res = await fetch(`${cleanUrl}/runs/${selectedRunId}/events`, { headers: APP_HEADERS });
         if (res.ok) {
           const data = await res.json();
           setSelectedRunEvents(data);
@@ -167,11 +168,12 @@ export function BottomBar() {
     try {
       const cleanUrl = gatewayUrl.replace(/\/$/, "");
       const res = await fetch(`${cleanUrl}/runs/${runId}`, {
-        method: "DELETE"
+        method: "DELETE",
+        headers: APP_HEADERS,
       });
       if (res.ok) {
         // Refresh run list and events
-        const runsRes = await fetch(`${cleanUrl}/runs`);
+        const runsRes = await fetch(`${cleanUrl}/runs`, { headers: APP_HEADERS });
         if (runsRes.ok) {
           const data = await runsRes.json();
           const validData = Array.isArray(data) ? data : [];
@@ -179,7 +181,7 @@ export function BottomBar() {
           const active = validData.filter((r: any) => r.status === "running").length;
           setActiveRunsCount(active);
         }
-        const eventsRes = await fetch(`${cleanUrl}/runs/${runId}/events`);
+        const eventsRes = await fetch(`${cleanUrl}/runs/${runId}/events`, { headers: APP_HEADERS });
         if (eventsRes.ok) {
           setSelectedRunEvents(await eventsRes.json());
         }

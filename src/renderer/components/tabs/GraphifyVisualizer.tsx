@@ -11,6 +11,7 @@ import {
 } from "@/lib/athenaContext";
 
 interface GraphifyVisualizerProps {
+  repoId: string;
   repoName: string;
   baseUrl: string;
   apiKey: string;
@@ -47,6 +48,7 @@ interface GraphEdge extends d3.SimulationLinkDatum<GraphNode> {
 }
 
 export const GraphifyVisualizer: React.FC<GraphifyVisualizerProps> = ({
+  repoId,
   repoName,
   baseUrl,
   apiKey,
@@ -160,7 +162,7 @@ export const GraphifyVisualizer: React.FC<GraphifyVisualizerProps> = ({
       }
 
       const contextPrompt = `You are ATHENA, an AI assistant integrated into the Savant Olympus app.
-The user is having a conversation with you regarding a Graphify Knowledge Graph entity:
+The user is having a conversation with you regarding a Project Graph entity:
 - Name: ${selectedNode.title}
 - Node Type: ${(selectedNode.node_type || "").toUpperCase()}
 - Node ID: ${selectedNode.node_id}
@@ -175,7 +177,7 @@ ${updatedMessages.slice(0, -1).map(msg => `${msg.sender === "user" ? "User" : "A
 [NEW USER MESSAGE]
 ${textToSend}
 
-Please analyze the Graphify entity details, the context, and the history, then respond to the user's message.
+Please analyze the project graph entity details, the context, and the history, then respond to the user's message.
 Explain how it fits into the repository structure, its dependencies/relationships, and suggest code changes or architectural insights.
 
 [INSTRUCTIONS FOR MCP USAGE]
@@ -220,11 +222,11 @@ Always prefer using a tool if it can provide more accurate or deep information.
     setSelectedNode(null);
     try {
       const res = await fetch(
-        `${baseUrl}/api/graphify/main-entities?workspace_id=${encodeURIComponent(
+        `${baseUrl}/api/graphify/main-entities?repo_id=${encodeURIComponent(repoId)}&workspace_id=${encodeURIComponent(
           repoName
         )}&limit=40`,
         {
-          headers: { "X-API-Key": apiKey },
+          headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
         }
       );
       if (!res.ok) throw new Error("Failed to load codebase graph structure");
@@ -253,18 +255,18 @@ Always prefer using a tool if it can provide more accurate or deep information.
 
   useEffect(() => {
     loadMainEntities();
-  }, [repoName, baseUrl, apiKey]);
+  }, [repoId, repoName, baseUrl, apiKey]);
 
   // 2. Fetch direct neighbors on select
   const expandNodeNeighbors = async (node: GraphNode) => {
     setIsExpanding(true);
     try {
       const res = await fetch(
-        `${baseUrl}/api/graphify/neighbors?workspace_id=${encodeURIComponent(
+        `${baseUrl}/api/graphify/neighbors?repo_id=${encodeURIComponent(repoId)}&workspace_id=${encodeURIComponent(
           repoName
         )}&node_id=${encodeURIComponent(node.node_id)}`,
         {
-          headers: { "X-API-Key": apiKey },
+          headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
         }
       );
       if (!res.ok) throw new Error("Failed to expand neighbors");
@@ -318,8 +320,10 @@ Always prefer using a tool if it can provide more accurate or deep information.
         headers: {
           "Content-Type": "application/json",
           "X-API-Key": apiKey,
+          "X-App-Name": "savant-olympus",
         },
         body: JSON.stringify({
+          repo_id: repoId,
           workspace_id: repoName,
           query: searchQuery,
           limit: 10,
@@ -671,7 +675,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
             <div className="w-full h-full flex flex-col items-center justify-center text-center opacity-35">
               <Loader2 size={24} className="animate-spin mb-1.5 text-[var(--cp-cyan)]" />
               <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">
-                initializing_graphify_canvas
+                initializing_project_graph
               </span>
             </div>
           )}

@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ContextView } from '../components/tabs/ContextView'
 import React from 'react'
 
-describe('ContextView - Graphify Integration', () => {
+describe('ContextView - Code Graph Integration', () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
@@ -83,34 +83,50 @@ describe('ContextView - Graphify Integration', () => {
     })
   })
 
-  it('detects Graphify JSON and renders upload banner', async () => {
+  it('does not expose the legacy local graph workflow', async () => {
     render(
       <ContextView
         serverUrl="http://127.0.0.1:8090"
         apiKey="test-key"
         onSelectProject={() => {}}
         selectedProject="savant-olympus"
+        isAdmin
       />
     )
 
-    // Wait for the repo list to load and select "savant-olympus" (it's auto-selected because of the prop)
-    await waitFor(() => {
-      expect(screen.getByText(/Graphify Data Detected/i)).toBeInTheDocument()
-      expect(screen.getByText(/Found graphify-out\/graph.json with 1 nodes and 1 edges/i)).toBeInTheDocument()
+    expect(await screen.findByText('SYNC CODE GRAPH')).toBeInTheDocument()
+    expect(screen.queryByText(/graphify/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/purge index/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/push local graph/i)).not.toBeInTheDocument()
+    expect(vi.mocked(window.fetch).mock.calls.some(([url]) => url.toString().includes('/api/graphify/import'))).toBe(false)
+  })
+
+  it('uses explicit repo identity and native code graph sync for CodeGraph repositories', async () => {
+    vi.mocked(window.fetch).mockImplementation((url, init) => {
+      const u = url.toString()
+      if (u.endsWith('/api/context/repos')) return Promise.resolve({ ok: true, json: async () => ({ repos: [{ id: 'repo-42', name: 'codegraph-repo', path: '/base-code/codegraph-repo', provider: 'codegraph', freshness: 'stale' }] }) } as Response)
+      if (u.includes('/api/context/repos/indexing-status')) return Promise.resolve({ ok: true, json: async () => ({ status: {} }) } as Response)
+      if (u.includes('/api/context/code-intelligence/repos/repo-42/health')) return Promise.resolve({ ok: true, json: async () => ({ provider: 'codegraph', freshness: 'stale', graph_version: '1.4.1' }) } as Response)
+      if (u.includes('/api/context/code-intelligence/repos/repo-42/sync')) return Promise.resolve({ ok: true, json: async () => ({ job_id: 'job-1', provider: 'codegraph' }) } as Response)
+      if (u.includes('/api/graphify/stats')) return Promise.resolve({ ok: true, json: async () => ({ total: 2, stats: {}, edges: {} }) } as Response)
+      if (u.includes('/api/context/ast/list')) return Promise.resolve({ ok: true, json: async () => ({ nodes: [] }) } as Response)
+      if (u.includes('/api/graphify/main-entities')) return Promise.resolve({ ok: true, json: async () => ({ nodes: [], edges: [] }) } as Response)
+      return Promise.resolve({ ok: true, json: async () => ({}) } as Response)
     })
 
-    // Click "Upload Graphify JSON"
-    const uploadBtn = screen.getByRole('button', { name: /Upload Graphify JSON/i })
-    fireEvent.click(uploadBtn)
+    render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject="codegraph-repo" isAdmin />)
 
-    await waitFor(() => {
-      expect(screen.getByText(/Successfully uploaded Graphify KG!/i)).toBeInTheDocument()
-    })
+    expect(await screen.findByText('SYNC CODE GRAPH')).toBeInTheDocument()
+    expect(screen.queryByText(/graphify/i)).not.toBeInTheDocument()
+    expect(await screen.findByText(/The code graph is stale/i)).toBeInTheDocument()
+    expect(screen.queryByText('SELECT GRAPHIFY DIR')).not.toBeInTheDocument()
 
-    // Verify stats got updated and displayed
-    await waitFor(() => {
-      expect(screen.getByText(/Graphify Stats/i)).toBeInTheDocument()
-      expect(screen.getByText(/function Nodes/i)).toBeInTheDocument()
-    })
+    fireEvent.click(screen.getByText('SYNC CODE GRAPH'))
+    await waitFor(() => expect(vi.mocked(window.fetch).mock.calls.some(([url]) => url.toString().includes('/api/context/code-intelligence/repos/repo-42/sync'))).toBe(true))
+
+    const statsCall = vi.mocked(window.fetch).mock.calls.find(([url]) => url.toString().includes('/api/graphify/stats'))
+    expect(statsCall?.[0].toString()).toContain('repo_id=repo-42')
+    const astCall = vi.mocked(window.fetch).mock.calls.find(([url]) => url.toString().includes('/api/context/ast/list'))
+    expect(astCall?.[0].toString()).toContain('repo_id=repo-42')
   })
 })

@@ -53,7 +53,7 @@ export async function fetchAthenaCodeContext(baseUrl: string, apiKey: string, qu
   if (repo) params.set("repo", repo)
 
   const res = await fetch(`${normalizeBaseUrl(baseUrl)}/api/context/search?${params.toString()}`, {
-    headers: { "X-API-Key": apiKey },
+    headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
   })
   if (!res.ok) return []
 
@@ -73,7 +73,7 @@ export async function fetchAthenaKnowledgeContext(baseUrl: string, apiKey: strin
   if (!trimmed) return []
 
   const res = await fetch(`${normalizeBaseUrl(baseUrl)}/api/knowledge/graph?slim=true&include_staged=false&_=${Date.now()}`, {
-    headers: { "X-API-Key": apiKey },
+    headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
   })
   if (!res.ok) return []
 
@@ -103,7 +103,7 @@ export async function fetchAthenaKnowledgeContext(baseUrl: string, apiKey: strin
 
 export async function fetchAthenaMcpTools(baseUrl: string, apiKey: string) {
   const res = await fetch(`${normalizeBaseUrl(baseUrl)}/api/mcp/tools?_=${Date.now()}`, {
-    headers: { "X-API-Key": apiKey },
+    headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
   })
   if (!res.ok) return []
 

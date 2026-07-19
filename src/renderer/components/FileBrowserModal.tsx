@@ -35,7 +35,7 @@ export function FileBrowserModal({ isOpen, onClose, onSelect, initialPath, baseP
     try {
       const baseUrl = serverUrl.replace(/\/+$/, "");
       const res = await fetch(`${baseUrl}/api/context/repos/browse?path=${encodeURIComponent(path)}`, {
-        headers: { "X-API-Key": apiKey },
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         const results = await res.json();

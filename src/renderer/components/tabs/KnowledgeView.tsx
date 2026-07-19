@@ -276,11 +276,18 @@ export function validateKnowledgeImportPayload(payload: any) {
   return payload;
 }
 
+function buildAuthHeaders(apiKey: string, contentType = "application/json") {
+  const h: Record<string, string> = { "X-App-Name": "savant-olympus" };
+  if (apiKey) h["X-API-Key"] = apiKey;
+  if (contentType) h["Content-Type"] = contentType;
+  return h;
+}
+
 export async function importKnowledgePayload(baseUrl: string, apiKey: string, payload: any) {
   const validatedPayload = validateKnowledgeImportPayload(payload);
   const response = await fetch(`${baseUrl}/api/knowledge/import`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+    headers: buildAuthHeaders(apiKey),
     body: JSON.stringify(validatedPayload),
   });
   if (!response.ok) throw new Error("Failed to import knowledge graph.");
@@ -288,7 +295,7 @@ export async function importKnowledgePayload(baseUrl: string, apiKey: string, pa
 }
 
 export async function fetchKnowledgeExportData(baseUrl: string, apiKey: string) {
-  const headers = { "X-API-Key": apiKey };
+  const headers = buildAuthHeaders(apiKey, "");
   const exportResponse = await fetch(`${baseUrl}/api/knowledge/export`, { headers });
   if (exportResponse.ok) return exportResponse.json();
 
@@ -852,7 +859,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
 
     try {
       let url = `${baseUrl}/api/knowledge/graph?slim=true&include_staged=true&_=${Date.now()}`;
-      const res = await fetch(url, { headers: { "X-API-Key": apiKey } });
+      const res = await fetch(url, { headers: buildAuthHeaders(apiKey, "") });
       const raw = await res.json();
       if (loadId !== graphLoadIdRef.current) return;
 
@@ -1426,7 +1433,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
           handleExploreNode(d.node_id);
           try {
             const res = await fetch(`${baseUrl}/api/knowledge/nodes/${d.node_id}`, {
-              headers: { "X-API-Key": apiKey }
+              headers: buildAuthHeaders(apiKey, "")
             });
             if (res.ok) setSelectedNode(await res.json());
           } catch (e) {
@@ -1792,7 +1799,7 @@ const selectNodeById = async (nodeId: string) => {
   handleExploreNode(nodeId);
   try {
     const res = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
-      headers: { "X-API-Key": apiKey }
+      headers: buildAuthHeaders(apiKey, "")
     });
     if (res.ok) setSelectedNode(await res.json());
   } catch (e) {
@@ -2046,7 +2053,7 @@ useEffect(() => {
   const fetchWorkspacesList = async () => {
     try {
       const res = await fetch(`${baseUrl}/api/workspaces`, {
-        headers: { "X-API-Key": apiKey },
+        headers: buildAuthHeaders(apiKey, ""),
       });
       if (res.ok) {
         const data = await res.json();
@@ -2069,7 +2076,7 @@ const handleMergeSubmit = async (e: React.FormEvent) => {
   try {
     const res = await fetch(`${baseUrl}/api/knowledge/nodes/merge`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      headers: buildAuthHeaders(apiKey),
       body: JSON.stringify({ node_ids: nodeIds, node_type: mergeNodeType }),
     });
     if (res.ok) {
@@ -2091,7 +2098,7 @@ const handleBulkConnect = async () => {
   try {
     const res = await fetch(`${baseUrl}/api/knowledge/edges/bulk`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      headers: buildAuthHeaders(apiKey),
       body: JSON.stringify({ source_id: ids[0], target_ids: ids.slice(1), edge_type: bulkEdgeType }),
     });
     if (res.ok) {
@@ -2109,7 +2116,7 @@ const handleBulkConnect = async () => {
     try {
       await Promise.all(ids.map(async (nodeId) => {
         const nodeRes = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
-          headers: { "X-API-Key": apiKey },
+          headers: buildAuthHeaders(apiKey, ""),
         });
         if (nodeRes.ok) {
           const nodeData = await nodeRes.json();
@@ -2124,7 +2131,7 @@ const handleBulkConnect = async () => {
           }
           await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
             method: "PUT",
-            headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+            headers: buildAuthHeaders(apiKey),
             body: JSON.stringify({ metadata: updatedMetadata }),
           });
         }
@@ -2149,7 +2156,7 @@ const handleBulkConnect = async () => {
       await Promise.all(sourceIds.map(async (sourceId) => {
         const res = await fetch(`${baseUrl}/api/knowledge/edges/bulk`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+          headers: buildAuthHeaders(apiKey),
           body: JSON.stringify({ source_id: sourceId, target_ids: connectTargetIds, edge_type: connectType }),
         });
         if (!res.ok) {
@@ -2177,12 +2184,12 @@ const handleDeleteEdge = async (edgeId: string | undefined, sourceId: string, ta
     if (edgeId) {
       res = await fetch(`${baseUrl}/api/knowledge/edges/${edgeId}`, {
         method: "DELETE",
-        headers: { "X-API-Key": apiKey },
+        headers: buildAuthHeaders(apiKey, ""),
       });
     } else {
       res = await fetch(`${baseUrl}/api/knowledge/edges/disconnect`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+        headers: buildAuthHeaders(apiKey),
         body: JSON.stringify({ source_id: sourceId, target_id: targetId, edge_type: edgeType }),
       });
     }
@@ -2206,7 +2213,7 @@ const handleBulkDelete = async () => {
   try {
     const res = await fetch(`${baseUrl}/api/knowledge/nodes/bulk-delete`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      headers: buildAuthHeaders(apiKey),
       body: JSON.stringify({ node_ids: ids }),
     });
     if (res.ok) {
@@ -2222,13 +2229,13 @@ const handleCommitNode = async (nodeId: string) => {
   try {
     const res = await fetch(`${baseUrl}/api/knowledge/nodes/commit`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      headers: buildAuthHeaders(apiKey),
       body: JSON.stringify({ node_ids: [nodeId] }),
     });
     if (res.ok) {
       await loadGraph();
       const detailRes = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
-        headers: { "X-API-Key": apiKey }
+        headers: buildAuthHeaders(apiKey, "")
       });
       if (detailRes.ok) {
         setSelectedNode(await detailRes.json());
@@ -2284,7 +2291,7 @@ const handleUpdateNodeMeta = async () => {
   try {
     const res = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      headers: buildAuthHeaders(apiKey),
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
@@ -2310,7 +2317,7 @@ const handleCommitAll = async () => {
   try {
     const res = await fetch(`${baseUrl}/api/knowledge/nodes/commit`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      headers: buildAuthHeaders(apiKey),
       body: JSON.stringify({ workspace_id: "olympus" }),
     });
     if (res.ok) {
@@ -2333,7 +2340,7 @@ const handleDeleteSelected = async () => {
   try {
     const res = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
       method: "DELETE",
-      headers: { "X-API-Key": apiKey },
+      headers: buildAuthHeaders(apiKey, ""),
     });
     if (res.ok) {
       setSelectedNode(null);
@@ -2349,7 +2356,7 @@ const handleAddNode = async (e: React.FormEvent) => {
   try {
     const res = await fetch(`${baseUrl}/api/knowledge/nodes`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      headers: buildAuthHeaders(apiKey),
       body: JSON.stringify({ title: newNodeTitle, node_type: newNodeType, content: newNodeContent, metadata: { workspaces: ["olympus"] } }),
     });
     if (res.ok) {
@@ -2367,7 +2374,7 @@ const handlePurgeGraph = async () => {
   try {
     const previewRes = await fetch(`${baseUrl}/api/knowledge/purge-workspace-preview`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      headers: buildAuthHeaders(apiKey),
       body: JSON.stringify({ workspace_id: "olympus" }),
     });
     if (!previewRes.ok) {
@@ -2377,7 +2384,7 @@ const handlePurgeGraph = async () => {
     const preview = await previewRes.json();
     const deleteNodeIds: string[] = preview.delete_node_ids || [];
     const graphRes = await fetch(`${baseUrl}/api/knowledge/graph?workspace_id=olympus&slim=true&include_staged=true`, {
-      headers: { "X-API-Key": apiKey },
+      headers: buildAuthHeaders(apiKey, ""),
     });
     const graph = graphRes.ok ? await graphRes.json() : { edges: [] };
     const edgeIds = new Set(
@@ -2399,7 +2406,7 @@ const handlePurgeGraph = async () => {
   try {
     await fetch(`${baseUrl}/api/knowledge/purge-workspace`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      headers: buildAuthHeaders(apiKey),
       body: JSON.stringify({ workspace_id: "olympus" }),
     });
     setSelectedNode(null);
@@ -2413,7 +2420,7 @@ const handlePruneGraph = async () => {
   try {
     await fetch(`${baseUrl}/api/knowledge/prune`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+      headers: buildAuthHeaders(apiKey),
       body: JSON.stringify({ workspace_id: "olympus" }),
     });
     setSelectedNode(null);
@@ -2793,7 +2800,7 @@ const confirmImport = async () => {
       try {
         const nodeId = restoredSelectedNode.node_id || restoredSelectedNode.id;
         const response = await fetch(`${baseUrl}/api/knowledge/nodes/${nodeId}`, {
-          headers: { "X-API-Key": apiKey },
+          headers: buildAuthHeaders(apiKey, ""),
         });
         if (response.ok) setSelectedNode(await response.json());
       } catch (error) {
@@ -3126,7 +3133,7 @@ return (
                       setSelectedNode(n);
                       handleExploreNode(n.node_id);
                       try {
-                        const res = await fetch(`${baseUrl}/api/knowledge/nodes/${n.node_id}`, { headers: { "X-API-Key": apiKey } });
+                        const res = await fetch(`${baseUrl}/api/knowledge/nodes/${n.node_id}`, { headers: buildAuthHeaders(apiKey, "") });
                         if (res.ok) setSelectedNode(await res.json());
                       } catch (e) { console.error(e); }
                       setSearchQuery("");

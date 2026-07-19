@@ -9,8 +9,21 @@ import { RemindersView } from '../components/tabs/RemindersView'
 
 describe('ToolsView Component', () => {
   beforeEach(() => {
-    vi.spyOn(window, 'fetch').mockImplementation((url) => {
+    vi.spyOn(window, 'fetch').mockImplementation((url, init) => {
       const u = url.toString()
+      const method = init?.method || 'GET'
+      if (u.includes('/api/tools') && method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          json: () => Promise.resolve({
+            tool: { name: 'custom_mcp_tool', description: 'Custom desc', source: 'postgresql' },
+          }),
+        } as Response)
+      }
+      if (u.includes('/api/tools/') && method === 'DELETE') {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ deleted: true }) } as Response)
+      }
       if (u.includes('/api/abilities/skills')) {
         return Promise.resolve({
           ok: true,
@@ -21,7 +34,7 @@ describe('ToolsView Component', () => {
           ])
         } as Response)
       }
-      if (u.includes('/api/abilities/tools') || u.includes('/api/mcp/tools')) {
+      if (u.includes('/api/abilities/tools') || u.includes('/api/mcp/tools') || u.includes('/api/tools')) {
         return Promise.resolve({
           ok: true,
           status: 200,
@@ -42,7 +55,7 @@ describe('ToolsView Component', () => {
   })
 
   it('allows searching, adding, and deleting tools', async () => {
-    render(<ToolsView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+    render(<ToolsView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin />)
     
     // Check initial tools render (fallback tools)
     await waitFor(() => {
@@ -92,7 +105,7 @@ describe('SkillsView Component', () => {
   beforeEach(() => {
     vi.spyOn(window, 'fetch').mockImplementation((url) => {
       const u = url.toString()
-      if (u.includes('/api/abilities/skills')) {
+      if (u.includes('/api/skills')) {
         return Promise.resolve({
           ok: true,
           status: 200,
@@ -111,7 +124,7 @@ describe('SkillsView Component', () => {
   })
 
   it('allows searching, uploading zip, selecting, and deleting skills', async () => {
-    render(<SkillsView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+    render(<SkillsView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
 
     // Check initial skills render (fallback skills)
     await waitFor(() => {
@@ -312,7 +325,7 @@ describe('UsersView Component', () => {
 
   it('lists all users in the sidebar index', async () => {
     const { UsersView } = await import('../components/tabs/UsersView')
-    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
 
     await waitFor(() => {
       expect(screen.getByText('Ahmed Shabbir')).toBeInTheDocument()
@@ -324,7 +337,7 @@ describe('UsersView Component', () => {
 
   it('allows creating a new user via the Create form', async () => {
     const { UsersView } = await import('../components/tabs/UsersView')
-    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
 
     await waitFor(() => {
       expect(screen.getByText('Ahmed Shabbir')).toBeInTheDocument()
@@ -354,7 +367,7 @@ describe('UsersView Component', () => {
 
   it('allows clicking a user and editing name, email, and role', async () => {
     const { UsersView } = await import('../components/tabs/UsersView')
-    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
 
     await waitFor(() => {
       expect(screen.getByText('Ahmed Shabbir')).toBeInTheDocument()
@@ -383,7 +396,7 @@ describe('UsersView Component', () => {
 
   it('allows deactivating/deleting a user', async () => {
     const { UsersView } = await import('../components/tabs/UsersView')
-    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
 
     await waitFor(() => {
       expect(screen.getByText('Ahmed Shabbir')).toBeInTheDocument()
@@ -399,7 +412,7 @@ describe('UsersView Component', () => {
 
   it('allows regenerating API Key for a user', async () => {
     const { UsersView } = await import('../components/tabs/UsersView')
-    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
 
     await waitFor(() => {
       expect(screen.getByText('Ahmed Shabbir')).toBeInTheDocument()
@@ -473,7 +486,7 @@ describe('AbilitiesView Component', () => {
 
   it('renders and supports browsing, editing, resolving prompt, and creating assets', async () => {
     const { AbilitiesView } = await import('../components/tabs/AbilitiesView')
-    render(<AbilitiesView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+    render(<AbilitiesView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
 
     // Verify template categories list
     await waitFor(() => {
@@ -503,7 +516,7 @@ describe('AbilitiesView Component', () => {
     fireEvent.click(screen.getByText('RESOLVE PROMPT'))
 
     await waitFor(() => {
-      const resolvedArea = screen.getByLabelText(/\/\/ Rendered Engineering Prompt/i) as HTMLTextAreaElement
+      const resolvedArea = screen.getByLabelText(/Rendered Engineering Prompt/i) as HTMLTextAreaElement
       expect(resolvedArea.value).toBe('Compiled system prompt here')
     })
 

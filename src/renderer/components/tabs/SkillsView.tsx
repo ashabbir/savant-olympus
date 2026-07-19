@@ -25,6 +25,7 @@ interface SkillsViewProps {
   serverUrl: string;
   apiKey: string;
   activeModel?: { provider: string; model: string };
+  isAdmin: boolean;
 }
 
 interface ChatMessage {
@@ -134,10 +135,11 @@ module.exports = run;`,
   }
 ];
 
-export function SkillsView({ serverUrl, apiKey, activeModel }: SkillsViewProps) {
+export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsViewProps) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSkillPaneOpen, setIsSkillPaneOpen] = useState(true);
 
@@ -325,58 +327,31 @@ export function SkillsView({ serverUrl, apiKey, activeModel }: SkillsViewProps) 
 
   const fetchSkills = async () => {
     setIsLoading(true);
+    setLoadError("");
     try {
-      let fetchedList: Skill[] = [];
-      const res = await fetch(`${baseUrl}/api/abilities/skills?_=${Date.now()}`, {
-        headers: { "X-API-Key": apiKey },
+      const res = await fetch(`${baseUrl}/api/skills?_=${Date.now()}`, {
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
-      if (res.ok) {
-        const data = await res.json();
-        fetchedList = Array.isArray(data.skills) ? data.skills : Array.isArray(data) ? data : [];
+      if (!res.ok) {
+        setSkills([]);
+        setLoadError(`Unable to load skills (${res.status}).`);
+        return;
       }
-
-      // Load local SQLite settings skills to merge or fallback
-      const settings = await window.system.getSettings();
-      const localSkills: Skill[] = settings["savant:skills"] || [];
-
-      // Combine arrays, removing duplicates by name
-      const map = new Map<string, Skill>();
-      
-      // Load defaults first
-      DEFAULT_SKILLS.forEach(s => map.set(s.name, s));
-      // Overwrite/Add fetched skills
-      fetchedList.forEach(s => {
-        if (s && s.name) {
-          map.set(s.name, {
-            ...s,
-            files: s.files || {
-              "prompt.txt": s.description || "System prompt",
-              "schema.json": JSON.stringify({ name: s.name, description: s.description || "", parameters: { type: "object", properties: {} } }, null, 2),
-              "index.js": "// code implementation\nmodule.exports = async function(args) {};",
-              "metadata.json": JSON.stringify(s, null, 2)
-            }
-          });
-        }
-      });
-      // Merge local sqlite custom skills
-      localSkills.forEach(s => {
-        if (s && s.name) {
-          map.set(s.name, s);
-        }
-      });
-
-      const finalSkills = Array.from(map.values());
-      setSkills(finalSkills);
+      const data = await res.json();
+      const fetchedList = Array.isArray(data.skills) ? data.skills : Array.isArray(data) ? data : [];
+      setSkills(fetchedList.map((skill: Partial<Skill>) => ({
+        ...skill,
+        files: {
+          "prompt.txt": skill.files?.["prompt.txt"] || "",
+          "schema.json": skill.files?.["schema.json"] || "",
+          "index.js": skill.files?.["index.js"] || "",
+          "metadata.json": skill.files?.["metadata.json"] || "",
+        },
+      })) as Skill[]);
     } catch (e) {
       console.error(e);
-      // SQLite settings fallback
-      const settings = await window.system.getSettings();
-      const localSkills: Skill[] = settings["savant:skills"] || [];
-      const map = new Map<string, Skill>();
-      DEFAULT_SKILLS.forEach(s => map.set(s.name, s));
-      localSkills.forEach(s => map.set(s.name, s));
-      const finalSkills = Array.from(map.values());
-      setSkills(finalSkills);
+      setSkills([]);
+      setLoadError("Unable to reach Savant server for skills.");
     } finally {
       setIsLoading(false);
     }
@@ -394,11 +369,12 @@ export function SkillsView({ serverUrl, apiKey, activeModel }: SkillsViewProps) 
         files: s.files
       }));
       
-      await fetch(`${baseUrl}/api/abilities/skills`, {
+      await fetch(`${baseUrl}/api/skills`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-API-Key": apiKey
+          "X-API-Key": apiKey,
+          "X-App-Name": "savant-olympus",
         },
         body: JSON.stringify({ skills: skillObjects })
       }).catch(e => console.log("Failed saving to remote server gateway: ", e));
@@ -894,7 +870,7 @@ If you have a decent understanding of the core behavior and are ready to generat
           <div className="flex items-center justify-between">
             {isSkillPaneOpen && <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono">Skill Registry</h3>}
             <div className="flex items-center gap-1.5">
-              {isSkillPaneOpen && (
+              {isSkillPaneOpen && isAdmin && (
                 <>
                   <button
                     onClick={() => {
@@ -968,6 +944,8 @@ If you have a decent understanding of the core behavior and are ready to generat
               <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-2">
                 {isLoading ? (
                   <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REGISTRY...</div>
+                ) : loadError ? (
+                  <div className="text-center py-6 text-xs text-red-400 font-mono">{loadError}</div>
                 ) : filteredSkills.length === 0 ? (
                   <div className="text-center py-6 text-xs text-muted-foreground opacity-40">No skills found</div>
                 ) : (
@@ -991,13 +969,13 @@ If you have a decent understanding of the core behavior and are ready to generat
                         </div>
                         <p className="text-[10px] text-muted-foreground opacity-70 mt-1 line-clamp-2">{s.description}</p>
                       </div>
-                      <button
+                      {isAdmin && <button
                         onClick={(e) => handleDeleteSkill(s.id, e)}
                         className="opacity-0 group-hover:opacity-100 p-1 text-[var(--cp-magenta)] hover:bg-red-950/20 transition-all cursor-pointer rounded shrink-0 ml-1.5"
                         title="Delete skill"
                       >
                         <Trash2 size={12} />
-                      </button>
+                      </button>}
                     </div>
                   ))
                 )}
@@ -1113,13 +1091,13 @@ If you have a decent understanding of the core behavior and are ready to generat
                     rows={1}
                     className="flex-1 bg-[var(--cp-bg-0)] border border-[var(--cp-border)] px-3 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:border-[var(--cp-cyan)] resize-none min-h-[32px] max-h-[120px] overflow-y-auto"
                   />
-                  <button
+                  {isAdmin && <button
                     onClick={handleSendAiChatMessage}
                     disabled={isAiChatLoading || !chatInput.trim()}
                     className="px-4 py-1.5 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase hover:opacity-90 disabled:opacity-50 font-mono"
                   >
                     GENERATE
-                  </button>
+                  </button>}
                 </div>
               </div>
             </div>

@@ -29,6 +29,7 @@ export default function App() {
   const [startupProgress, setStartupProgress] = useState("BOOTING_SYSTEM");
   const [startupSubtext, setStartupSubtext] = useState("Initializing Olympus control surface...");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [liveRole, setLiveRole] = useState("");
   const [settings, setSettings] = useState<Record<string, any>>({});
   const [thinking, setThinking] = useState<Thinking[]>([]);
   const [statusText, setStatusText] = useState("IDLE");
@@ -39,6 +40,7 @@ export default function App() {
   const apiKey = settings["user:apiKey"] || getStoredApiKey() || "";
   const providerChain = settings["provider:chain"] || [];
   const activeModel = providerChain[0] || { provider: "gemini", model: "3.5" };
+  const isAdmin = liveRole === "admin";
 
   const addThinking = (agent: string, thought: string, type: Thinking["type"] = "thought") => {
     setThinking(prev => [{
@@ -65,7 +67,7 @@ export default function App() {
     let res: Response;
     try {
       res = await fetch(`${targetServerUrl.replace(/\/+$/, "")}/api/auth/validate`, {
-        headers: { "X-API-Key": candidateApiKey },
+        headers: { "X-API-Key": candidateApiKey, "X-App-Name": "savant-olympus" },
       });
     } catch (_e) {
       throw new Error("Cannot reach Savant server auth. Check that savant-server is running and allows X-API-Key CORS preflight.");
@@ -88,7 +90,9 @@ export default function App() {
 
     if (gatewayEnabled) {
       try {
-        const res = await fetch(`${gatewayUrl.replace(/\/$/, "")}/health`);
+        const res = await fetch(`${gatewayUrl.replace(/\/$/, "")}/health`, {
+          headers: { "X-App-Name": "savant-olympus" },
+        });
         addThinking("System", res.ok ? `GATEWAY_LINK_ESTABLISHED (${gatewayUrl})` : `GATEWAY_RESPONDED_WITH_ERROR (${res.status})`, res.ok ? "mcp_response" : "timeout");
       } catch (_e) {
         addThinking("System", `GATEWAY_OFFLINE: ${gatewayUrl}`, "timeout");
@@ -130,16 +134,14 @@ export default function App() {
           loadedSettings["user:name"] = auth.name;
           await window.system.saveSetting("user:name", auth.name);
         }
-        if (auth?.role) {
-          loadedSettings["user:role"] = auth.role;
-          await window.system.saveSetting("user:role", auth.role);
-        }
+        setLiveRole(auth?.role || "");
       } catch (_e) {
         clearStoredApiKey();
         await window.system.saveSetting("user:apiKey", "");
         await window.system.saveSetting("user:id", "");
         await window.system.saveSetting("user:name", "");
         await window.system.saveSetting("user:role", "");
+        setLiveRole("");
         setSettings({ ...loadedSettings, "user:apiKey": "", "user:id": "", "user:name": "", "user:role": "" });
         setIsAuthenticated(false);
         setIsInitializing(false);
@@ -182,10 +184,7 @@ export default function App() {
       await window.system.saveSetting("user:name", auth.name);
       loadedSettings["user:name"] = auth.name;
     }
-    if (auth?.role) {
-      await window.system.saveSetting("user:role", auth.role);
-      loadedSettings["user:role"] = auth.role;
-    }
+    setLiveRole(auth?.role || "");
     loadedSettings["user:apiKey"] = trimmed;
     setIsAuthenticated(true);
     await initializeOlympus(loadedSettings);
@@ -197,6 +196,7 @@ export default function App() {
     await window.system.saveSetting("user:id", "");
     await window.system.saveSetting("user:name", "");
     await window.system.saveSetting("user:role", "");
+    setLiveRole("");
     setIsAuthenticated(false);
     setIsInitializing(false);
     setSettings(prev => ({ ...prev, "user:apiKey": "", "user:id": "", "user:name": "", "user:role": "" }));
@@ -215,6 +215,33 @@ export default function App() {
     window.addEventListener("switch-tab", handleSwitch);
     return () => window.removeEventListener("switch-tab", handleSwitch);
   }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated || !apiKey) {
+      return;
+    }
+
+    let isCurrent = true;
+    const refreshLiveRole = async () => {
+      try {
+        const auth = await validateSavantApiKey(apiKey, { "server:config": { url: serverUrl } });
+        if (isCurrent) {
+          setLiveRole(auth?.role || "");
+        }
+      } catch (_e) {
+        if (isCurrent) {
+          setLiveRole("");
+        }
+      }
+    };
+
+    void refreshLiveRole();
+    window.addEventListener("focus", refreshLiveRole);
+    return () => {
+      isCurrent = false;
+      window.removeEventListener("focus", refreshLiveRole);
+    };
+  }, [activeTab, apiKey, isAuthenticated, serverUrl]);
 
   if (isInitializing) {
     return <StartupScreen progress={startupProgress} subtext={startupSubtext} />;
@@ -250,17 +277,17 @@ export default function App() {
           {activeTab === "Workspace" ? (
             <WorkspaceView serverUrl={serverUrl} apiKey={apiKey} sessionId={null} />
           ) : activeTab === "Knowledge" ? (
-            <KnowledgeView serverUrl={serverUrl} apiKey={apiKey} isAdmin={settings["user:role"] === "admin"} />
+            <KnowledgeView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} />
           ) : activeTab === "Context" ? (
-            <ContextView serverUrl={serverUrl} apiKey={apiKey} selectedProject={selectedProject} onSelectProject={setSelectedProject} activeModel={activeModel} isAdmin={settings["user:role"] === "admin"} />
+            <ContextView serverUrl={serverUrl} apiKey={apiKey} selectedProject={selectedProject} onSelectProject={setSelectedProject} activeModel={activeModel} isAdmin={isAdmin} />
           ) : activeTab === "Tools" ? (
-            <ToolsView serverUrl={serverUrl} apiKey={apiKey} />
+            <ToolsView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} />
           ) : activeTab === "Skills" ? (
-            <SkillsView serverUrl={serverUrl} apiKey={apiKey} activeModel={activeModel} />
+            <SkillsView serverUrl={serverUrl} apiKey={apiKey} activeModel={activeModel} isAdmin={isAdmin} />
           ) : activeTab === "Abilities" ? (
-            <AbilitiesView serverUrl={serverUrl} apiKey={apiKey} />
+            <AbilitiesView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} />
           ) : activeTab === "Users" ? (
-            <UsersView serverUrl={serverUrl} apiKey={apiKey} activeUserId={settings["user:id"] || ""} onSettingsChanged={handleSettingsChanged} />
+            <UsersView serverUrl={serverUrl} apiKey={apiKey} activeUserId={settings["user:id"] || ""} onSettingsChanged={handleSettingsChanged} isAdmin={isAdmin} />
           ) : activeTab === "Reminders" ? (
             <RemindersView serverUrl={serverUrl} apiKey={apiKey} />
           ) : (
@@ -275,7 +302,7 @@ export default function App() {
           serverUrl={serverUrl}
           apiKey={apiKey}
           selectedProject={selectedProject}
-          isAdmin={settings["user:role"] === "admin"}
+          isAdmin={isAdmin}
         />
       </div>
 

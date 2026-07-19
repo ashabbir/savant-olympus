@@ -15,13 +15,15 @@ interface AbilityAsset {
 interface AbilitiesViewProps {
   serverUrl: string;
   apiKey: string;
+  isAdmin: boolean;
 }
 
-export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
+export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps) {
   const [assets, setAssets] = useState<Record<string, AbilityAsset[]>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<AbilityAsset | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [isAssetPaneOpen, setIsAssetPaneOpen] = useState(true);
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({
@@ -57,26 +59,22 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
 
   const fetchAssets = async () => {
     setIsLoading(true);
+    setLoadError("");
     try {
       const res = await fetch(`${baseUrl}/api/abilities/assets?_=${Date.now()}`, {
-        headers: { "X-API-Key": apiKey },
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         const data = await res.json();
         setAssets(data);
       } else {
-        // Mock fallback
-        setAssets({
-          persona: [
-            { id: "persona.engineer", type: "persona", name: "Engineer Persona", priority: 100, tags: ["backend"], body: "# Engineer\nFocuses on robust coding standards.\n" }
-          ],
-          rule: [
-            { id: "rule.coding_style", type: "rule", name: "Coding Style Guide", priority: 200, tags: ["style"], body: "# Style\nUse camelCase for JS/TS.\n" }
-          ]
-        });
+        setAssets({});
+        setLoadError(`Unable to load assets (${res.status}).`);
       }
     } catch (e) {
       console.error("fetchAssets failed:", e);
+      setAssets({});
+      setLoadError("Unable to reach Savant server for ability assets.");
     } finally {
       setIsLoading(false);
     }
@@ -90,7 +88,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
     if (isDirty && !window.confirm("Discard unsaved changes?")) return;
     try {
       const res = await fetch(`${baseUrl}/api/abilities/assets/${encodeURIComponent(id)}`, {
-        headers: { "X-API-Key": apiKey },
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         const asset: AbilityAsset = await res.json();
@@ -121,6 +119,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
         headers: {
           "Content-Type": "application/json",
           "X-API-Key": apiKey,
+          "X-App-Name": "savant-olympus",
         },
         body: JSON.stringify(payload),
       });
@@ -142,7 +141,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
     try {
       const res = await fetch(`${baseUrl}/api/abilities/assets/${encodeURIComponent(selectedId)}`, {
         method: "DELETE",
-        headers: { "X-API-Key": apiKey },
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         setSelectedId(null);
@@ -172,6 +171,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
         headers: {
           "Content-Type": "application/json",
           "X-API-Key": apiKey,
+          "X-App-Name": "savant-olympus",
         },
         body: JSON.stringify(payload),
       });
@@ -206,6 +206,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
         headers: {
           "Content-Type": "application/json",
           "X-API-Key": apiKey,
+          "X-App-Name": "savant-olympus",
         },
         body: JSON.stringify(payload),
       });
@@ -222,7 +223,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
     try {
       const res = await fetch(`${baseUrl}/api/abilities/bootstrap`, {
         method: "POST",
-        headers: { "X-API-Key": apiKey },
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         fetchAssets();
@@ -235,7 +236,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
   const handleValidate = async () => {
     try {
       const res = await fetch(`${baseUrl}/api/abilities/validate`, {
-        headers: { "X-API-Key": apiKey },
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         const data = await res.json();
@@ -314,7 +315,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
           <div className="flex items-center justify-between">
             {isAssetPaneOpen && <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono">Asset Trees</h3>}
             <div className="flex items-center gap-1">
-              {isAssetPaneOpen && (
+              {isAssetPaneOpen && isAdmin && (
                 <button
                   onClick={() => setShowNewModal(true)}
                   className="px-2 py-0.5 border text-[10px] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] flex items-center gap-1 font-mono cursor-pointer"
@@ -350,6 +351,8 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
               <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-1">
                 {isLoading ? (
                   <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REGISTRY...</div>
+                ) : loadError ? (
+                  <div className="text-center py-6 text-xs text-red-400 font-mono">{loadError}</div>
                 ) : (
                   typeOrder.map(type => {
                 let items = assets[type] || [];
@@ -527,7 +530,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
                 </h3>
                 <p className="text-[10px] text-muted-foreground font-mono">Asset Type: {selectedAsset.type.toUpperCase()}</p>
               </div>
-              <div className="flex items-center gap-2">
+              {isAdmin && <div className="flex items-center gap-2">
                 <button
                   onClick={handleDelete}
                   className="px-2 py-1 border border-red-500/30 text-[10px] text-[var(--cp-magenta)] hover:bg-red-950/20 flex items-center gap-1 font-mono cursor-pointer"
@@ -540,7 +543,7 @@ export function AbilitiesView({ serverUrl, apiKey }: AbilitiesViewProps) {
                 >
                   <Save size={10} /> SAVE
                 </button>
-              </div>
+              </div>}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

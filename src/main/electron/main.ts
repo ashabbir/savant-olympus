@@ -114,7 +114,10 @@ async function getGatewayProviders(gatewayUrl: string) {
     try {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 2500)
-      const response = await fetch(`${baseUrl}${endpoint}`, { signal: controller.signal })
+      const response = await fetch(`${baseUrl}${endpoint}`, {
+        signal: controller.signal,
+        headers: { 'X-App-Name': 'savant-olympus' },
+      })
       clearTimeout(timeout)
       if (!response.ok) continue
 
@@ -234,7 +237,8 @@ async function runGatewayAgent(provider: string, model: string, prompt: string) 
     const baseUrl = gatewayUrl.replace(/\/$/, '');
     const runRes = await fetch(`${baseUrl}/runs`, {
        method: 'POST',
-       headers: {
+      headers: {
+        'X-App-Name': 'savant-olympus',
          'Content-Type': 'application/json',
          ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
        },
@@ -254,7 +258,7 @@ async function runGatewayAgent(provider: string, model: string, prompt: string) 
     while (true) {
       await new Promise(r => setTimeout(r, 500));
       const pollRes = await fetch(`${baseUrl}/runs/${id}`, {
-        headers: { ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}) }
+        headers: { 'X-App-Name': 'savant-olympus', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}) }
       });
       if (!pollRes.ok) continue;
       const run = await pollRes.json();

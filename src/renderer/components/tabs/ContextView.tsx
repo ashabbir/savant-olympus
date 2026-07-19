@@ -6,7 +6,8 @@ import { FileBrowserModal } from "../FileBrowserModal";
 import { toast } from "sonner";
 
 interface Repo {
-
+  id?: string | number;
+  repo_id?: string | number;
   name: string;
   path: string;
   source?: "github" | "gitlab" | "git" | "directory" | "unknown";
@@ -20,6 +21,20 @@ interface Repo {
   indexed_at?: string;
   created_at?: string;
   languages?: Record<string, number>;
+  provider?: string;
+  freshness?: string;
+  graph_version?: string;
+  code_intelligence?: StructuralHealth;
+}
+
+interface StructuralHealth {
+  provider?: string;
+  freshness?: "fresh" | "pending_sync" | "stale" | "degraded" | "unavailable" | string;
+  indexed?: boolean;
+  graph_version?: string | null;
+  warnings?: string[];
+  current_job?: Record<string, any> | null;
+  last_job?: Record<string, any> | null;
 }
 
 interface ContextViewProps {
@@ -38,25 +53,32 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const [newRepoName, setNewRepoName] = useState("");
   const [newRepoPath, setNewRepoPath] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [refreshingRepo, setRefreshingRepo] = useState<string | null>(null);
   const [indexingStatus, setIndexingStatus] = useState<Record<string, any>>({});
   const previousIndexingStatusRef = useRef<Record<string, any>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [isRepoPaneOpen, setIsRepoPaneOpen] = useState(true);
+  const [structuralHealth, setStructuralHealth] = useState<StructuralHealth | null>(null);
+  const [isLoadingStructuralHealth, setIsLoadingStructuralHealth] = useState(false);
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
+  const authHeaders = { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" };
 
   const fetchRepos = useCallback(async () => {
     setIsLoading(true);
+    setLoadError("");
     try {
       const res = await fetch(`${baseUrl}/api/context/repos`, {
-        headers: { "X-API-Key": apiKey },
+        headers: authHeaders,
       });
-      if (!res.ok) throw new Error("Failed to load repositories");
+      if (!res.ok) throw new Error(`Unable to load projects (${res.status}).`);
       const data = await res.json();
       setRepos(data.repos || data || []);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setRepos([]);
+      setLoadError(e.message || "Unable to reach Savant server for projects.");
     } finally {
       setIsLoading(false);
     }
@@ -65,7 +87,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const fetchIndexingStatus = useCallback(async () => {
     try {
       const res = await fetch(`${baseUrl}/api/context/repos/indexing-status`, {
-        headers: { "X-API-Key": apiKey },
+        headers: authHeaders,
       });
       if (res.ok) {
         const data = await res.json();
@@ -109,10 +131,12 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
   const [graphVersion, setGraphVersion] = useState(0);
 
-  const fetchGraphifyStats = async (projectName: string) => {
+  const repoIdentity = (repo: Repo) => String(repo.repo_id ?? repo.id ?? repo.name);
+
+  const fetchGraphifyStats = async (repo: Repo) => {
     try {
-      const res = await fetch(`${baseUrl}/api/graphify/stats?workspace_id=${encodeURIComponent(projectName)}`, {
-        headers: { "X-API-Key": apiKey }
+      const res = await fetch(`${baseUrl}/api/graphify/stats?repo_id=${encodeURIComponent(repoIdentity(repo))}&workspace_id=${encodeURIComponent(repo.name)}`, {
+        headers: authHeaders
       });
       if (res.ok) {
         const data = await res.json();
@@ -134,6 +158,27 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       }
     }
   };
+
+  const fetchStructuralHealth = useCallback(async (repo: Repo) => {
+    setIsLoadingStructuralHealth(true);
+    try {
+      const res = await fetch(`${baseUrl}/api/context/code-intelligence/repos/${encodeURIComponent(repoIdentity(repo))}/health`, {
+        headers: authHeaders,
+      });
+      if (!res.ok) throw new Error(`Structural health unavailable (${res.status})`);
+      setStructuralHealth(await res.json());
+    } catch (error) {
+      console.error(error);
+      setStructuralHealth({
+        provider: repo.provider || repo.code_intelligence?.provider || "legacy",
+        freshness: repo.freshness || repo.code_intelligence?.freshness || "unavailable",
+        graph_version: repo.graph_version || repo.code_intelligence?.graph_version,
+        warnings: ["Structural health is currently unavailable."],
+      });
+    } finally {
+      setIsLoadingStructuralHealth(false);
+    }
+  }, [baseUrl, apiKey]);
 
   const handleUploadGraphify = async () => {
     if (!selectedRepo) return;
@@ -157,9 +202,10 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-API-Key": apiKey
+          ...authHeaders
         },
         body: JSON.stringify({
+          repo_id: repoIdentity(selectedRepo),
           workspace_id: selectedRepo.name,
           graph: graphData
         })
@@ -167,7 +213,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       if (res.ok) {
         const data = await res.json();
         setUploadSuccess(`Successfully uploaded Graphify KG! Imported ${data.nodes_imported} nodes and ${data.edges_imported} edges.`);
-        fetchGraphifyStats(selectedRepo.name);
+        fetchGraphifyStats(selectedRepo);
         setGraphVersion((prev) => prev + 1);
       } else {
         const err = await res.json();
@@ -261,9 +307,10 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-API-Key": apiKey
+            ...authHeaders
           },
           body: JSON.stringify({
+            repo_id: repoIdentity(selectedRepo),
             workspace_id: selectedRepo.name,
             graph: graphJson,
             meta: metaJson
@@ -273,7 +320,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         if (res.ok) {
           const data = await res.json();
           setUploadSuccess(`Successfully uploaded Graphify KG! Imported ${data.nodes_imported} nodes and ${data.edges_imported} edges.`);
-          fetchGraphifyStats(selectedRepo.name);
+          fetchGraphifyStats(selectedRepo);
           setGraphVersion((prev) => prev + 1);
         } else {
           const err = await res.json();
@@ -306,18 +353,21 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
             console.error("Failed to read graphify json on mount:", err);
           });
       }
-      fetchGraphifyStats(selectedRepo.name);
+      fetchGraphifyStats(selectedRepo);
+      fetchStructuralHealth(selectedRepo);
     } else {
       setGraphifyJson(null);
       setGraphifyStats(null);
       setUploadSuccess(null);
     }
-  }, [selectedRepo?.path, selectedRepo?.name, baseUrl, apiKey]);
+  }, [selectedRepo?.path, selectedRepo?.name, selectedRepo?.id, selectedRepo?.repo_id, baseUrl, apiKey, fetchStructuralHealth]);
 
-  const fetchAstAndAnalyze = useCallback(async (projectName: string) => {
+  const fetchAstAndAnalyze = useCallback(async (projectName: string, repoOverride?: Repo) => {
     try {
-      const res = await fetch(`${baseUrl}/api/context/ast/list?repo=${encodeURIComponent(projectName)}`, {
-        headers: { "X-API-Key": apiKey },
+      const repo = repoOverride || repos.find((item) => item.name === projectName);
+      const identity = repo ? repoIdentity(repo) : projectName;
+      const res = await fetch(`${baseUrl}/api/context/ast/list?repo_id=${encodeURIComponent(identity)}&repo=${encodeURIComponent(projectName)}`, {
+        headers: authHeaders,
       });
       if (!res.ok) throw new Error("Failed to load AST list");
       const data = await res.json();
@@ -331,7 +381,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
           try {
             const uri = `${projectName}:${relPath}`;
             const fileRes = await fetch(`${baseUrl}/api/context/code/read?uri=${encodeURIComponent(uri)}`, {
-              headers: { "X-API-Key": apiKey },
+              headers: authHeaders,
             });
             if (fileRes.ok) {
               const doc = await fileRes.json();
@@ -347,16 +397,16 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       console.error("Heuristics failed:", e);
       setAnalysisResults(null);
     }
-  }, [baseUrl, apiKey]);
+  }, [baseUrl, apiKey, repos]);
 
   useEffect(() => {
-    if (selectedProject) {
+    if (selectedRepo) {
       setAstNodes([]);
       setAnalysisResults(null);
       setDetailsTab("overview");
-      fetchAstAndAnalyze(selectedProject);
+      fetchAstAndAnalyze(selectedRepo.name, selectedRepo);
     }
-  }, [selectedProject, fetchAstAndAnalyze]);
+  }, [selectedRepo, fetchAstAndAnalyze]);
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isFileBrowserOpen, setIsFileBrowserOpen] = useState(false);
@@ -387,7 +437,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     setDirPath("");
     try {
       const res = await fetch(`${baseUrl}/api/context/repos/sources`, {
-        headers: { "X-API-Key": apiKey },
+        headers: authHeaders,
       });
       if (!res.ok) throw new Error("Failed to load sources");
       const data = await res.json();
@@ -437,7 +487,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-API-Key": apiKey,
+          ...authHeaders,
         },
         body: JSON.stringify(payload),
       });
@@ -468,7 +518,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     jobPollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`${baseUrl}/api/context/repos/indexing-status`, {
-          headers: { "X-API-Key": apiKey },
+          headers: authHeaders,
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -508,7 +558,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     try {
       const res = await fetch(`${baseUrl}/api/context/repos/${encodeURIComponent(repoName)}/refresh`, {
         method: "POST",
-        headers: { "X-API-Key": apiKey },
+        headers: authHeaders,
       });
       if (!res.ok) {
         let message = `HTTP ${res.status}`;
@@ -536,7 +586,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-API-Key": apiKey,
+          ...authHeaders,
         },
         body: JSON.stringify({ name: repoName }),
       });
@@ -552,25 +602,26 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     }
   };
 
-  const handleGenerateAst = async (repoName: string) => {
+  const handleSyncCodeGraph = async (repo: Repo) => {
     try {
-      const res = await fetch(`${baseUrl}/api/context/repos/ast/generate`, {
+      const res = await fetch(`${baseUrl}/api/context/code-intelligence/repos/${encodeURIComponent(repoIdentity(repo))}/sync`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-API-Key": apiKey,
+          ...authHeaders,
         },
-        body: JSON.stringify({ name: repoName }),
+        body: JSON.stringify({ mode: "create_or_sync" }),
       });
-      if (!res.ok) throw new Error("Failed to start AST generation");
-      toast.info(`AST generation queued for "${repoName}"`, {
+      if (!res.ok) throw new Error("Failed to sync code graph");
+      toast.info(`Code graph sync queued for "${repo.name}"`, {
         description: "You will be notified when the job completes.",
         duration: 4000,
       });
       fetchIndexingStatus();
-      pollForJobCompletion(repoName, "AST generation");
+      pollForJobCompletion(repo.name, "Code graph sync");
+      fetchStructuralHealth(repo);
     } catch (e: any) {
-      toast.error("Failed to queue AST generation", { description: e.message });
+      toast.error("Failed to queue code graph sync", { description: e.message });
     }
   };
 
@@ -580,7 +631,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-API-Key": apiKey,
+          ...authHeaders,
         },
         body: JSON.stringify({ name: repoName }),
       });
@@ -599,7 +650,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-API-Key": apiKey,
+          ...authHeaders,
         },
         body: JSON.stringify({ name: repoName }),
       });
@@ -615,7 +666,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     try {
       const res = await fetch(`${baseUrl}/api/context/repos/${encodeURIComponent(repoName)}`, {
         method: "DELETE",
-        headers: { "X-API-Key": apiKey },
+        headers: authHeaders,
       });
       if (!res.ok) throw new Error("Failed to delete repository");
       if (selectedProject === repoName) onSelectProject(null);
@@ -628,6 +679,11 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const statusInfo = selectedProject ? indexingStatus[selectedProject] || {} : {};
   const liveStatus = (statusInfo.status || selectedRepo?.status || "ready").toLowerCase();
   const isCurrentlyIndexing = liveStatus === "indexing" || liveStatus === "running" || liveStatus === "queued" || liveStatus === "processing";
+  const structuralJob = structuralHealth?.current_job || statusInfo.structural_job;
+  const structuralJobStatus = String(structuralJob?.status || "").toLowerCase();
+  const isStructuralJobActive = ["indexing", "running", "queued", "processing"].includes(structuralJobStatus);
+  const structuralProvider = structuralHealth?.provider || selectedRepo?.provider || selectedRepo?.code_intelligence?.provider || "legacy";
+  const structuralFreshness = structuralHealth?.freshness || selectedRepo?.freshness || selectedRepo?.code_intelligence?.freshness || "unavailable";
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const filteredRepos = normalizedSearchQuery
     ? repos.filter((repo) => JSON.stringify({ ...repo, live_status: indexingStatus[repo.name] || {} }).toLowerCase().includes(normalizedSearchQuery))
@@ -697,6 +753,8 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
               <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-2">
                 {isLoading ? (
                   <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REPOS...</div>
+                ) : loadError ? (
+                  <div className="text-center py-6 text-xs text-red-400 font-mono">{loadError}</div>
                 ) : filteredRepos.length === 0 ? (
                   <div className="text-center py-6 text-xs text-muted-foreground opacity-40">
                     {normalizedSearchQuery ? "No matching projects." : "No projects registered."}
@@ -837,7 +895,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                 >
                   Visualizations & Heuristics
                 </button>
-                {graphifyStats && graphifyStats.total > 0 && (
+                {((graphifyStats && graphifyStats.total > 0) || structuralProvider === "codegraph") && (
                   <button
                     onClick={() => setDetailsTab("graphify")}
                     className={`px-3 py-1 text-xs uppercase border ${
@@ -846,7 +904,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         : "border-[var(--cp-border)] text-muted-foreground hover:text-foreground"
                     } cursor-pointer`}
                   >
-                    Codebase Graph (Graphify)
+                    Project Graph
                   </button>
                 )}
               </div>
@@ -884,18 +942,11 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                       <Zap size={12} /> INDEX REPO
                     </button>
                     <button
-                      onClick={() => handleGenerateAst(selectedRepo.name)}
+                      onClick={() => handleSyncCodeGraph(selectedRepo)}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-950 text-indigo-400 border border-indigo-900 hover:bg-indigo-900 hover:text-indigo-200 cursor-pointer font-mono font-bold"
-                      disabled={isCurrentlyIndexing}
+                      disabled={isCurrentlyIndexing || isStructuralJobActive}
                     >
-                      <FileCode size={12} /> GENERATE AST
-                    </button>
-                    <button
-                      onClick={() => handlePurgeRepo(selectedRepo.name)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-stone-900 text-stone-400 border border-stone-800 hover:bg-stone-850 hover:text-stone-300 cursor-pointer font-mono font-bold"
-                      disabled={isCurrentlyIndexing}
-                    >
-                      <Trash size={12} /> PURGE INDEX
+                      <FileCode size={12} /> {isStructuralJobActive ? "SYNCING CODE GRAPH..." : "SYNC CODE GRAPH"}
                     </button>
                     <button
                       onClick={() => handleDeleteRepo(selectedRepo.name)}
@@ -903,63 +954,25 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     >
                       <Trash2 size={12} /> DELETE PROJECT
                     </button>
-                    <button
-                      onClick={() => document.getElementById("graphify-file-input")?.click()}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-cyan-950 text-[var(--cp-cyan)] border border-cyan-900 hover:bg-cyan-900 cursor-pointer font-mono font-bold"
-                      disabled={isUploadingGraphify}
-                    >
-                      <Upload size={12} /> {isUploadingGraphify ? "UPLOADING..." : "SELECT GRAPHIFY DIR"}
-                    </button>
-                    <input
-                      type="file"
-                      id="graphify-file-input"
-                      {...({
-                        webkitdirectory: "",
-                        directory: "",
-                      } as any)}
-                      style={{ display: "none" }}
-                      onChange={handleFileChange}
-                    />
                     </> : <span className="text-[10px] text-muted-foreground font-mono border border-[var(--cp-border)] px-2 py-1">READ-ONLY MEMBER ACCESS</span>}
                   </div>
 
-                  {/* Graphify Upload/Sync Banner */}
-                  {graphifyJson && (() => {
-                    const serverTotal = graphifyStats?.total || 0;
-                    const localTotal = graphifyJson.nodes?.length || 0;
-                    const needsSync = serverTotal > 0 && serverTotal !== localTotal;
-                    
-                    if (serverTotal === 0 || needsSync) {
-                      return (
-                        <div className="bg-cyan-950/20 border border-[var(--cp-cyan)]/30 p-4 rounded flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs font-mono backdrop-blur-md">
-                          <div>
-                            <h5 className="text-[var(--cp-cyan)] font-bold uppercase tracking-wider mb-1">
-                              {needsSync ? "Graphify Update Available" : "Graphify Data Detected"}
-                            </h5>
-                            <p className="text-muted-foreground">
-                              {needsSync 
-                                ? `Your local codebase Graphify is updated. (Local: ${localTotal} nodes, Server: ${serverTotal} nodes). Do you want to sync it with the server?`
-                                : `Found graphify-out/graph.json with ${localTotal} nodes and ${(graphifyJson.links?.length || graphifyJson.edges?.length || 0)} edges.`}
-                            </p>
-                          </div>
-                          {isAdmin && <button
-                              onClick={handleUploadGraphify}
-                              disabled={isUploadingGraphify}
-                              className="px-4 py-2 bg-cyan-950 text-[var(--cp-cyan)] border border-cyan-900 hover:bg-cyan-900 cursor-pointer font-bold tracking-wider uppercase text-[10px] self-start md:self-auto shrink-0 transition-all duration-300"
-                            >
-                              {isUploadingGraphify ? "Uploading..." : needsSync ? "Sync Graphify" : "Upload Graphify JSON"}
-                            </button>}
-                        </div>
-                      );
-                    }
-                    return null;
-                  })()}
 
-                  {uploadSuccess && (
-                    <div className="bg-stone-900/50 border border-stone-800 text-foreground p-3 text-xs font-mono rounded">
-                      {uploadSuccess}
+                  <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded font-mono text-xs" data-testid="structural-health">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[var(--section-label)] uppercase tracking-wider">Structural Intelligence</span>
+                      <div className="flex items-center gap-2 uppercase text-[10px]">
+                        <span>Provider: <strong className="text-foreground">{structuralProvider}</strong></span>
+                        <span>Freshness: <strong className={structuralFreshness === "fresh" ? "text-green-400" : structuralFreshness === "pending_sync" ? "text-amber-400" : "text-red-400"}>{isLoadingStructuralHealth ? "loading" : structuralFreshness}</strong></span>
+                      </div>
                     </div>
-                  )}
+                    {structuralHealth?.graph_version && <p className="mt-1 text-[10px] text-muted-foreground">Graph version: {structuralHealth.graph_version}</p>}
+                    {structuralFreshness === "pending_sync" && <p className="mt-2 text-amber-400">A structural sync is pending. Existing results may be incomplete.</p>}
+                    {structuralFreshness === "stale" && <p className="mt-2 text-amber-400">The code graph is stale. Sync Code Graph to refresh it.</p>}
+                    {structuralFreshness === "degraded" && <p className="mt-2 text-red-400">Structural intelligence is degraded. Results may be incomplete; review provider warnings.</p>}
+                    {structuralFreshness === "unavailable" && <p className="mt-2 text-red-400">Structural intelligence is unavailable. Check provider health, then retry Sync Code Graph.</p>}
+                    {structuralHealth?.warnings?.map((warning) => <p key={warning} className="mt-1 text-[10px] text-amber-400">{warning}</p>)}
+                  </div>
 
                   {/* Progress Section */}
                   {isCurrentlyIndexing && (
@@ -1012,10 +1025,10 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     </div>
                   </div>
 
-                  {/* Graphify Stats */}
+                  {/* Code graph statistics */}
                   {graphifyStats && graphifyStats.total > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-[11px] uppercase font-mono text-[var(--section-label)] tracking-wider">Graphify Stats</h4>
+                      <h4 className="text-[11px] uppercase font-mono text-[var(--section-label)] tracking-wider">Code Graph Stats</h4>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {Object.entries(graphifyStats.stats || {}).map(([type, count]) => (
                           <div key={type} className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded">
@@ -1024,7 +1037,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                           </div>
                         ))}
                         <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded">
-                          <span className="block text-[10px] font-mono text-muted-foreground uppercase">Total Graphify Nodes</span>
+                          <span className="block text-[10px] font-mono text-muted-foreground uppercase">Total Code Graph Nodes</span>
                           <span className="text-lg font-bold text-foreground">{graphifyStats.total}</span>
                         </div>
                       </div>
@@ -1080,40 +1093,15 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded flex items-center justify-between gap-3 text-xs font-mono">
                     <div className="flex items-center gap-4">
                       <span className="text-muted-foreground">
-                        SERVER DB: <strong className="text-foreground">{graphifyStats?.total || 0} nodes</strong>
+                        CODE GRAPH: <strong className="text-foreground">{graphifyStats?.total || 0} nodes</strong>
                       </span>
-                      {graphifyJson && (
-                        <>
-                          <span className="text-muted-foreground">|</span>
-                          <span className="text-muted-foreground">
-                            LOCAL JSON: <strong className="text-foreground">{graphifyJson.nodes?.length || 0} nodes</strong>
-                          </span>
-                          {graphifyStats?.total !== graphifyJson.nodes?.length ? (
-                            <span className="px-1.5 py-0.5 bg-yellow-950/40 border border-yellow-500/50 text-yellow-500 rounded text-[9px] uppercase font-bold">
-                              Out of Sync
-                            </span>
-                          ) : (
-                            <span className="px-1.5 py-0.5 bg-green-950/40 border border-green-500/50 text-green-500 rounded text-[9px] uppercase font-bold">
-                              Synced
-                            </span>
-                          )}
-                        </>
-                      )}
                     </div>
-                    {typeof window.system?.readGraphifyJson === 'function' && (
-                      <button
-                        onClick={handleUploadGraphify}
-                        disabled={isUploadingGraphify}
-                        className="px-3 py-1 bg-cyan-950 text-[var(--cp-cyan)] border border-cyan-900 hover:bg-cyan-900 cursor-pointer font-bold uppercase text-[9px] transition-all duration-300"
-                      >
-                        {isUploadingGraphify ? "Pushing..." : "Push Local Graph to Server DB"}
-                      </button>
-                    )}
                   </div>
 
-                  {graphifyStats && graphifyStats.total > 0 ? (
+                  {((graphifyStats && graphifyStats.total > 0) || structuralProvider === "codegraph") ? (
                     <GraphifyVisualizer
                       key={`${selectedRepo.name}-${graphVersion}`}
+                      repoId={repoIdentity(selectedRepo)}
                       repoName={selectedRepo.name}
                       baseUrl={serverUrl}
                       apiKey={apiKey}
@@ -1122,17 +1110,8 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   ) : (
                     <div className="flex-1 min-h-[350px] bg-[var(--cp-bg-2)] border border-[var(--cp-border)] rounded flex flex-col items-center justify-center text-center p-6">
                       <p className="text-xs font-mono text-muted-foreground max-w-md mb-4 leading-relaxed uppercase">
-                        No Graphify data stored on the server for this repository. Please run graphify locally and push it to the PostgreSQL database.
+                        No project graph is available. Use Sync Code Graph to build structural data for this repository.
                       </p>
-                      {typeof window.system?.readGraphifyJson === 'function' && (
-                        <button
-                          onClick={handleUploadGraphify}
-                          disabled={isUploadingGraphify}
-                          className="px-4 py-2 bg-cyan-950 text-[var(--cp-cyan)] border border-cyan-900 hover:bg-cyan-900 cursor-pointer font-bold tracking-wider uppercase text-[10px] transition-all duration-300"
-                        >
-                          {isUploadingGraphify ? "Pushing Graphify Data..." : "Push Local Graph to Server DB"}
-                        </button>
-                      )}
                     </div>
                   )}
                 </div>

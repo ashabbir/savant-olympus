@@ -1,24 +1,27 @@
 import React, { useState, useEffect } from "react";
-import { Wrench, Sliders, Play, Trash2, Plus, Search, ShieldCheck, ChevronLeft, ChevronRight } from "lucide-react";
+import { Wrench, Play, Trash2, Plus, Search, ShieldCheck, ChevronLeft, ChevronRight, Download } from "lucide-react";
 
 interface Tool {
   name: string;
   description?: string;
   input_schema?: Record<string, any>;
   schema?: Record<string, any>;
+  source?: string;
 }
 
 interface ToolsViewProps {
   serverUrl: string;
   apiKey: string;
+  isAdmin: boolean;
 }
 
-export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
+export function ToolsView({ serverUrl, apiKey, isAdmin }: ToolsViewProps) {
   const [tools, setTools] = useState<Tool[]>([]);
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [params, setParams] = useState<Record<string, string>>({});
   const [result, setResult] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isCalling, setIsCalling] = useState(false);
 
   // Browser state
@@ -32,33 +35,23 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
 
   const fetchTools = async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
-      const res = await fetch(`${baseUrl}/api/mcp/tools?_=${Date.now()}`, {
-        headers: { "X-API-Key": apiKey },
+      const res = await fetch(`${baseUrl}/api/tools?_=${Date.now()}`, {
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
       });
       if (res.ok) {
         const data = await res.json();
         const list = Array.isArray(data.tools) ? data.tools : Array.isArray(data) ? data : [];
-        setTools(list.length > 0 ? list : [
-          { name: "get_current_workspace", description: "Detect current workspace info", input_schema: { type: "object", properties: {} } },
-          { name: "list_workspaces", description: "List all workspaces in system", input_schema: { type: "object", properties: { status: { type: "string" } } } },
-          { name: "search_ast", description: "Search Abstract Syntax Tree index", input_schema: { type: "object", properties: { query: { type: "string" } } } },
-        ]);
+        setTools(list);
       } else {
-        // Fallback to simple tools list if not found
-        setTools([
-          { name: "get_current_workspace", description: "Detect current workspace info", input_schema: { type: "object", properties: {} } },
-          { name: "list_workspaces", description: "List all workspaces in system", input_schema: { type: "object", properties: { status: { type: "string" } } } },
-          { name: "search_ast", description: "Search Abstract Syntax Tree index", input_schema: { type: "object", properties: { query: { type: "string" } } } },
-        ]);
+        setTools([]);
+        setLoadError(`Unable to load tools (${res.status}).`);
       }
     } catch (e) {
       console.error(e);
-      setTools([
-        { name: "get_current_workspace", description: "Detect current workspace info", input_schema: { type: "object", properties: {} } },
-        { name: "list_workspaces", description: "List all workspaces in system", input_schema: { type: "object", properties: { status: { type: "string" } } } },
-        { name: "search_ast", description: "Search Abstract Syntax Tree index", input_schema: { type: "object", properties: { query: { type: "string" } } } },
-      ]);
+      setTools([]);
+      setLoadError("Unable to reach Savant server for tools.");
     } finally {
       setIsLoading(false);
     }
@@ -85,6 +78,7 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
         headers: {
           "Content-Type": "application/json",
           "X-API-Key": apiKey,
+          "X-App-Name": "savant-olympus",
         },
         body: JSON.stringify({
           name: selectedTool.name,
@@ -100,26 +94,69 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
     }
   };
 
-  const handleAddTool = (e: React.FormEvent) => {
+  const handleAddTool = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newToolName.trim()) return;
-    const newTool: Tool = {
-      name: newToolName.trim(),
-      description: newToolDesc.trim(),
-      input_schema: { type: "object", properties: {} }
-    };
-    setTools(prev => [newTool, ...prev]);
-    setNewToolName("");
-    setNewToolDesc("");
-    setShowAddForm(false);
-    setSelectedTool(newTool);
+    setLoadError(null);
+    try {
+      const res = await fetch(`${baseUrl}/api/tools`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": apiKey,
+          "X-App-Name": "savant-olympus",
+        },
+        body: JSON.stringify({
+          name: newToolName.trim(),
+          description: newToolDesc.trim(),
+          input_schema: { type: "object", properties: {} },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Unable to create tool (${res.status}).`);
+      const newTool = data.tool as Tool;
+      setTools(prev => [newTool, ...prev.filter(tool => tool.name !== newTool.name)]);
+      setNewToolName("");
+      setNewToolDesc("");
+      setShowAddForm(false);
+      setSelectedTool(newTool);
+    } catch (error: any) {
+      setLoadError(error.message || "Unable to create tool.");
+    }
   };
 
-  const handleDeleteTool = (name: string, e: React.MouseEvent) => {
+  const handleDeleteTool = async (name: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setTools(prev => prev.filter(t => t.name !== name));
-    if (selectedTool?.name === name) {
-      setSelectedTool(null);
+    setLoadError(null);
+    try {
+      const res = await fetch(`${baseUrl}/api/tools/${encodeURIComponent(name)}`, {
+        method: "DELETE",
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Unable to delete tool (${res.status}).`);
+      setTools(prev => prev.filter(t => t.name !== name));
+      if (selectedTool?.name === name) setSelectedTool(null);
+    } catch (error: any) {
+      setLoadError(error.message || "Unable to delete tool.");
+    }
+  };
+
+  const handleDownloadTool = async (name: string) => {
+    setLoadError(null);
+    try {
+      const res = await fetch(`${baseUrl}/api/tools/${encodeURIComponent(name)}/archive`, {
+        headers: { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" },
+      });
+      if (!res.ok) throw new Error(`Unable to download tool (${res.status}).`);
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${name}.zip`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      setLoadError(error.message || "Unable to download tool.");
     }
   };
 
@@ -146,7 +183,7 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
           <div className="flex items-center justify-between">
             {isToolPaneOpen && <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono">Available Tools</h3>}
             <div className="flex items-center gap-1">
-              {isToolPaneOpen && (
+              {isToolPaneOpen && isAdmin && (
                 <button
                   onClick={() => setShowAddForm(!showAddForm)}
                   style={{ borderColor: "rgba(0, 229, 255, 0.3)" }}
@@ -211,6 +248,8 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
               <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-2">
                 {isLoading ? (
                   <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REGISTRY...</div>
+                ) : loadError ? (
+                  <div className="text-center py-6 text-xs text-red-400 font-mono">{loadError}</div>
                 ) : filteredTools.length === 0 ? (
                   <div className="text-center py-6 text-xs text-muted-foreground opacity-40">No tools found</div>
                 ) : (
@@ -231,13 +270,13 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
                         </div>
                         <p className="text-[10px] text-muted-foreground opacity-70 mt-1 line-clamp-2">{t.description}</p>
                       </div>
-                      <button
+                      {isAdmin && <button
                         onClick={(e) => handleDeleteTool(t.name, e)}
                         className="opacity-0 group-hover:opacity-100 p-1 text-[var(--cp-magenta)] hover:bg-red-950/20 transition-all cursor-pointer rounded shrink-0 ml-1.5"
                         title="Delete tool"
                       >
                         <Trash2 size={12} />
-                      </button>
+                      </button>}
                     </div>
                   ))
                 )}
@@ -259,9 +298,16 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
               <div className="border-b border-[var(--cp-border)] pb-2">
                 <h3 className="text-sm font-bold text-foreground">{selectedTool.name}</h3>
                 <p className="text-xs text-muted-foreground mt-1">{selectedTool.description}</p>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadTool(selectedTool.name)}
+                  className="mt-2 inline-flex items-center gap-1 px-2 py-1 text-[10px] border border-[var(--cp-border)] text-[var(--cp-cyan)] font-mono hover:bg-[rgba(0,229,255,0.08)]"
+                >
+                  <Download size={11} /> DOWNLOAD
+                </button>
               </div>
 
-              <form onSubmit={handleCallTool} className="space-y-3">
+              {selectedTool.source !== "postgresql" && <form onSubmit={handleCallTool} className="space-y-3">
                 <h4 className="text-xs uppercase text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
                   Arguments
                 </h4>
@@ -291,7 +337,7 @@ export function ToolsView({ serverUrl, apiKey }: ToolsViewProps) {
                   <Play size={12} />
                   {isCalling ? "CALLING..." : "EXECUTE"}
                 </button>
-              </form>
+              </form>}
 
               {result && (
                 <div className="space-y-2 pt-2">

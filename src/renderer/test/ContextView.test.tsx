@@ -58,6 +58,17 @@ describe('ContextView - FileBrowserModal Integration', () => {
     })
   })
 
+  it('identifies Olympus on project-list requests', async () => {
+    render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject={null} isAdmin={true} />)
+
+    await waitFor(() => {
+      const call = vi.mocked(window.fetch).mock.calls.find(([url]) => url.toString().includes('/api/context/repos'))
+      expect(call?.[1]).toMatchObject({
+        headers: { "X-API-Key": "test-key", "X-App-Name": "savant-olympus" },
+      })
+    })
+  })
+
   it('opens FileBrowserModal when BROWSE button is clicked', async () => {
     render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject={null} isAdmin={true} />)
     
@@ -299,4 +310,3 @@ describe('ContextView - FileBrowserModal Integration', () => {
     expect(screen.getByText(/PHASE: Embedding files/i)).toBeInTheDocument()
   })
 })
-
