@@ -4,6 +4,7 @@ import { ContextVisualizations, analyzeProjectSource } from "./ContextVisualizat
 import { GraphifyVisualizer } from "./GraphifyVisualizer";
 import { FileBrowserModal } from "../FileBrowserModal";
 import { toast } from "sonner";
+import { createContextService } from "@/services/contextService";
 
 interface Repo {
   id?: string | number;
@@ -16,9 +17,11 @@ interface Repo {
   status?: string;
   file_count?: number;
   memory_count?: number;
+  memory_bank_count?: number;
   chunk_count?: number;
   ast_node_count?: number;
   indexed_at?: string;
+  last_fetched_at?: string;
   created_at?: string;
   languages?: Record<string, number>;
   provider?: string;
@@ -61,20 +64,55 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const [isRepoPaneOpen, setIsRepoPaneOpen] = useState(true);
   const [structuralHealth, setStructuralHealth] = useState<StructuralHealth | null>(null);
   const [isLoadingStructuralHealth, setIsLoadingStructuralHealth] = useState(false);
+  const [periodicStatus, setPeriodicStatus] = useState<any>(null);
+  const [periodicLogs, setPeriodicLogs] = useState<any[]>([]);
+  const [isLoadingSyncLogs, setIsLoadingSyncLogs] = useState(false);
+  const [isTriggeringPeriodicSync, setIsTriggeringPeriodicSync] = useState(false);
 
-  const baseUrl = serverUrl.replace(/\/+$/, "");
-  const authHeaders = { "X-API-Key": apiKey, "X-App-Name": "savant-olympus" };
+  const contextService = React.useMemo(() => createContextService(serverUrl, apiKey), [serverUrl, apiKey]);
+
+  const fetchPeriodicSyncData = useCallback(async () => {
+    setIsLoadingSyncLogs(true);
+    try {
+      const [statusRes, logsRes] = await Promise.all([
+        contextService.getPeriodicSyncStatus().catch(() => null),
+        contextService.getPeriodicSyncLogs(undefined, 50).catch(() => ({ logs: [] })),
+      ]);
+      if (statusRes) setPeriodicStatus(statusRes);
+      if (logsRes?.logs) setPeriodicLogs(logsRes.logs);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingSyncLogs(false);
+    }
+  }, [contextService]);
+
+  useEffect(() => {
+    fetchPeriodicSyncData();
+    const interval = setInterval(fetchPeriodicSyncData, 15000);
+    return () => clearInterval(interval);
+  }, [fetchPeriodicSyncData]);
+
+  const handleManualPeriodicSyncRun = async () => {
+    setIsTriggeringPeriodicSync(true);
+    toast.info("Triggering 6-hour periodic sync pass for all projects...");
+    try {
+      const res = await contextService.triggerPeriodicSyncAll();
+      toast.success(`Periodic sync completed for ${res.count || 0} projects!`);
+      await fetchPeriodicSyncData();
+      await fetchRepos();
+    } catch (e: any) {
+      toast.error(`Periodic sync failed: ${e.message}`);
+    } finally {
+      setIsTriggeringPeriodicSync(false);
+    }
+  };
 
   const fetchRepos = useCallback(async () => {
     setIsLoading(true);
     setLoadError("");
     try {
-      const res = await fetch(`${baseUrl}/api/context/repos`, {
-        headers: authHeaders,
-      });
-      if (!res.ok) throw new Error(`Unable to load projects (${res.status}).`);
-      const data = await res.json();
-      setRepos(data.repos || data || []);
+      setRepos(await contextService.listRepositories());
     } catch (e: any) {
       console.error(e);
       setRepos([]);
@@ -82,16 +120,11 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     } finally {
       setIsLoading(false);
     }
-  }, [baseUrl, apiKey]);
+  }, [contextService]);
 
   const fetchIndexingStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${baseUrl}/api/context/repos/indexing-status`, {
-        headers: authHeaders,
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const nextStatus = data.status || data || {};
+        const nextStatus = await contextService.getIndexingStatus();
         const previousStatus = previousIndexingStatusRef.current;
         const changedRepos = Object.keys({ ...previousStatus, ...nextStatus }).filter((name) => {
           const previous = previousStatus[name] || {};
@@ -108,11 +141,10 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         previousIndexingStatusRef.current = nextStatus;
         setIndexingStatus(nextStatus);
         if (completedRepo) fetchRepos();
-      }
     } catch (e) {
       console.error(e);
     }
-  }, [baseUrl, apiKey, fetchRepos]);
+  }, [contextService, fetchRepos]);
 
   useEffect(() => {
     fetchRepos();
@@ -135,21 +167,11 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
   const fetchGraphifyStats = async (repo: Repo) => {
     try {
-      const res = await fetch(`${baseUrl}/api/graphify/stats?repo_id=${encodeURIComponent(repoIdentity(repo))}&workspace_id=${encodeURIComponent(repo.name)}`, {
-        headers: authHeaders
-      });
-      if (res.ok) {
-        const data = await res.json();
+        const data = await contextService.getGraphifyStats(repoIdentity(repo), repo.name);
         setGraphifyStats(data);
         if ((!data || data.total === 0) && detailsTab === "graphify") {
           setDetailsTab("overview");
         }
-      } else {
-        setGraphifyStats(null);
-        if (detailsTab === "graphify") {
-          setDetailsTab("overview");
-        }
-      }
     } catch (e) {
       console.error(e);
       setGraphifyStats(null);
@@ -162,11 +184,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const fetchStructuralHealth = useCallback(async (repo: Repo) => {
     setIsLoadingStructuralHealth(true);
     try {
-      const res = await fetch(`${baseUrl}/api/context/code-intelligence/repos/${encodeURIComponent(repoIdentity(repo))}/health`, {
-        headers: authHeaders,
-      });
-      if (!res.ok) throw new Error(`Structural health unavailable (${res.status})`);
-      setStructuralHealth(await res.json());
+      setStructuralHealth(await contextService.getStructuralHealth(repoIdentity(repo)));
     } catch (error) {
       console.error(error);
       setStructuralHealth({
@@ -178,7 +196,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     } finally {
       setIsLoadingStructuralHealth(false);
     }
-  }, [baseUrl, apiKey]);
+  }, [contextService]);
 
   const handleUploadGraphify = async () => {
     if (!selectedRepo) return;
@@ -198,27 +216,10 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         throw new Error("Local graphify-out/graph.json is not loaded and filesystem is not accessible in this context.");
       }
 
-      const res = await fetch(`${baseUrl}/api/graphify/import`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders
-        },
-        body: JSON.stringify({
-          repo_id: repoIdentity(selectedRepo),
-          workspace_id: selectedRepo.name,
-          graph: graphData
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUploadSuccess(`Successfully uploaded Graphify KG! Imported ${data.nodes_imported} nodes and ${data.edges_imported} edges.`);
-        fetchGraphifyStats(selectedRepo);
-        setGraphVersion((prev) => prev + 1);
-      } else {
-        const err = await res.json();
-        setUploadSuccess(`Upload failed: ${err.error || "unknown error"}`);
-      }
+      const data = await contextService.importGraphify(repoIdentity(selectedRepo), selectedRepo.name, graphData);
+      setUploadSuccess(`Successfully uploaded Graphify KG! Imported ${data.nodes_imported} nodes and ${data.edges_imported} edges.`);
+      fetchGraphifyStats(selectedRepo);
+      setGraphVersion((prev) => prev + 1);
     } catch (e: any) {
       setUploadSuccess(`Upload failed: ${e.message}`);
     } finally {
@@ -303,29 +304,10 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
           throw new Error("Could not find a valid graph JSON file containing nodes/edges in the selected directory.");
         }
 
-        const res = await fetch(`${baseUrl}/api/graphify/import`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...authHeaders
-          },
-          body: JSON.stringify({
-            repo_id: repoIdentity(selectedRepo),
-            workspace_id: selectedRepo.name,
-            graph: graphJson,
-            meta: metaJson
-          })
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          setUploadSuccess(`Successfully uploaded Graphify KG! Imported ${data.nodes_imported} nodes and ${data.edges_imported} edges.`);
-          fetchGraphifyStats(selectedRepo);
-          setGraphVersion((prev) => prev + 1);
-        } else {
-          const err = await res.json();
-          setUploadSuccess(`Upload failed: ${err.error || "unknown error"}`);
-        }
+        const data = await contextService.importGraphify(repoIdentity(selectedRepo), selectedRepo.name, graphJson, metaJson);
+        setUploadSuccess(`Successfully uploaded Graphify KG! Imported ${data.nodes_imported} nodes and ${data.edges_imported} edges.`);
+        fetchGraphifyStats(selectedRepo);
+        setGraphVersion((prev) => prev + 1);
       })
       .catch((err: any) => {
         setUploadSuccess(`Upload failed: ${err.message}`);
@@ -360,18 +342,13 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       setGraphifyStats(null);
       setUploadSuccess(null);
     }
-  }, [selectedRepo?.path, selectedRepo?.name, selectedRepo?.id, selectedRepo?.repo_id, baseUrl, apiKey, fetchStructuralHealth]);
+  }, [selectedRepo?.path, selectedRepo?.name, selectedRepo?.id, selectedRepo?.repo_id, contextService, fetchStructuralHealth]);
 
   const fetchAstAndAnalyze = useCallback(async (projectName: string, repoOverride?: Repo) => {
     try {
       const repo = repoOverride || repos.find((item) => item.name === projectName);
       const identity = repo ? repoIdentity(repo) : projectName;
-      const res = await fetch(`${baseUrl}/api/context/ast/list?repo_id=${encodeURIComponent(identity)}&repo=${encodeURIComponent(projectName)}`, {
-        headers: authHeaders,
-      });
-      if (!res.ok) throw new Error("Failed to load AST list");
-      const data = await res.json();
-      const nodes = data.nodes || [];
+      const nodes = await contextService.listAst(identity, projectName);
       setAstNodes(nodes);
 
       const targetPaths = Array.from(new Set(nodes.map((n: any) => n.path).filter(Boolean))).slice(0, 100);
@@ -380,13 +357,8 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         targetPaths.map(async (relPath: any) => {
           try {
             const uri = `${projectName}:${relPath}`;
-            const fileRes = await fetch(`${baseUrl}/api/context/code/read?uri=${encodeURIComponent(uri)}`, {
-              headers: authHeaders,
-            });
-            if (fileRes.ok) {
-              const doc = await fileRes.json();
-              docs.push({ path: relPath, language: doc.language || "", content: doc.content || "" });
-            }
+            const doc = await contextService.readCode(uri);
+            docs.push({ path: relPath, language: doc.language || "", content: doc.content || "" });
           } catch (err) {}
         })
       );
@@ -397,7 +369,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       console.error("Heuristics failed:", e);
       setAnalysisResults(null);
     }
-  }, [baseUrl, apiKey, repos]);
+  }, [contextService, repos]);
 
   useEffect(() => {
     if (selectedRepo) {
@@ -436,11 +408,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     setRepoUrl("");
     setDirPath("");
     try {
-      const res = await fetch(`${baseUrl}/api/context/repos/sources`, {
-        headers: authHeaders,
-      });
-      if (!res.ok) throw new Error("Failed to load sources");
-      const data = await res.json();
+      const data: any = await contextService.getRepositorySources();
       setSources(data.sources || null);
       
       if (data.sources) {
@@ -483,22 +451,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     }
 
     try {
-      const res = await fetch(`${baseUrl}/api/context/repos`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders,
-        },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        let errMessage = `HTTP ${res.status}`;
-        try {
-          const errJson = await res.json();
-          errMessage = errJson.error || errMessage;
-        } catch {}
-        throw new Error(errMessage);
-      }
+      await contextService.addRepository(payload);
       setIsAddModalOpen(false);
       fetchRepos();
     } catch (e: any) {
@@ -511,20 +464,23 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   // Poll for job completion and fire toast
   const jobPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const pollForJobCompletion = useCallback((repoName: string, jobLabel: string) => {
+  const pollForJobCompletion = useCallback((repoName: string, jobLabel: string, jobType: "index" | "graph" = "index") => {
     // Clear any existing poll
     if (jobPollRef.current) clearInterval(jobPollRef.current);
 
+    let missingGraphPolls = 0;
     jobPollRef.current = setInterval(async () => {
       try {
-        const res = await fetch(`${baseUrl}/api/context/repos/indexing-status`, {
-          headers: authHeaders,
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        const nextStatus = data.status || data || {};
+        const nextStatus = await contextService.getIndexingStatus();
         const status = nextStatus[repoName] || {};
-        const activeStatus = status.status || "idle";
+        const trackedJob = jobType === "graph" ? status.structural_job : status;
+        if (jobType === "graph" && !trackedJob) {
+          missingGraphPolls += 1;
+          if (missingGraphPolls < 2) return;
+        } else {
+          missingGraphPolls = 0;
+        }
+        const activeStatus = trackedJob?.status || "idle";
         previousIndexingStatusRef.current = nextStatus;
         setIndexingStatus(nextStatus);
 
@@ -538,13 +494,18 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
           fetchRepos();
           if (selectedProject === repoName) {
             fetchAstAndAnalyze(repoName);
+            const repo = repos.find((item) => item.name === repoName);
+            if (repo) {
+              fetchStructuralHealth(repo);
+              fetchGraphifyStats(repo);
+            }
           }
         }
       } catch (e) {
         // Silently continue polling
       }
     }, 3000);
-  }, [baseUrl, apiKey, selectedProject]);
+  }, [contextService, selectedProject, fetchAstAndAnalyze, fetchRepos, fetchStructuralHealth, repos]);
 
   // Cleanup poll on unmount
   useEffect(() => {
@@ -556,18 +517,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const handleRefreshRepo = async (repoName: string) => {
     setRefreshingRepo(repoName);
     try {
-      const res = await fetch(`${baseUrl}/api/context/repos/${encodeURIComponent(repoName)}/refresh`, {
-        method: "POST",
-        headers: authHeaders,
-      });
-      if (!res.ok) {
-        let message = `HTTP ${res.status}`;
-        try {
-          const data = await res.json();
-          message = data.error || message;
-        } catch {}
-        throw new Error(message);
-      }
+      await contextService.refreshRepository(repoName);
       toast.success(`Latest code pulled for "${repoName}"`, {
         description: "The checkout is now up to date. Queue indexing when you want to refresh Context data.",
         duration: 5000,
@@ -582,15 +532,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
   const handleStartIndexing = async (repoName: string) => {
     try {
-      const res = await fetch(`${baseUrl}/api/context/repos/index`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders,
-        },
-        body: JSON.stringify({ name: repoName }),
-      });
-      if (!res.ok) throw new Error("Failed to start indexing");
+      await contextService.startIndexing(repoName);
       toast.info(`Indexing job queued for "${repoName}"`, {
         description: "You will be notified when the job completes.",
         duration: 4000,
@@ -604,22 +546,25 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
   const handleSyncCodeGraph = async (repo: Repo) => {
     try {
-      const res = await fetch(`${baseUrl}/api/context/code-intelligence/repos/${encodeURIComponent(repoIdentity(repo))}/sync`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders,
+      const queued = await contextService.syncCodeGraph(repoIdentity(repo));
+      setStructuralHealth((current) => ({
+        ...(current || {}),
+        freshness: "pending_sync",
+        current_job: {
+          id: queued?.job_id,
+          job_type: "codegraph_sync",
+          status: "queued",
+          progress: 0,
+          phase: "Queued",
+          message: "Waiting for the graph worker",
         },
-        body: JSON.stringify({ mode: "create_or_sync" }),
-      });
-      if (!res.ok) throw new Error("Failed to sync code graph");
+      }));
       toast.info(`Code graph sync queued for "${repo.name}"`, {
         description: "You will be notified when the job completes.",
         duration: 4000,
       });
       fetchIndexingStatus();
-      pollForJobCompletion(repo.name, "Code graph sync");
-      fetchStructuralHealth(repo);
+      pollForJobCompletion(repo.name, "Graph generation", "graph");
     } catch (e: any) {
       toast.error("Failed to queue code graph sync", { description: e.message });
     }
@@ -627,15 +572,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
   const handleStopIndexing = async (repoName: string) => {
     try {
-      const res = await fetch(`${baseUrl}/api/context/repos/stop`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders,
-        },
-        body: JSON.stringify({ name: repoName }),
-      });
-      if (!res.ok) throw new Error("Failed to stop indexing");
+      await contextService.stopIndexing(repoName);
       fetchIndexingStatus();
       setTimeout(fetchRepos, 1000);
     } catch (e: any) {
@@ -646,15 +583,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const handlePurgeRepo = async (repoName: string) => {
     if (!confirm(`Purge all indexed data for "${repoName}"? The project will be kept but all vectors and chunks will be removed.`)) return;
     try {
-      const res = await fetch(`${baseUrl}/api/context/repos/purge`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders,
-        },
-        body: JSON.stringify({ name: repoName }),
-      });
-      if (!res.ok) throw new Error("Failed to purge repository");
+      await contextService.purgeRepository(repoName);
       fetchRepos();
     } catch (e: any) {
       alert(e.message);
@@ -664,11 +593,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const handleDeleteRepo = async (repoName: string) => {
     if (!confirm(`Delete project "${repoName}" and all its indexed data?`)) return;
     try {
-      const res = await fetch(`${baseUrl}/api/context/repos/${encodeURIComponent(repoName)}`, {
-        method: "DELETE",
-        headers: authHeaders,
-      });
-      if (!res.ok) throw new Error("Failed to delete repository");
+      await contextService.deleteRepository(repoName);
       if (selectedProject === repoName) onSelectProject(null);
       fetchRepos();
     } catch (e: any) {
@@ -679,11 +604,18 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const statusInfo = selectedProject ? indexingStatus[selectedProject] || {} : {};
   const liveStatus = (statusInfo.status || selectedRepo?.status || "ready").toLowerCase();
   const isCurrentlyIndexing = liveStatus === "indexing" || liveStatus === "running" || liveStatus === "queued" || liveStatus === "processing";
-  const structuralJob = structuralHealth?.current_job || statusInfo.structural_job;
+  const structuralJob = statusInfo.structural_job || structuralHealth?.current_job;
   const structuralJobStatus = String(structuralJob?.status || "").toLowerCase();
   const isStructuralJobActive = ["indexing", "running", "queued", "processing"].includes(structuralJobStatus);
+  const hasStructuralJobResult = ["done", "failed", "cancelled"].includes(structuralJobStatus);
   const structuralProvider = structuralHealth?.provider || selectedRepo?.provider || selectedRepo?.code_intelligence?.provider || "legacy";
   const structuralFreshness = structuralHealth?.freshness || selectedRepo?.freshness || selectedRepo?.code_intelligence?.freshness || "unavailable";
+  const semanticDisplayStatus = ["indexed", "done", "ready"].includes(liveStatus) ? "done" : liveStatus;
+  const structuralDisplayStatus = isStructuralJobActive
+    ? structuralJobStatus
+    : structuralFreshness === "fresh" || structuralJobStatus === "done"
+      ? "done"
+      : structuralFreshness;
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const filteredRepos = normalizedSearchQuery
     ? repos.filter((repo) => JSON.stringify({ ...repo, live_status: indexingStatus[repo.name] || {} }).toLowerCase().includes(normalizedSearchQuery))
@@ -763,9 +695,11 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   filteredRepos.map((repo) => {
                 const status = indexingStatus[repo.name] || {};
                 const isSelected = selectedProject === repo.name;
-                const activeStatus = (status.status || repo.status || "ready").toLowerCase();
+                const graphJobStatus = String(status.structural_job?.status || "").toLowerCase();
+                const graphIsBusy = ["indexing", "running", "queued", "processing"].includes(graphJobStatus);
+                const activeStatus = graphIsBusy ? `graph ${graphJobStatus}` : (status.status || repo.status || "ready").toLowerCase();
                 const isFailed = activeStatus === "error" || activeStatus === "failed" || activeStatus === "stalled";
-                const isBusy = activeStatus === "indexing" || activeStatus === "running" || activeStatus === "queued" || activeStatus === "processing";
+                const isBusy = graphIsBusy || activeStatus === "indexing" || activeStatus === "running" || activeStatus === "queued" || activeStatus === "processing";
 
                 let tone = "border-[var(--cp-border)]";
                 if (isSelected) {
@@ -834,7 +768,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         }`} />
                         STATUS: {activeStatus.toUpperCase()}
                       </span>
-                      {status.progress != null && <span>{Math.round(status.progress)}%</span>}
+                      {(graphIsBusy ? status.structural_job?.progress : status.progress) != null && <span>{Math.round(graphIsBusy ? status.structural_job.progress : status.progress)}%</span>}
                     </div>
                   </div>
                 );
@@ -858,15 +792,23 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
               {/* Header */}
               <div className="border-b border-[var(--cp-border)] pb-3 flex justify-between items-start">
                 <div>
-                  <h3 className="text-md font-bold text-foreground flex items-center gap-2">
+                  <h3 className="text-md font-bold text-foreground flex flex-wrap items-center gap-2">
                     {selectedRepo.name}
                     <span className={`px-2 py-0.5 text-[9px] uppercase font-mono border rounded ${
-                      liveStatus === "indexing" || liveStatus === "running" ? "border-amber-500 text-amber-500 bg-amber-950/20" :
-                      liveStatus === "queued" ? "border-blue-500 text-blue-500 bg-blue-950/20" :
-                      liveStatus === "error" || liveStatus === "failed" ? "border-red-500 text-red-500 bg-red-950/20" :
+                      semanticDisplayStatus.includes("running") || semanticDisplayStatus.includes("processing") || semanticDisplayStatus === "indexing" ? "border-amber-500 text-amber-500 bg-amber-950/20" :
+                      semanticDisplayStatus.includes("queued") ? "border-blue-500 text-blue-500 bg-blue-950/20" :
+                      semanticDisplayStatus.includes("failed") || semanticDisplayStatus.includes("cancelled") || semanticDisplayStatus === "error" ? "border-red-500 text-red-500 bg-red-950/20" :
                       "border-green-500 text-green-500 bg-green-950/20"
                     }`}>
-                      {liveStatus}
+                      SEMANTIC: {semanticDisplayStatus.toUpperCase()}
+                    </span>
+                    <span className={`px-2 py-0.5 text-[9px] uppercase font-mono border rounded ${
+                      ["running", "processing", "pending_sync"].includes(structuralDisplayStatus) ? "border-amber-500 text-amber-500 bg-amber-950/20" :
+                      structuralDisplayStatus === "queued" ? "border-blue-500 text-blue-500 bg-blue-950/20" :
+                      ["failed", "cancelled", "degraded", "unavailable", "stale"].includes(structuralDisplayStatus) ? "border-red-500 text-red-500 bg-red-950/20" :
+                      "border-green-500 text-green-500 bg-green-950/20"
+                    }`}>
+                      STRUCTURAL: {structuralDisplayStatus.toUpperCase()}
                     </span>
                   </h3>
                   <p className="text-[10px] text-muted-foreground font-mono mt-1">{selectedRepo.path}</p>
@@ -946,7 +888,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-950 text-indigo-400 border border-indigo-900 hover:bg-indigo-900 hover:text-indigo-200 cursor-pointer font-mono font-bold"
                       disabled={isCurrentlyIndexing || isStructuralJobActive}
                     >
-                      <FileCode size={12} /> {isStructuralJobActive ? "SYNCING CODE GRAPH..." : "SYNC CODE GRAPH"}
+                      <FileCode size={12} /> {isStructuralJobActive ? "GENERATING GRAPH..." : "GENERATE GRAPH"}
                     </button>
                     <button
                       onClick={() => handleDeleteRepo(selectedRepo.name)}
@@ -1002,6 +944,131 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     </div>
                   )}
 
+                  {(isStructuralJobActive || hasStructuralJobResult) && (
+                    <div className={`bg-[var(--cp-bg-2)] border p-3 space-y-2 rounded ${structuralJobStatus === "done" ? "border-green-700/60" : structuralJobStatus === "failed" || structuralJobStatus === "cancelled" ? "border-red-700/60" : "border-indigo-700/60"}`} data-testid="graph-generation-progress">
+                      <div className="flex justify-between items-center text-xs font-mono">
+                        <span className={`font-bold uppercase ${structuralJobStatus === "done" ? "text-green-400" : structuralJobStatus === "failed" || structuralJobStatus === "cancelled" ? "text-red-400" : "text-indigo-300"}`}>
+                          Graph Generation {structuralJobStatus === "queued" ? "Queued" : structuralJobStatus === "done" ? "Completed" : structuralJobStatus === "failed" ? "Failed" : structuralJobStatus === "cancelled" ? "Cancelled" : "In Progress"}
+                        </span>
+                        <span className="text-indigo-300">{Math.round(structuralJob?.progress || 0)}%</span>
+                      </div>
+                      <div className="w-full bg-[var(--cp-bg-3)] h-1.5 rounded overflow-hidden">
+                        <div className="bg-indigo-400 h-full transition-all duration-300" style={{ width: `${structuralJob?.progress || 0}%` }} />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground font-mono truncate">
+                        PHASE: {structuralJob?.phase || (structuralJobStatus === "queued" ? "Waiting for worker" : structuralJobStatus === "done" ? "Complete" : "Generating structural graph")}
+                      </p>
+                      {(structuralJob?.message || structuralJob?.error) && <p className={`text-[9px] font-mono truncate ${structuralJobStatus === "failed" ? "text-red-400" : "text-muted-foreground"}`}>{structuralJob?.error || structuralJob?.message}</p>}
+                    </div>
+                  )}
+
+                  {/* 6-Hour Background Sync Runner & Audit Logs Section */}
+                  <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-4 rounded-lg space-y-3 font-mono text-xs" data-testid="periodic-sync-history-panel">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--cp-border)] pb-2">
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-[var(--cp-cyan)] animate-pulse" />
+                        <span className="font-bold text-foreground uppercase tracking-wider text-xs">6-Hour Background Sync & Execution History</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-green-950/80 text-green-400 border border-green-700/50">
+                          RUNNER ACTIVE
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleManualPeriodicSyncRun}
+                          disabled={isTriggeringPeriodicSync}
+                          className="flex items-center gap-1.5 px-3 py-1 bg-[var(--cp-cyan)]/10 text-[var(--cp-cyan)] hover:bg-[var(--cp-cyan)]/20 border border-[var(--cp-cyan)]/30 rounded text-[11px] font-bold transition disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${isTriggeringPeriodicSync ? "animate-spin" : ""}`} />
+                          {isTriggeringPeriodicSync ? "SYNCING ALL..." : "RUN ALL NOW"}
+                        </button>
+                        <button
+                          onClick={fetchPeriodicSyncData}
+                          disabled={isLoadingSyncLogs}
+                          className="p-1 hover:bg-[var(--cp-bg-3)] rounded text-muted-foreground transition"
+                          title="Refresh Logs"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${isLoadingSyncLogs ? "animate-spin" : ""}`} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Status info bar */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px] bg-[var(--cp-bg-3)]/60 p-2.5 rounded border border-[var(--cp-border)]/50">
+                      <div>
+                        <span className="text-muted-foreground block text-[10px] uppercase">Last Sync Run</span>
+                        <span className="text-foreground font-medium">
+                          {periodicStatus?.last_run_at ? new Date(periodicStatus.last_run_at).toLocaleString() : "Recently on startup"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[10px] uppercase">Next Scheduled Sync</span>
+                        <span className="text-[var(--cp-cyan)] font-medium">
+                          {periodicStatus?.next_run_at ? new Date(periodicStatus.next_run_at).toLocaleString() : "Every 6 Hours"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[10px] uppercase">Projects Processed</span>
+                        <span className="text-foreground font-medium">
+                          {periodicStatus?.last_run_summary?.count ?? repos.length} Projects Checked
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Execution Logs Table */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center text-[10px] uppercase text-muted-foreground font-bold tracking-wider">
+                        <span>Execution Audit Trail</span>
+                        <span>{periodicLogs.length} Entries</span>
+                      </div>
+
+                      <div className="max-h-60 overflow-y-auto border border-[var(--cp-border)]/60 rounded bg-[var(--cp-bg-1)]">
+                        {periodicLogs.length === 0 ? (
+                          <div className="p-4 text-center text-muted-foreground text-[11px]">No sync logs recorded yet.</div>
+                        ) : (
+                          <table className="w-full text-left border-collapse text-[10px]">
+                            <thead className="bg-[var(--cp-bg-3)] sticky top-0 text-muted-foreground border-b border-[var(--cp-border)] uppercase tracking-wider text-[9px]">
+                              <tr>
+                                <th className="py-1.5 px-2">Time</th>
+                                <th className="py-1.5 px-2">Project</th>
+                                <th className="py-1.5 px-2">Status</th>
+                                <th className="py-1.5 px-2">Actions</th>
+                                <th className="py-1.5 px-2">Details</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[var(--cp-border)]/40 font-mono">
+                              {periodicLogs.map((log: any) => (
+                                <tr key={log.id} className="hover:bg-[var(--cp-bg-2)]/80 transition">
+                                  <td className="py-1.5 px-2 text-muted-foreground whitespace-nowrap">
+                                    {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                  </td>
+                                  <td className="py-1.5 px-2 font-bold text-foreground">{log.repo_name}</td>
+                                  <td className="py-1.5 px-2">
+                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                      log.status === "success" ? "bg-green-950 text-green-400" : log.status === "skipped" ? "bg-zinc-800 text-zinc-400" : "bg-red-950 text-red-400"
+                                    }`}>
+                                      {log.status.toUpperCase()}
+                                    </span>
+                                  </td>
+                                  <td className="py-1.5 px-2 whitespace-nowrap">
+                                    <div className="flex gap-1 text-[9px]">
+                                      {log.fetched && <span className="text-blue-400 bg-blue-950/60 px-1 rounded">FETCH</span>}
+                                      {log.code_changed && <span className="text-amber-400 bg-amber-950/60 px-1 rounded">CHANGED</span>}
+                                      {log.indexed && <span className="text-green-400 bg-green-950/60 px-1 rounded">INDEX</span>}
+                                      {log.graphed && <span className="text-purple-400 bg-purple-950/60 px-1 rounded">GRAPH</span>}
+                                    </div>
+                                  </td>
+                                  <td className="py-1.5 px-2 text-muted-foreground max-w-xs truncate" title={log.details}>
+                                    {log.details || "No details"}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Stats Grid */}
                   <div className="space-y-2">
                     <h4 className="text-[11px] uppercase font-mono text-[var(--section-label)] tracking-wider">Overview Metrics</h4>
@@ -1012,15 +1079,11 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                       </div>
                       <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded">
                         <span className="block text-[10px] font-mono text-muted-foreground uppercase">Memory Bank</span>
-                        <span className="text-lg font-bold text-foreground">{selectedRepo.memory_count ?? 0}</span>
+                        <span className="text-lg font-bold text-foreground">{selectedRepo.memory_bank_count ?? selectedRepo.memory_count ?? 0}</span>
                       </div>
                       <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded">
                         <span className="block text-[10px] font-mono text-muted-foreground uppercase">Index Chunks</span>
                         <span className="text-lg font-bold text-foreground">{selectedRepo.chunk_count ?? 0}</span>
-                      </div>
-                      <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded">
-                        <span className="block text-[10px] font-mono text-muted-foreground uppercase">AST Nodes</span>
-                        <span className="text-lg font-bold text-foreground">{selectedRepo.ast_node_count ?? 0}</span>
                       </div>
                     </div>
                   </div>
@@ -1039,6 +1102,14 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded">
                           <span className="block text-[10px] font-mono text-muted-foreground uppercase">Total Code Graph Nodes</span>
                           <span className="text-lg font-bold text-foreground">{graphifyStats.total}</span>
+                        </div>
+                        <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded">
+                          <span className="block text-[10px] font-mono text-muted-foreground uppercase">Code Graph Edges</span>
+                          <span className="text-lg font-bold text-foreground">{graphifyStats.total_edges ?? 0}</span>
+                        </div>
+                        <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded" title="Symbols extracted by the semantic indexer; this is separate from the generated CodeGraph node total.">
+                          <span className="block text-[10px] font-mono text-muted-foreground uppercase">Indexed Symbols (AST)</span>
+                          <span className="text-lg font-bold text-foreground">{selectedRepo.ast_node_count ?? 0}</span>
                         </div>
                       </div>
                     </div>
@@ -1079,6 +1150,16 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         <Clock size={12} className="text-muted-foreground/60" />
                         <span>Last Indexed: <strong className="text-foreground">{selectedRepo.indexed_at ? new Date(selectedRepo.indexed_at).toLocaleString() : "Never"}</strong></span>
                       </div>
+                      {(selectedRepo.source === "github" || selectedRepo.source === "gitlab") && (
+                        <div className="flex items-center gap-1.5">
+                          <Clock size={12} className="text-muted-foreground/60" />
+                          <span>Last Fetched: <strong className="text-foreground">{selectedRepo.last_fetched_at ? new Date(selectedRepo.last_fetched_at).toLocaleString() : "Never"}</strong></span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1.5">
+                        <Clock size={12} className="text-muted-foreground/60" />
+                        <span>Last Graph Generated: <strong className="text-foreground">{graphifyStats?.generated_at ? new Date(graphifyStats.generated_at).toLocaleString() : "Never"}</strong></span>
+                      </div>
                       <div className="flex items-center gap-1.5">
                         <Clock size={12} className="text-muted-foreground/60" />
                         <span>Registered: <strong className="text-foreground">{selectedRepo.created_at ? new Date(selectedRepo.created_at).toLocaleString() : "Unknown"}</strong></span>
@@ -1110,7 +1191,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   ) : (
                     <div className="flex-1 min-h-[350px] bg-[var(--cp-bg-2)] border border-[var(--cp-border)] rounded flex flex-col items-center justify-center text-center p-6">
                       <p className="text-xs font-mono text-muted-foreground max-w-md mb-4 leading-relaxed uppercase">
-                        No project graph is available. Use Sync Code Graph to build structural data for this repository.
+                        No project graph is available. Use Generate Graph to build structural data for this repository.
                       </p>
                     </div>
                   )}
