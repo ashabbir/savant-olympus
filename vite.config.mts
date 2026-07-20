@@ -45,8 +45,15 @@ export default defineConfig({
         vite: { 
           build: { 
             outDir: '../../dist-electron',
-            rollupOptions: { 
-              external: ["better-sqlite3"] 
+            rollupOptions: {
+              external: [
+                "better-sqlite3",
+                "node:child_process",
+                "node:fs/promises",
+                "node:os",
+                "node:path",
+                "node:url",
+              ]
             } 
           } 
         },

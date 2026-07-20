@@ -25,6 +25,7 @@ export default defineConfig({
         'node:fs/promises',
         'node:os',
         'node:path',
+        'node:url',
       ],
       output: {
         entryFileNames: '[name].js',
