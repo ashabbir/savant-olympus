@@ -1,6 +1,28 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ContextView } from '../components/tabs/ContextView'
+import { ContextView, formatSyncLogDateTime, sortSyncLogsNewestFirst } from '../components/tabs/ContextView'
+
+describe('ContextView - Sync Audit Trail', () => {
+  it('sorts sync logs newest first with IDs as a stable timestamp tie-breaker', () => {
+    const logs = [
+      { id: 1, created_at: '2026-07-20T02:50:26Z' },
+      { id: 2, created_at: '2026-07-20T02:50:28Z' },
+      { id: 3, created_at: '2026-07-20T02:50:28Z' },
+    ]
+
+    expect(sortSyncLogsNewestFirst(logs).map((log) => log.id)).toEqual([3, 2, 1])
+    expect(logs.map((log) => log.id)).toEqual([1, 2, 3])
+  })
+
+  it('formats a sync log timestamp with both its date and time', () => {
+    const formatted = formatSyncLogDateTime('2026-07-20T02:50:28Z')
+
+    expect(formatted).toMatch(/2026/)
+    expect(formatted).toMatch(/Jul/)
+    expect(formatted).toMatch(/20/)
+    expect(formatted).toMatch(/:/)
+  })
+})
 
 describe('ContextView - FileBrowserModal Integration', () => {
   beforeEach(() => {

@@ -3,8 +3,7 @@ import { buildAuthHeaders, normalizeBaseUrl } from "./httpClient";
 export interface SkillPayload {
   name: string;
   description?: string;
-  status?: "audited" | "unlocked" | "archived";
-  files?: Record<string, string>;
+  files: Array<{ path: string; content: string }>;
 }
 
 export class SkillsService {
@@ -29,17 +28,8 @@ export class SkillsService {
     return Array.isArray(data.skills) ? data.skills : Array.isArray(data) ? data : [];
   }
 
-  async saveSkills(skills: any[]): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/api/skills`, {
-      method: "POST",
-      headers: this.headers,
-      body: JSON.stringify({ skills }),
-    });
-    if (!res.ok) throw new Error(`Failed to save skills: ${res.statusText}`);
-  }
-
   async createSkill(payload: SkillPayload): Promise<any> {
-    const res = await fetch(`${this.baseUrl}/api/abilities/skills`, {
+    const res = await fetch(`${this.baseUrl}/api/skills`, {
       method: "POST",
       headers: this.headers,
       body: JSON.stringify(payload),
@@ -49,7 +39,7 @@ export class SkillsService {
   }
 
   async updateSkill(skillId: string, updates: Partial<SkillPayload>): Promise<any> {
-    const res = await fetch(`${this.baseUrl}/api/abilities/skills/${skillId}`, {
+    const res = await fetch(`${this.baseUrl}/api/skills/${skillId}`, {
       method: "PUT",
       headers: this.headers,
       body: JSON.stringify(updates),
@@ -59,12 +49,39 @@ export class SkillsService {
   }
 
   async deleteSkill(skillId: string): Promise<any> {
-    const res = await fetch(`${this.baseUrl}/api/abilities/skills/${skillId}`, {
+    const res = await fetch(`${this.baseUrl}/api/skills/${skillId}`, {
       method: "DELETE",
       headers: buildAuthHeaders(this.apiKey, ""),
     });
     if (!res.ok) throw new Error(`Failed to delete skill: ${res.statusText}`);
     return res.json();
+  }
+
+  async listSkillFiles(skillId: string): Promise<string[]> {
+    const res = await fetch(`${this.baseUrl}/api/skills/${encodeURIComponent(skillId)}/files`, {
+      headers: buildAuthHeaders(this.apiKey, ""),
+    });
+    if (!res.ok) throw new Error(`Failed to list skill files: ${res.statusText}`);
+    const data = await res.json();
+    return Array.isArray(data.files) ? data.files : [];
+  }
+
+  async getSkillFile(skillId: string, path: string): Promise<string> {
+    const res = await fetch(`${this.baseUrl}/api/skills/${encodeURIComponent(skillId)}/file?path=${encodeURIComponent(path)}`, {
+      headers: buildAuthHeaders(this.apiKey, ""),
+    });
+    if (!res.ok) throw new Error(`Failed to read skill file: ${res.statusText}`);
+    const data = await res.json();
+    return typeof data.content === "string" ? data.content : "";
+  }
+
+  async updateSkillFile(skillId: string, path: string, content: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/skills/${encodeURIComponent(skillId)}/file?path=${encodeURIComponent(path)}`, {
+      method: "PUT",
+      headers: this.headers,
+      body: JSON.stringify({ content }),
+    });
+    if (!res.ok) throw new Error(`Failed to update skill file: ${res.statusText}`);
   }
 }
 

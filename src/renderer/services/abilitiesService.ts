@@ -11,6 +11,7 @@ export interface AbilityPayload {
 export interface AbilityAssetPayload {
   id?: string;
   type?: string;
+  name?: string;
   priority?: number;
   tags?: string[];
   includes?: string[];

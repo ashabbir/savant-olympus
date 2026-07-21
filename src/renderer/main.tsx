@@ -40,6 +40,8 @@ if (!window.system) {
     readGraphifyJson: async (_repoPath: string) => null,
     runAgentViaGateway: async () => '',
     exportDocument: async () => null,
+    getSkillExportProfiles: async () => ({}),
+    exportSkillPackage: async () => ({ provider: '', path: '', format: '' }),
   }
 }
 

@@ -33,6 +33,14 @@ const mockSystem: any = {
   readGraphifyJson: vi.fn().mockResolvedValue(null),
   runAgentViaGateway: vi.fn().mockResolvedValue('Mock agent response'),
   exportDocument: vi.fn().mockResolvedValue('/tmp/athena-export.html'),
+  getSkillExportProfiles: vi.fn().mockResolvedValue({
+    codex: { label: 'Codex', directory: '/tmp/.codex/skills', format: 'Agent Skills / SKILL.md' },
+    claude: { label: 'Claude', directory: '/tmp/.claude/skills', format: 'Claude Code Skill' },
+    copilot: { label: 'Copilot', directory: '/tmp/.copilot/skills', format: 'GitHub Copilot Agent Skill' },
+    agy: { label: 'AGY', directory: '/tmp/.agents/skills', format: 'AGY Workspace Skill' },
+    hermes: { label: 'Hermes', directory: '/tmp/.hermes/skills/custom', format: 'Hermes Agent Skill' },
+  }),
+  exportSkillPackage: vi.fn().mockResolvedValue({ provider: 'codex', path: '/tmp/.codex/skills/example', format: 'Agent Skills / SKILL.md' }),
 }
 
 mockSystem.getChatHistory = vi.fn().mockResolvedValue([])

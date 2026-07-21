@@ -49,6 +49,22 @@ interface ContextViewProps {
   isAdmin?: boolean;
 }
 
+export const sortSyncLogsNewestFirst = (logs: any[]) =>
+  [...logs].sort((a, b) => {
+    const timeDifference = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    return timeDifference || Number(b.id || 0) - Number(a.id || 0);
+  });
+
+export const formatSyncLogDateTime = (timestamp: string) =>
+  new Date(timestamp).toLocaleString([], {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
 
 
 export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProject, activeModel, isAdmin = false }: ContextViewProps) {
@@ -81,7 +97,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         contextService.getPeriodicSyncLogs(undefined, 10).catch(() => ({ logs: [] })),
       ]);
       if (statusRes) setPeriodicStatus(statusRes);
-      if (logsRes?.logs) setPeriodicLogs(logsRes.logs);
+      if (logsRes?.logs) setPeriodicLogs(sortSyncLogsNewestFirst(logsRes.logs));
     } catch (e) {
       console.error(e);
     } finally {
@@ -1077,7 +1093,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                               {periodicLogs.slice(0, 10).map((log: any) => (
                                 <tr key={log.id} className="hover:bg-[var(--cp-bg-2)]/80 transition">
                                   <td className="py-1.5 px-2 text-muted-foreground whitespace-nowrap">
-                                    {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                    {formatSyncLogDateTime(log.created_at)}
                                   </td>
                                   <td className="py-1.5 px-2 font-bold text-foreground">{log.repo_name}</td>
                                   <td className="py-1.5 px-2">

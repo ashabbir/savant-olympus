@@ -107,4 +107,28 @@ describe('App Component', () => {
       expect(screen.getByTitle('Add Node')).toBeInTheDocument()
     })
   })
+
+  it('hides the Users sidebar tab icon for non-admin users and shows it for admin users', async () => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!
+    let serverRole = 'operator'
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (String(input).includes('/api/auth/validate')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ valid: true, user_id: 'test-user', name: 'test-user', role: serverRole }),
+        } as Response)
+      }
+      return originalFetch(input, init)
+    })
+
+    await waitForAppReady()
+    expect(screen.queryByTitle('Users')).not.toBeInTheDocument()
+
+    serverRole = 'admin'
+    fireEvent.focus(window)
+    await waitFor(() => {
+      expect(screen.getByTitle('Users')).toBeInTheDocument()
+    })
+  })
 })

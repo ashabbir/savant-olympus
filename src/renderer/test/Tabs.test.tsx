@@ -190,6 +190,59 @@ describe('SkillsView Component', () => {
       expect(screen.queryAllByText('new_savant_skill').length).toBe(0)
     })
   })
+
+  it('reviews Athena suggested files before creating them on the server', async () => {
+    vi.mocked(window.ipcRenderer.invoke).mockResolvedValueOnce(JSON.stringify({
+      status: 'ready',
+      name: 'summarize-releases',
+      description: 'Summarize release history',
+      rationale: 'A deterministic parser belongs in scripts.',
+      files: [
+        { path: 'SKILL.md', content: '---\nname: summarize-releases\ndescription: Summarize releases\n---\n' },
+        { path: 'scripts/summarize.py', content: "print('ok')\n" },
+      ],
+    }))
+
+    render(<SkillsView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+    await waitFor(() => expect(screen.getByText(/automated_tests_auditor/i)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByText('CREATE WITH ATHENA'))
+    fireEvent.change(screen.getByPlaceholderText(/Describe the workflow/i), {
+      target: { value: 'Build a release summarizer' },
+    })
+    fireEvent.click(screen.getByText('FINALIZE & GENERATE'))
+
+    await waitFor(() => expect(screen.getByText('scripts/summarize.py')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('CREATE ON SERVER'))
+
+    await waitFor(() => expect(window.fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:8090/api/skills',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('scripts/summarize.py'),
+      }),
+    ))
+  })
+
+  it('shows Athena recommendation while asking a necessary question', async () => {
+    vi.mocked(window.ipcRenderer.invoke).mockResolvedValueOnce(JSON.stringify({
+      status: 'clarifying',
+      question: 'Should the skill publish releases or only draft them?',
+      suggestion: 'Draft by default so publishing remains an explicit human action.',
+      assumptions: ['Git tags are the release source'],
+    }))
+
+    render(<SkillsView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+    await waitFor(() => expect(screen.getByText(/automated_tests_auditor/i)).toBeInTheDocument())
+    fireEvent.click(screen.getByText('CREATE WITH ATHENA'))
+    fireEvent.change(screen.getByPlaceholderText(/Describe the workflow/i), {
+      target: { value: 'Build a release skill' },
+    })
+    fireEvent.click(screen.getByText('SEND MESSAGE'))
+
+    await waitFor(() => expect(screen.getByText(/Draft by default so publishing remains an explicit human action/)).toBeInTheDocument())
+    expect(screen.getByText(/Git tags are the release source/)).toBeInTheDocument()
+  })
 })
 
 describe('UsersView Component', () => {
@@ -539,6 +592,54 @@ describe('AbilitiesView Component', () => {
     // Verify it added to active list dependencies
     await waitFor(() => {
       expect(screen.getByText('rule.coding_style').closest('.min-h-\\[30px\\]')).toBeInTheDocument()
+    })
+  })
+
+  it('validates uniqueness and generates snake_case identifier when creating a new asset', async () => {
+    const { AbilitiesView } = await import('../components/tabs/AbilitiesView')
+    render(<AbilitiesView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+
+    await waitFor(() => {
+      expect(screen.getByText(/NEW_ASSET/i)).toBeInTheDocument()
+    })
+
+    // Open NEW_ASSET modal
+    fireEvent.click(screen.getByText(/NEW_ASSET/i))
+    expect(screen.getByText('NEW ABILITY ASSET')).toBeInTheDocument()
+
+    // Find Name and Type fields
+    const nameInput = screen.getByPlaceholderText(/e\.g\. JS Naming/i)
+    const typeSelect = screen.getByDisplayValue('RULE')
+
+    // Type a name: "some thing"
+    fireEvent.change(nameInput, { target: { value: 'some thing' } })
+
+    // Check machine generated identifier input value
+    const generatedIdInput = screen.getByDisplayValue('rule.some_thing')
+    expect(generatedIdInput).toBeInTheDocument()
+
+    // Test duplicate identifier: "coding style" -> "rule.coding_style" which already exists
+    fireEvent.change(nameInput, { target: { value: 'coding style' } })
+    await waitFor(() => {
+      expect(screen.getByText(/already exists/i)).toBeInTheDocument()
+    })
+
+    // CREATE_ASSET button should be disabled for duplicate
+    const createBtn = screen.getByRole('button', { name: 'CREATE_ASSET' })
+    expect(createBtn).toBeDisabled()
+
+    // Change to a unique name: "JS Naming Rule" -> "rule.js_naming_rule"
+    fireEvent.change(nameInput, { target: { value: 'JS Naming Rule' } })
+    await waitFor(() => {
+      expect(screen.queryByText(/already exists/i)).not.toBeInTheDocument()
+    })
+    expect(screen.getByDisplayValue('rule.js_naming_rule')).toBeInTheDocument()
+    expect(createBtn).not.toBeDisabled()
+
+    // Submit asset creation
+    fireEvent.click(createBtn)
+    await waitFor(() => {
+      expect(screen.queryByText('NEW ABILITY ASSET')).not.toBeInTheDocument()
     })
   })
 })

@@ -50,10 +50,23 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
 
   // New Asset Form
   const [showNewModal, setShowNewModal] = useState(false);
-  const [newId, setNewId] = useState("");
+  const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("rule");
   const [newPriority, setNewPriority] = useState(900);
   const [newTagsString, setNewTagsString] = useState("");
+  const [createError, setCreateError] = useState("");
+
+  const toSnakeCase = (str: string): string => {
+    return str
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  };
+
+  const generatedId = newName.trim() ? `${newType}.${toSnakeCase(newName)}` : "";
+  const allAssetIds = Object.values(assets).flat().map(a => a.id);
+  const isDuplicate = Boolean(generatedId && allAssetIds.includes(generatedId));
 
   // Resolution Builder
   const [showBuilder, setShowBuilder] = useState(false);
@@ -130,24 +143,45 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newId.trim()) return;
+    setCreateError("");
+
+    const cleanName = newName.trim();
+    if (!cleanName) {
+      setCreateError("Name is required.");
+      return;
+    }
+
+    const snakeName = toSnakeCase(cleanName);
+    if (!snakeName) {
+      setCreateError("Invalid name format.");
+      return;
+    }
+
+    const targetId = `${newType}.${snakeName}`;
+    if (allAssetIds.includes(targetId)) {
+      setCreateError(`Asset ID '${targetId}' already exists. Choose a unique name or type.`);
+      return;
+    }
+
     try {
       const tags = newTagsString.split(",").map(t => t.trim()).filter(Boolean);
       const payload = {
-        id: newId.trim(),
+        id: targetId,
         type: newType,
+        name: cleanName,
         priority: newPriority,
         tags,
-        body: `# ${newId.split(".").pop()}\n\nContent here...\n`,
+        body: `# ${cleanName}\n\nContent here...\n`,
       };
       await abilitiesService.createAsset(payload);
-      setNewId("");
+      setNewName("");
       setNewTagsString("");
+      setCreateError("");
       setShowNewModal(false);
       await fetchAssets();
       await loadAsset(payload.id);
     } catch (e: any) {
-      alert(`Create error: ${e.message}`);
+      setCreateError(`Create error: ${e.message}`);
     }
   };
 
@@ -467,7 +501,7 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
                 <h3 className="text-sm font-bold text-foreground font-mono flex items-center gap-1.5">
                   <FileText size={14} className="text-[var(--cp-cyan)]" /> {selectedAsset.id}
                 </h3>
-                <p className="text-[10px] text-muted-foreground font-mono">Asset Type: {selectedAsset.type.toUpperCase()}</p>
+                <p className="text-[10px] text-muted-foreground font-mono">Asset Type: {(selectedAsset.type || "").toUpperCase()}</p>
               </div>
               {isAdmin && <div className="flex items-center gap-2">
                 <button
@@ -629,26 +663,25 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
           <div className="bg-[var(--cp-bg-1)] border border-[var(--cp-border)] w-full max-w-md p-4 space-y-4">
             <div className="flex justify-between items-center border-b border-[var(--cp-border)] pb-2">
               <h3 className="text-sm font-bold text-[var(--section-label)] font-mono">NEW ABILITY ASSET</h3>
-              <button onClick={() => setShowNewModal(false)} className="text-muted-foreground hover:text-foreground">×</button>
+              <button
+                onClick={() => {
+                  setShowNewModal(false);
+                  setCreateError("");
+                }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                ×
+              </button>
             </div>
             <form onSubmit={handleCreate} className="space-y-3 font-mono text-xs">
-              <div className="flex flex-col space-y-1">
-                <label className="text-muted-foreground uppercase">Asset ID (e.g. rule.js_naming)</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="rule.identifier"
-                  value={newId}
-                  onChange={e => setNewId(e.target.value)}
-                  className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground p-1.5 focus:outline-none"
-                />
-              </div>
-
               <div className="flex flex-col space-y-1">
                 <label className="text-muted-foreground uppercase">Type</label>
                 <select
                   value={newType}
-                  onChange={e => setNewType(e.target.value)}
+                  onChange={e => {
+                    setNewType(e.target.value);
+                    setCreateError("");
+                  }}
                   className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground p-1.5 focus:outline-none"
                 >
                   <option value="persona">PERSONA</option>
@@ -657,6 +690,36 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
                   <option value="style">STYLE</option>
                   <option value="repo">REPO</option>
                 </select>
+              </div>
+
+              <div className="flex flex-col space-y-1">
+                <label className="text-muted-foreground uppercase">Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. JS Naming or some thing"
+                  value={newName}
+                  onChange={e => {
+                    setNewName(e.target.value);
+                    setCreateError("");
+                  }}
+                  className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground p-1.5 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex flex-col space-y-1">
+                <label className="text-muted-foreground uppercase">Generated Identifier (Machine Generated)</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={generatedId || `${newType}.<name>`}
+                  className={`bg-[var(--cp-bg-2)]/60 border ${
+                    isDuplicate ? "border-red-500 text-red-400" : "border-[var(--cp-border)] text-muted-foreground"
+                  } p-1.5 focus:outline-none cursor-not-allowed`}
+                />
+                {isDuplicate && (
+                  <span className="text-[10px] text-red-400">⚠ Identifier '{generatedId}' already exists</span>
+                )}
               </div>
 
               <div className="flex flex-col space-y-1">
@@ -680,17 +743,29 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
                 />
               </div>
 
+              {createError && (
+                <div className="text-[10px] text-red-400 font-mono bg-red-950/30 border border-red-500/30 p-1.5">
+                  {createError}
+                </div>
+              )}
+
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowNewModal(false)}
+                  onClick={() => {
+                    setShowNewModal(false);
+                    setCreateError("");
+                  }}
                   className="px-3 py-1 border border-red-500/30 text-red-400 hover:bg-red-500/10"
                 >
                   CANCEL
                 </button>
                 <button
                   type="submit"
-                  className="px-3 py-1 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold"
+                  disabled={isDuplicate}
+                  className={`px-3 py-1 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold ${
+                    isDuplicate ? "opacity-50 cursor-not-allowed" : "hover:opacity-90 cursor-pointer"
+                  }`}
                 >
                   CREATE_ASSET
                 </button>

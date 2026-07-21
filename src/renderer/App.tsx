@@ -259,6 +259,7 @@ export default function App() {
           onLogout={handleLogout}
           activeTab={activeTab}
           onChangeTab={setActiveTab}
+          isAdmin={isAdmin}
         />
 
         <main className="flex-1 overflow-hidden">
@@ -274,7 +275,7 @@ export default function App() {
             <SkillsView serverUrl={serverUrl} apiKey={apiKey} activeModel={activeModel} isAdmin={isAdmin} />
           ) : activeTab === "Abilities" ? (
             <AbilitiesView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} />
-          ) : activeTab === "Users" ? (
+          ) : activeTab === "Users" && isAdmin ? (
             <UsersView serverUrl={serverUrl} apiKey={apiKey} activeUserId={settings["user:id"] || ""} onSettingsChanged={handleSettingsChanged} isAdmin={isAdmin} />
           ) : activeTab === "Reminders" ? (
             <RemindersView serverUrl={serverUrl} apiKey={apiKey} />

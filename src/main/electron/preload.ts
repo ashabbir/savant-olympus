@@ -40,6 +40,9 @@ contextBridge.exposeInMainWorld('system', {
   runAgentViaGateway: (args: { provider: string; model: string; prompt: string }) => ipcRenderer.invoke('run-agent', args),
   exportDocument: (args: { format: 'html' | 'pdf'; html: string; defaultFilename: string }) =>
     ipcRenderer.invoke('export-document', args),
+  getSkillExportProfiles: () => ipcRenderer.invoke('get-skill-export-profiles'),
+  exportSkillPackage: (args: { provider: string; name: string; destinationRoot: string; files: Array<{ path: string; content: string }> }) =>
+    ipcRenderer.invoke('export-skill-package', args),
 })
 
 contextBridge.exposeInMainWorld('electronAPI', {

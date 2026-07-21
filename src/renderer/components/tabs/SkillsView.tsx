@@ -8,21 +8,29 @@ import {
 import { buildAthenaPromptSections, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits } from "@/lib/athenaContext";
 import { createSkillsService } from "@/services/skillsService";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
+import { ModalBackdrop } from "@/components/shared/ModalBackdrop";
 import { createScopedLocalAthenaThreadStore, readLocalAthenaHistory, useAthenaThread } from "@/hooks/useAthenaThread";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 interface Skill {
   id: string;
   name: string;
   description?: string;
-  status: "audited" | "unlocked" | "archived";
+  status: "audited" | "unlocked" | "archived" | "active" | "inactive";
   rules_count?: number;
-  files: {
-    "prompt.txt": string;
-    "schema.json": string;
-    "index.js": string;
-    "metadata.json": string;
-  };
+  files: Record<string, string>;
 }
+
+interface SkillProposal {
+  name: string;
+  description: string;
+  files: Record<string, string>;
+  rationale?: string;
+}
+
+type SkillExportProvider = "codex" | "claude" | "copilot" | "agy" | "hermes";
+type SkillExportProfile = { label: string; directory: string; format: string };
 
 interface SkillsViewProps {
   serverUrl: string;
@@ -41,6 +49,15 @@ interface ChatMessage {
 
 const ATHENA_CHAT_HISTORY_KEY = "savant_athena_chat_history";
 const ATHENA_SKILLS_SCOPE = "skills";
+
+const languageForSkillFile = (path: string) => {
+  const extension = path.split(".").pop()?.toLowerCase();
+  return ({
+    md: "markdown", json: "json", js: "javascript", jsx: "jsx", ts: "typescript", tsx: "tsx",
+    py: "python", sh: "bash", bash: "bash", yml: "yaml", yaml: "yaml", html: "markup", css: "css",
+    sql: "sql", toml: "toml", xml: "markup",
+  } as Record<string, string>)[extension || ""] || "text";
+};
 
 const DEFAULT_SKILLS: Skill[] = [
   {
@@ -233,7 +250,7 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
   };
 
   // Editor states
-  const [activeFile, setActiveFile] = useState<keyof Skill["files"]>("prompt.txt");
+  const [activeFile, setActiveFile] = useState("SKILL.md");
   const [editorContent, setEditorContent] = useState("");
   const [isDirty, setIsDirty] = useState(false);
 
@@ -245,6 +262,17 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
   const [isAiMode, setIsAiMode] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [isAiChatLoading, setIsAiChatLoading] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [skillProposal, setSkillProposal] = useState<SkillProposal | null>(null);
+  const [proposalPreviewFile, setProposalPreviewFile] = useState("SKILL.md");
+  const [isCreatingSkill, setIsCreatingSkill] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [downloadSkill, setDownloadSkill] = useState<Skill | null>(null);
+  const [exportProvider, setExportProvider] = useState<SkillExportProvider>("codex");
+  const [exportProfiles, setExportProfiles] = useState<Record<string, SkillExportProfile>>({});
+  const [exportDestination, setExportDestination] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportStatus, setExportStatus] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
@@ -308,7 +336,7 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
   }, [chatMessages]);
 
   useEffect(() => {
-    if (chatEndRef.current) {
+    if (chatEndRef.current?.scrollIntoView) {
       chatEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [chatMessages]);
@@ -328,12 +356,9 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
       const fetchedList = await skillsService.listSkills();
       setSkills(fetchedList.map((skill: Partial<Skill>) => ({
         ...skill,
-        files: {
-          "prompt.txt": skill.files?.["prompt.txt"] || "",
-          "schema.json": skill.files?.["schema.json"] || "",
-          "index.js": skill.files?.["index.js"] || "",
-          "metadata.json": skill.files?.["metadata.json"] || "",
-        },
+        name: skill.name || (skill as any).title || skill.id,
+        status: skill.status || "active",
+        files: skill.files || {},
       })) as Skill[]);
     } catch (e: any) {
       console.error(e);
@@ -346,7 +371,6 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
 
   const handleSaveLocalSkills = async (updatedSkills: Skill[]) => {
     try {
-      // Save to server
       const skillObjects = updatedSkills.map(s => ({
         id: s.id,
         name: s.name,
@@ -356,13 +380,25 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
         files: s.files
       }));
       
-      await skillsService.saveSkills(skillObjects)
-        .catch(e => console.log("Failed saving to remote server gateway: ", e));
-
-      // Always save to SQLite locally so it works offline
       await window.system.saveSetting("savant:skills", skillObjects);
     } catch (e) {
       console.error("Failed persisting skills locally:", e);
+    }
+  };
+
+  const handleSkillSelect = async (skill: Skill) => {
+    setSelectedSkill(skill);
+    setIsAiMode(false);
+    if (Object.keys(skill.files).length > 0) return;
+    try {
+      const paths = await skillsService.listSkillFiles(skill.id);
+      const entries = await Promise.all(paths.map(async path => [path, await skillsService.getSkillFile(skill.id, path)] as const));
+      const hydrated = { ...skill, files: Object.fromEntries(entries) };
+      setSkills(current => current.map(item => item.id === skill.id ? hydrated : item));
+      setSelectedSkill(hydrated);
+      setActiveFile(paths.includes("SKILL.md") ? "SKILL.md" : paths[0] || "SKILL.md");
+    } catch (error: any) {
+      setLoadError(error?.message || "Unable to load skill files.");
     }
   };
 
@@ -405,9 +441,14 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
     handleSaveLocalSkills(nextSkills);
   };
 
-  const handleDeleteSkill = (id: string, e: React.MouseEvent) => {
+  const handleDeleteSkill = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-
+    try {
+      await skillsService.deleteSkill(id);
+    } catch (error: any) {
+      alert(error?.message || "Failed to delete skill from the server.");
+      return;
+    }
     const nextSkills = skills.filter(s => s.id !== id);
     setSkills(nextSkills);
     if (selectedSkill?.id === id) {
@@ -416,8 +457,15 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
     handleSaveLocalSkills(nextSkills);
   };
 
-  const handleSaveEditorChanges = () => {
+  const handleSaveEditorChanges = async () => {
     if (!selectedSkill) return;
+
+    try {
+      await skillsService.updateSkillFile(selectedSkill.id, activeFile, editorContent);
+    } catch (error: any) {
+      alert(error?.message || "Failed to save the file on the server.");
+      return;
+    }
 
     const updatedFiles = {
       ...selectedSkill.files,
@@ -446,15 +494,57 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
     handleSaveLocalSkills(nextSkills);
   };
 
-  // Download entire skill package as structured JSON
-  const handleDownloadSkill = (skill: Skill) => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(skill, null, 2));
+  const handleDownloadSkill = async (skill: Skill) => {
+    const profiles = await window.system.getSkillExportProfiles();
+    setExportProfiles(profiles);
+    setExportProvider("codex");
+    setExportDestination(profiles.codex?.directory || "");
+    setExportStatus("");
+    setDownloadSkill(skill);
+  };
+
+  const handleDownloadZip = async (skill: Skill) => {
+    const zip = new JSZip();
+    Object.entries(skill.files).forEach(([path, content]) => zip.file(path, content));
+    const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
+    const objectUrl = URL.createObjectURL(blob);
     const downloadAnchor = document.createElement("a");
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `${skill.name}-skill.json`);
+    downloadAnchor.href = objectUrl;
+    downloadAnchor.download = `${skill.name}.zip`;
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
+    URL.revokeObjectURL(objectUrl);
+  };
+
+  const handleExportProviderChange = (provider: SkillExportProvider) => {
+    setExportProvider(provider);
+    setExportDestination(exportProfiles[provider]?.directory || "");
+    setExportStatus("");
+  };
+
+  const handleChooseExportDirectory = async () => {
+    const selected = await window.electronAPI?.pickDirectory(exportDestination);
+    if (selected) setExportDestination(selected);
+  };
+
+  const handleInstallProviderSkill = async () => {
+    if (!downloadSkill || !exportDestination || isExporting) return;
+    setIsExporting(true);
+    setExportStatus("");
+    try {
+      const result = await window.system.exportSkillPackage({
+        provider: exportProvider,
+        name: downloadSkill.name,
+        destinationRoot: exportDestination,
+        files: Object.entries(downloadSkill.files).map(([path, content]) => ({ path, content })),
+      });
+      setExportStatus(`Installed at ${result.path}`);
+    } catch (error: any) {
+      setExportStatus(error?.message || "Unable to install the skill package.");
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   // Download individual active file
@@ -509,6 +599,65 @@ Please output the FULL updated contents of the file. Do NOT include markdown sty
     }
   };
 
+  const proposalFromResponse = (parsed: any): SkillProposal => {
+    const entries = Array.isArray(parsed.files)
+      ? parsed.files
+      : Object.entries(parsed.files || {}).map(([path, content]) => ({ path, content }));
+    const files = Object.fromEntries(entries
+      .filter((file: any) => typeof file?.path === "string" && file?.content != null)
+      .map((file: any) => {
+        let content = typeof file.content === "string" ? file.content : JSON.stringify(file.content, null, 2);
+        if (file.path.toLowerCase().endsWith(".json")) {
+          try { content = JSON.stringify(JSON.parse(content), null, 2); } catch {}
+        }
+        return [file.path, content];
+      }));
+    if (!parsed.name || !files["SKILL.md"]) throw new Error("Athena must provide a name and SKILL.md.");
+    return {
+      name: String(parsed.name).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64),
+      description: parsed.description || "Athena generated skill",
+      rationale: parsed.rationale,
+      files,
+    };
+  };
+
+  const handleCreateProposal = async () => {
+    if (!skillProposal || isCreatingSkill) return;
+    setIsCreatingSkill(true);
+    setCreateError("");
+    try {
+      const created = await skillsService.createSkill({
+        name: skillProposal.name,
+        description: skillProposal.description,
+        files: Object.entries(skillProposal.files).map(([path, content]) => ({ path, content })),
+      });
+      const newSkill: Skill = {
+        id: created.id || skillProposal.name,
+        name: created.title || skillProposal.name,
+        description: created.description || skillProposal.description,
+        status: "active",
+        rules_count: 0,
+        files: skillProposal.files,
+      };
+      setSkills(current => [newSkill, ...current.filter(skill => skill.id !== newSkill.id)]);
+      setSelectedSkill(newSkill);
+      setActiveFile("SKILL.md");
+      setSkillProposal(null);
+      setIsAiMode(false);
+      setChatMessages(current => [...current, {
+        id: Math.random().toString(),
+        sender: "assistant",
+        text: `Created **${newSkill.name}** on the Savant Server with ${Object.keys(newSkill.files).length} files.`,
+        timestamp: new Date().toISOString(),
+        suggestedSkill: newSkill,
+      }]);
+    } catch (error: any) {
+      setCreateError(error?.message || "The server could not create this skill.");
+    } finally {
+      setIsCreatingSkill(false);
+    }
+  };
+
   // Replay last message through AI
   const handleReplayLastMessage = async () => {
     if (isAiChatLoading) return;
@@ -548,21 +697,30 @@ DIRECTIONS FOR DETERMINING TO GENERATE OR CLARIFY:
 If you need to clarify core parameters or logic, return:
 {
   "status": "clarifying",
-  "question": "A precise question to clarify important core requirements (e.g. inputs, RSpec structure, or runner command)."
+  "question": "One precise question that is truly necessary before proceeding.",
+  "suggestion": "Your recommended answer or design direction, with a short reason.",
+  "assumptions": ["Any safe defaults you can already infer"]
 }
 
 If you have a decent understanding of the core behavior and are ready to generate the skill, return:
 {
   "status": "ready",
-  "name": "snake_case_skill_name",
+  "name": "hyphen-case-skill-name",
   "description": "Short description of the skill",
-  "files": {
-    "prompt.txt": "Detailed, robust system instructions/prompts for this skill to operate in the gateway/LLM provider. Explain inputs, outputs, rules.",
-    "schema.json": "A valid tool parameters JSON schema (e.g., standard OpenAPI/Gemini function parameters format defining parameters/required items). Specify properties, descriptions, types.",
-    "index.js": "Javascript implementation code. Exports a run(args) function executing the skill.",
-    "metadata.json": "A config JSON containing name, description, and status."
-  }
-}`;
+  "rationale": "Why this file structure is sufficient and intentionally concise.",
+  "files": [
+    { "path": "SKILL.md", "content": "Required concise instructions with YAML frontmatter containing only name and description." },
+    { "path": "scripts/example.py", "content": "Optional deterministic implementation only when repeated or fragile execution requires it." }
+  ]
+}
+
+STEERING RULES:
+- Ask only when the answer materially changes the workflow, inputs, integrations, or safety constraints.
+- Whenever you ask, recommend a concrete default so the user can accept or redirect it.
+- If the request is actionable, do not ask; encode reasonable assumptions in the generated skill.
+- Decide which files are useful. SKILL.md is required; add scripts/, references/, or assets only when justified. Do not create README, changelog, installation, or process documentation.
+- Keep SKILL.md concise and move detailed domain material into references/ for progressive disclosure.
+- Use lowercase hyphen-case names under 64 characters and never emit metadata.json because the server owns it.`;
 
       const res = await window.ipcRenderer.invoke("run-agent", {
         provider: activeModel?.provider || "gemini",
@@ -602,42 +760,25 @@ If you have a decent understanding of the core behavior and are ready to generat
           const assistantMsg = {
             id: Math.random().toString(),
             sender: "assistant" as const,
-            text: parsed.question,
+            text: `${parsed.question}${parsed.suggestion ? `\n\n**Athena suggests:** ${parsed.suggestion}` : ""}${Array.isArray(parsed.assumptions) && parsed.assumptions.length ? `\n\n**Working assumptions:** ${parsed.assumptions.join("; ")}` : ""}`,
             timestamp: new Date().toISOString()
           };
           setChatMessages(prev => [...prev, {
             ...assistantMsg
           }]);
         } else if (parsed.status === "ready" && parsed.name && parsed.files) {
-          const newSkill: Skill = {
-            id: `skill-${Date.now()}`,
-            name: parsed.name,
-            description: parsed.description || "AI Generated Skill",
-            status: "audited",
-            rules_count: 1,
-            files: {
-              "prompt.txt": parsed.files["prompt.txt"] || "Instructions",
-              "schema.json": typeof parsed.files["schema.json"] === "object" ? JSON.stringify(parsed.files["schema.json"], null, 2) : parsed.files["schema.json"],
-              "index.js": parsed.files["index.js"] || "// Code",
-              "metadata.json": typeof parsed.files["metadata.json"] === "object" ? JSON.stringify(parsed.files["metadata.json"], null, 2) : parsed.files["metadata.json"]
-            }
-          };
-
-          const nextSkills = [newSkill, ...skills];
-          setSkills(nextSkills);
-          setSelectedSkill(newSkill);
-          handleSaveLocalSkills(nextSkills);
+          const proposal = proposalFromResponse(parsed);
+          setSkillProposal(proposal);
+          setProposalPreviewFile(proposal.files["SKILL.md"] ? "SKILL.md" : Object.keys(proposal.files)[0]);
+          setCreateError("");
 
           const assistantMsg = {
             id: Math.random().toString(),
             sender: "assistant" as const,
-            text: `Awesome! After our interview, I generated the **${newSkill.name}** skill successfully. I have loaded it into your environment and saved it! You can view and edit its files in the editor now.`,
+            text: `I recommend the **${proposal.name}** structure below. Review the files, then create it on the server or tell me what to change.`,
             timestamp: new Date().toISOString(),
-            suggestedSkill: newSkill
           };
           setChatMessages(prev => [...prev, assistantMsg]);
-
-          setIsAiMode(false);
         } else {
           throw new Error("Missing status properties.");
         }
@@ -665,27 +806,30 @@ If you have a decent understanding of the core behavior and are ready to generat
   };
 
   // ATHENA to build a new skill
-  const handleSendAiChatMessage = async () => {
-    if (!chatInput.trim() || isAiChatLoading) return;
+  const handleSendAiChatMessage = async (finalize = false) => {
+    if (isAiChatLoading || (!finalize && !chatInput.trim())) return;
+    if (finalize && chatMessages.every(message => message.sender !== "user") && !chatInput.trim()) return;
 
-    const userMsg: ChatMessage = {
+    const pendingText = chatInput.trim();
+    const userMsg: ChatMessage | null = pendingText ? {
       id: Math.random().toString(),
       sender: "user",
-      text: chatInput,
+      text: pendingText,
       timestamp: new Date().toISOString()
-    };
+    } : null;
 
-    const nextMessages = [...chatMessages, userMsg];
+    const nextMessages = userMsg ? [...chatMessages, userMsg] : chatMessages;
     setChatMessages(nextMessages);
     setChatInput("");
     setIsAiChatLoading(true);
+    setIsFinalizing(finalize);
 
     try {
       const chatHistory = nextMessages
         .map(msg => `${msg.sender.toUpperCase()}: ${msg.text}`)
         .join("\n");
 
-      const promptPayload = `You are a helpful AI Skill Architect designing a new Savant skill module based on user input.
+      const promptPayload = `You are a collaborative AI Skill Architect designing a new Savant skill through conversation.
 
 Here is the conversation history so far:
 ${formatAthenaHistory(readSharedAthenaHistory())}
@@ -693,29 +837,40 @@ ${chatHistory}
 
 You MUST respond with a valid JSON object. Do not include any markdown wrap, extra explanation, or conversational text outside of the JSON.
 
-DIRECTIONS FOR DETERMINING TO GENERATE OR CLARIFY:
-- You should aim for a decent, moderate amount of clarification. Ask 1 or 2 high-quality, targeted questions regarding the core logic, required parameter inputs, or test runner strategies if they are not yet clear.
-- Do not ask trivial questions about obvious metadata fields, version numbers, or simple directory layouts.
-- Once you have the main inputs and behavior defined through a brief back-and-forth, set the status to "ready" and generate the full code, prompts, and schema using smart defaults.
+DIRECTIONS:
+- This request is in ${finalize ? "FINALIZE" : "CONVERSATION"} mode.
+- In CONVERSATION mode, continue the design discussion. Never generate files or return status "ready". Ask at most one necessary question, suggest a concrete direction, and help steer the user toward a complete design.
+- In FINALIZE mode, stop asking questions. Resolve remaining ambiguity with the recommendations and assumptions already discussed, then return status "ready" with the complete file plan and contents.
+- Do not ask trivial questions about metadata, versions, or directory layout.
 
-If you need to clarify core parameters or logic, return:
+In CONVERSATION mode return:
 {
-  "status": "clarifying",
-  "question": "A precise question to clarify important core requirements (e.g. inputs, RSpec structure, or runner command)."
+  "status": "conversational",
+  "response": "A concise acknowledgement or useful design observation.",
+  "question": "One precise question, or an empty string if no question is needed yet.",
+  "suggestion": "Your recommended answer or design direction, with a short reason.",
+  "assumptions": ["Any safe defaults you can already infer"]
 }
 
-If you have a decent understanding of the core behavior and are ready to generate the skill, return:
+In FINALIZE mode return:
 {
   "status": "ready",
-  "name": "snake_case_skill_name",
+  "name": "hyphen-case-skill-name",
   "description": "Short description of the skill",
-  "files": {
-    "prompt.txt": "Detailed, robust system instructions/prompts for this skill to operate in the gateway/LLM provider. Explain inputs, outputs, rules.",
-    "schema.json": "A valid tool parameters JSON schema (e.g., standard OpenAPI/Gemini function parameters format defining parameters/required items). Specify properties, descriptions, types.",
-    "index.js": "Javascript implementation code. Exports a run(args) function executing the skill.",
-    "metadata.json": "A config JSON containing name, description, and status."
-  }
-}`;
+  "rationale": "Why this file structure is sufficient and intentionally concise.",
+  "files": [
+    { "path": "SKILL.md", "content": "Required concise instructions with YAML frontmatter containing only name and description." },
+    { "path": "scripts/example.py", "content": "Optional deterministic implementation only when repeated or fragile execution requires it." }
+  ]
+}
+
+STEERING RULES:
+- Ask only when the answer materially changes the workflow, inputs, integrations, or safety constraints.
+- Whenever you ask, recommend a concrete default so the user can accept or redirect it.
+- If the request is actionable, do not ask; encode reasonable assumptions in the generated skill.
+- Decide which files are useful. SKILL.md is required; add scripts/, references/, or assets only when justified. Do not create README, changelog, installation, or process documentation.
+- Keep SKILL.md concise and move detailed domain material into references/ for progressive disclosure.
+- Use lowercase hyphen-case names under 64 characters and never emit metadata.json because the server owns it.`;
 
       const res = await window.ipcRenderer.invoke("run-agent", {
         provider: activeModel?.provider || "gemini",
@@ -751,43 +906,25 @@ If you have a decent understanding of the core behavior and are ready to generat
 
       try {
         const parsed = parseJsonSafely(cleanRes);
-        if (parsed.status === "clarifying" && parsed.question) {
+        if ((parsed.status === "conversational" || parsed.status === "clarifying") && (parsed.response || parsed.question)) {
           setChatMessages(prev => [...prev, {
             id: Math.random().toString(),
             sender: "assistant",
-            text: parsed.question,
+            text: `${parsed.response || ""}${parsed.question ? `${parsed.response ? "\n\n" : ""}${parsed.question}` : ""}${parsed.suggestion ? `\n\n**Athena suggests:** ${parsed.suggestion}` : ""}${Array.isArray(parsed.assumptions) && parsed.assumptions.length ? `\n\n**Working assumptions:** ${parsed.assumptions.join("; ")}` : ""}`,
             timestamp: new Date().toISOString()
           }]);
         } else if (parsed.status === "ready" && parsed.name && parsed.files) {
-          const newSkill: Skill = {
-            id: `skill-${Date.now()}`,
-            name: parsed.name,
-            description: parsed.description || "AI Generated Skill",
-            status: "audited",
-            rules_count: 1,
-            files: {
-              "prompt.txt": parsed.files["prompt.txt"] || "Instructions",
-              "schema.json": typeof parsed.files["schema.json"] === "object" ? JSON.stringify(parsed.files["schema.json"], null, 2) : parsed.files["schema.json"],
-              "index.js": parsed.files["index.js"] || "// Code",
-              "metadata.json": typeof parsed.files["metadata.json"] === "object" ? JSON.stringify(parsed.files["metadata.json"], null, 2) : parsed.files["metadata.json"]
-            }
-          };
-
-          const nextSkills = [newSkill, ...skills];
-          setSkills(nextSkills);
-          setSelectedSkill(newSkill);
-          handleSaveLocalSkills(nextSkills);
+          const proposal = proposalFromResponse(parsed);
+          setSkillProposal(proposal);
+          setProposalPreviewFile(proposal.files["SKILL.md"] ? "SKILL.md" : Object.keys(proposal.files)[0]);
+          setCreateError("");
 
           setChatMessages(prev => [...prev, {
             id: Math.random().toString(),
             sender: "assistant",
-            text: `Awesome! After our interview, I generated the **${newSkill.name}** skill successfully. I have loaded it into your environment and saved it! You can view and edit its files in the editor now.`,
+            text: `I recommend the **${proposal.name}** structure below. Review the files, then create it on the server or tell me what to change.`,
             timestamp: new Date().toISOString(),
-            suggestedSkill: newSkill
           }]);
-          
-          // Briefly highlight editor
-          setIsAiMode(false);
         } else {
           throw new Error("Missing status properties.");
         }
@@ -810,6 +947,7 @@ If you have a decent understanding of the core behavior and are ready to generat
       }]);
     } finally {
       setIsAiChatLoading(false);
+      setIsFinalizing(false);
     }
   };
 
@@ -927,10 +1065,7 @@ If you have a decent understanding of the core behavior and are ready to generat
                   filteredSkills.map((s) => (
                     <div
                       key={s.id}
-                      onClick={() => {
-                        setSelectedSkill(s);
-                        setIsAiMode(false);
-                      }}
+                      onClick={() => handleSkillSelect(s)}
                       className={`p-2.5 border cursor-pointer transition-all flex items-start justify-between group ${
                         selectedSkill?.id === s.id && !isAiMode
                           ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.05)]"
@@ -988,7 +1123,56 @@ If you have a decent understanding of the core behavior and are ready to generat
                       <RefreshCcw size={14} />
                     </div>
                     <div className="p-3 border border-dashed border-pink-500/25 bg-[var(--cp-bg-1)] text-xs font-mono text-pink-400/80 animate-pulse">
-                      Generating structure schema, prompts, config manifest, and code execution scope...
+                      {isFinalizing ? "Finalizing the skill structure and writing every file..." : "Athena is reviewing your message and shaping the skill..."}
+                    </div>
+                  </div>
+                )}
+
+                {skillProposal && (
+                  <div className="ml-auto w-full max-w-2xl border border-[var(--cp-cyan)]/40 bg-[var(--cp-bg-1)] p-3 space-y-3 font-mono">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-bold text-[var(--cp-cyan)]">PROPOSED_SKILL / {skillProposal.name}</div>
+                        <div className="text-[10px] text-muted-foreground mt-1">{skillProposal.description}</div>
+                      </div>
+                      <span className="text-[9px] text-[var(--cp-green)] border border-[var(--cp-green)]/30 px-1.5 py-0.5">REVIEW</span>
+                    </div>
+                    {skillProposal.rationale && <p className="text-[10px] text-muted-foreground">{skillProposal.rationale}</p>}
+                    <div className="grid grid-cols-[minmax(150px,0.34fr)_minmax(0,1fr)] border border-[var(--cp-border)] min-h-52 max-h-80 overflow-hidden">
+                      <div className="overflow-y-auto border-r border-[var(--cp-border)] bg-[var(--cp-bg-2)]">
+                        {Object.entries(skillProposal.files).map(([path, content]) => (
+                          <button
+                            type="button"
+                            key={path}
+                            onClick={() => setProposalPreviewFile(path)}
+                            className={`w-full flex items-center justify-between gap-2 px-2 py-2 text-left text-[10px] border-b border-[var(--cp-border)] ${proposalPreviewFile === path ? "text-[var(--cp-cyan)] bg-[rgba(0,229,255,0.06)]" : "text-foreground hover:bg-[var(--cp-bg-3)]"}`}
+                          >
+                            <span className="truncate">{path}</span>
+                            <span className="text-[9px] text-muted-foreground shrink-0">{content.length.toLocaleString()}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="overflow-auto bg-[#1e1e1e]">
+                        <div className="sticky top-0 z-10 flex justify-between px-3 py-1.5 bg-[#181818] border-b border-white/10 text-[9px] text-muted-foreground">
+                          <span>{proposalPreviewFile}</span>
+                          <span>{languageForSkillFile(proposalPreviewFile).toUpperCase()}</span>
+                        </div>
+                        <SyntaxHighlighter
+                          language={languageForSkillFile(proposalPreviewFile)}
+                          style={vscDarkPlus}
+                          customStyle={{ margin: 0, padding: "12px", background: "transparent", fontSize: "10px", lineHeight: 1.55 }}
+                          wrapLongLines
+                        >
+                          {skillProposal.files[proposalPreviewFile] || ""}
+                        </SyntaxHighlighter>
+                      </div>
+                    </div>
+                    {createError && <div className="text-[10px] text-red-400">{createError}</div>}
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={() => setSkillProposal(null)} className="px-2.5 py-1 border border-[var(--cp-border)] text-[10px] text-muted-foreground hover:text-foreground">DISCARD</button>
+                      <button type="button" onClick={handleCreateProposal} disabled={isCreatingSkill} className="px-3 py-1 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] text-[10px] font-bold disabled:opacity-50">
+                        {isCreatingSkill ? "CREATING..." : "CREATE ON SERVER"}
+                      </button>
                     </div>
                   </div>
                 )}
@@ -997,22 +1181,14 @@ If you have a decent understanding of the core behavior and are ready to generat
               </div>
 
               {/* Chat Input */}
-              <div className="p-3 border-t border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex flex-col gap-2">
-                {chatMessages.filter(m => m.sender === "user").length > 0 && (
-                  <div className="flex justify-end">
-                    <button
-                      onClick={handleReplayLastMessage}
-                      disabled={isAiChatLoading}
-                      className="px-2.5 py-1 border border-pink-500/20 text-pink-400 hover:border-pink-500/50 hover:bg-pink-950/20 text-[10px] font-bold font-mono tracking-wider flex items-center gap-1 cursor-pointer transition-all rounded-sm bg-pink-950/5"
-                    >
-                      <RefreshCcw size={10} className={isAiChatLoading ? "animate-spin" : ""} />
-                      <span>REPLAY LAST TURN</span>
-                    </button>
-                  </div>
-                )}
-                 <div className="flex gap-2 items-end">
+              <div className="p-4 border-t border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex flex-col gap-3 shadow-[0_-12px_28px_rgba(0,0,0,0.18)]">
+                <div className="flex items-center justify-between font-mono">
+                  <span className="text-[10px] uppercase tracking-widest text-[var(--cp-cyan)]">Continue the design conversation</span>
+                  <span className="text-[9px] text-muted-foreground">Enter sends · Shift+Enter adds a line</span>
+                </div>
+                <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-0)] focus-within:border-[var(--cp-cyan)] transition-colors">
                   <textarea
-                    placeholder="Describe your skill in detail (e.g. inputs, outputs, rules). Use Enter to generate, Shift+Enter for newlines."
+                    placeholder="Describe the workflow, give an example, answer Athena, or redirect her recommendation..."
                     value={chatInput}
                     onChange={e => setChatInput(e.target.value)}
                     onKeyDown={e => {
@@ -1024,17 +1200,31 @@ If you have a decent understanding of the core behavior and are ready to generat
                       }
                     }}
                     disabled={isAiChatLoading}
-                    rows={1}
-                    className="flex-1 bg-[var(--cp-bg-0)] border border-[var(--cp-border)] px-3 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:border-[var(--cp-cyan)] resize-none min-h-[32px] max-h-[120px] overflow-y-auto"
+                    rows={4}
+                    className="w-full bg-transparent px-3 py-3 text-xs font-mono text-foreground focus:outline-none resize-y min-h-[112px] max-h-[240px] overflow-y-auto leading-relaxed"
                   />
-                  {isAdmin && <button
-                    onClick={handleSendAiChatMessage}
-                    disabled={isAiChatLoading || !chatInput.trim()}
-                    className="px-4 py-1.5 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase hover:opacity-90 disabled:opacity-50 font-mono"
-                  >
-                    GENERATE
-                  </button>}
                 </div>
+                {isAdmin && <div className="flex items-center justify-between gap-3">
+                  <p className="text-[9px] text-muted-foreground font-mono">Finalize uses the complete conversation and Athena's recommended defaults.</p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleSendAiChatMessage(false)}
+                      disabled={isAiChatLoading || !chatInput.trim()}
+                      className="px-4 py-2 border border-[var(--cp-cyan)] text-[var(--cp-cyan)] font-bold text-[10px] uppercase hover:bg-[rgba(0,229,255,0.08)] disabled:opacity-40 font-mono flex items-center gap-1.5"
+                    >
+                      <Send size={11} /> SEND MESSAGE
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSendAiChatMessage(true)}
+                      disabled={isAiChatLoading || (chatMessages.every(message => message.sender !== "user") && !chatInput.trim())}
+                      className="px-4 py-2 bg-[var(--cp-magenta)] text-white font-bold text-[10px] uppercase hover:opacity-90 disabled:opacity-40 font-mono flex items-center gap-1.5"
+                    >
+                      <Sparkles size={11} /> FINALIZE &amp; GENERATE
+                    </button>
+                  </div>
+                </div>}
               </div>
             </div>
           ) : selectedSkill ? (
@@ -1053,15 +1243,15 @@ If you have a decent understanding of the core behavior and are ready to generat
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => handleDownloadSkill(selectedSkill)}
-                    title="Download complete skill bundle"
+                    title="Download folder-preserving SKILL.md package"
                     className="p-1.5 border border-[var(--cp-cyan)]/30 text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.08)] rounded font-mono text-xs flex items-center gap-1.5 cursor-pointer"
                   >
                     <Download size={13} />
-                    <span className="hidden sm:inline">DOWNLOAD_SKILL</span>
+                    <span className="hidden sm:inline">DOWNLOAD_SKILL_ZIP</span>
                   </button>
                   <span
                     className={`text-[9px] px-2 py-0.5 border font-semibold tracking-wider font-mono ${
-                      selectedSkill.status === "audited"
+                      selectedSkill.status === "audited" || selectedSkill.status === "active"
                         ? "border-[var(--cp-green)] text-[var(--cp-green)] bg-[rgba(0,255,136,0.05)]"
                         : "border-gray-500/30 text-muted-foreground"
                     }`}
@@ -1074,7 +1264,7 @@ If you have a decent understanding of the core behavior and are ready to generat
               {/* Editor Tabs & File Action panel */}
               <div className="flex items-center justify-between border-b border-[var(--cp-border)] px-2 bg-[var(--cp-bg-3)]">
                 <div className="flex">
-                  {(Object.keys(selectedSkill.files) as Array<keyof Skill["files"]>).map(fileName => (
+                  {Object.keys(selectedSkill.files).map(fileName => (
                     <button
                       key={fileName}
                       onClick={() => {
@@ -1174,15 +1364,23 @@ If you have a decent understanding of the core behavior and are ready to generat
                     <div className="space-y-1.5 text-[9px] font-mono text-muted-foreground">
                       <div className="flex items-center gap-1 text-[var(--cp-green)]">
                         <Check size={9} />
-                        <span>OpenAI Tool Specification</span>
+                        <span>Codex Agent Skills</span>
                       </div>
                       <div className="flex items-center gap-1 text-[var(--cp-green)]">
                         <Check size={9} />
-                        <span>Gemini Function Declarations</span>
+                        <span>Claude Code Skills</span>
                       </div>
                       <div className="flex items-center gap-1 text-[var(--cp-green)]">
                         <Check size={9} />
-                        <span>Anthropic Computer Tools</span>
+                        <span>GitHub Copilot Skills</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-[var(--cp-green)]">
+                        <Check size={9} />
+                        <span>AGY Workspace Skills</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-[var(--cp-green)]">
+                        <Check size={9} />
+                        <span>Hermes Agent Skills</span>
                       </div>
                     </div>
                   </div>
@@ -1199,6 +1397,54 @@ If you have a decent understanding of the core behavior and are ready to generat
           )}
         </div>
       </div>
+      <ModalBackdrop
+        isOpen={Boolean(downloadSkill)}
+        onClose={() => setDownloadSkill(null)}
+        title="Install skill for an agent"
+        maxWidth="max-w-2xl"
+      >
+        {downloadSkill && <div className="space-y-4">
+          <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-3">
+            <div className="text-xs font-bold text-foreground">{downloadSkill.name}</div>
+            <div className="text-[10px] text-muted-foreground mt-1">Choose the agent that will discover this skill. Olympus keeps the complete folder tree and adapts the install location.</div>
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-[var(--cp-cyan)] mb-2">1 / Agent provider</label>
+            <div className="grid grid-cols-5 gap-2">
+              {(["codex", "claude", "copilot", "agy", "hermes"] as SkillExportProvider[]).map(provider => (
+                <button
+                  type="button"
+                  key={provider}
+                  onClick={() => handleExportProviderChange(provider)}
+                  className={`px-2 py-2 border text-[10px] font-bold uppercase ${exportProvider === provider ? "border-[var(--cp-cyan)] text-[var(--cp-cyan)] bg-[rgba(0,229,255,0.06)]" : "border-[var(--cp-border)] text-muted-foreground hover:text-foreground"}`}
+                >
+                  {exportProfiles[provider]?.label || provider}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-[var(--cp-cyan)] mb-2">2 / Install directory</label>
+            <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-0)] p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[9px] text-muted-foreground uppercase">Recommended for {exportProfiles[exportProvider]?.format}</div>
+                  <div className="text-[11px] text-foreground truncate mt-1">{exportDestination}</div>
+                </div>
+                <button type="button" onClick={handleChooseExportDirectory} className="px-3 py-1.5 border border-[var(--cp-border)] text-[10px] text-[var(--cp-cyan)] hover:bg-[var(--cp-bg-2)] shrink-0">CHOOSE DIRECTORY</button>
+              </div>
+              <div className="text-[9px] text-muted-foreground">Olympus will create <span className="text-foreground">{downloadSkill.name}/</span> inside this directory.</div>
+            </div>
+          </div>
+          {exportStatus && <div className={`text-[10px] border px-3 py-2 ${exportStatus.startsWith("Installed") ? "border-[var(--cp-green)]/30 text-[var(--cp-green)]" : "border-red-500/30 text-red-400"}`}>{exportStatus}</div>}
+          <div className="flex items-center justify-between border-t border-[var(--cp-border)] pt-3">
+            <button type="button" onClick={() => handleDownloadZip(downloadSkill)} className="px-3 py-2 border border-[var(--cp-border)] text-[10px] text-muted-foreground hover:text-foreground">DOWNLOAD PORTABLE ZIP</button>
+            <button type="button" onClick={handleInstallProviderSkill} disabled={isExporting || !exportDestination} className="px-4 py-2 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] text-[10px] font-bold disabled:opacity-40">
+              {isExporting ? "INSTALLING..." : `INSTALL FOR ${exportProvider.toUpperCase()}`}
+            </button>
+          </div>
+        </div>}
+      </ModalBackdrop>
     </div>
   );
 }

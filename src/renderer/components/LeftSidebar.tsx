@@ -13,6 +13,7 @@ interface LeftSidebarProps {
   onLogout: () => void;
   activeTab: string;
   onChangeTab: (tab: string) => void;
+  isAdmin?: boolean;
 }
 
 function NavIcon({
@@ -70,9 +71,11 @@ const TAB_ITEMS = [
   { id: "Reminders", label: "Reminders", icon: <Bell size={16} /> },
 ];
 
-export function LeftSidebar({ onSettingsChanged, onLogout, activeTab, onChangeTab }: LeftSidebarProps) {
+export function LeftSidebar({ onSettingsChanged, onLogout, activeTab, onChangeTab, isAdmin }: LeftSidebarProps) {
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+
+  const visibleTabs = TAB_ITEMS.filter((tab) => tab.id !== "Users" || isAdmin);
 
   return (
     <aside
@@ -89,7 +92,7 @@ export function LeftSidebar({ onSettingsChanged, onLogout, activeTab, onChangeTa
         className="flex flex-col justify-between py-2 shrink-0"
       >
         <div className="flex flex-col items-center gap-1">
-          {TAB_ITEMS.map((tab) => (
+          {visibleTabs.map((tab) => (
             <NavIcon
               key={tab.id}
               icon={tab.icon}

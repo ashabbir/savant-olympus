@@ -42,6 +42,13 @@ interface Window {
       html: string
       defaultFilename: string
     }) => Promise<string | null>
+    getSkillExportProfiles: () => Promise<Record<string, { label: string; directory: string; format: string }>>
+    exportSkillPackage: (args: {
+      provider: string
+      name: string
+      destinationRoot: string
+      files: Array<{ path: string; content: string }>
+    }) => Promise<{ provider: string; path: string; format: string }>
   }
   electronAPI?: {
     pickDirectory: (defaultPath?: string) => Promise<string | null>;

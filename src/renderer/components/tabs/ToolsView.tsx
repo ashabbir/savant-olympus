@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Wrench, Play, Trash2, Plus, ShieldCheck, ChevronLeft, ChevronRight, Download } from "lucide-react";
+import { Wrench, Play, Trash2, Plus, ShieldCheck, ChevronLeft, ChevronRight, Download, AlertTriangle } from "lucide-react";
 import { createToolsService, ToolDefinition } from "@/services/toolsService";
 import { SearchBar } from "@/components/shared/SearchBar";
 
@@ -121,11 +121,24 @@ export function ToolsView({ serverUrl, apiKey, isAdmin }: ToolsViewProps) {
     <div className="flex flex-col h-full overflow-hidden p-4 space-y-4" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
       <div className="flex items-center justify-between border-b border-[var(--cp-border)] pb-3">
         <div>
-          <h2 className="text-lg font-medium text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
-            MCP TOOLKIT
-          </h2>
-          <p className="text-xs text-muted-foreground opacity-60">Meta-Cognitive Programming protocol registry & playground</p>
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-medium text-[var(--section-label)] tracking-wider" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+              MCP TOOLKIT
+            </h2>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 border border-amber-500/40 text-amber-400 tracking-wider">
+              <AlertTriangle size={11} className="text-amber-400 animate-pulse" />
+              UNDER CONSTRUCTION
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground opacity-60">Meta-Cognitive Programming protocol registry & playground (In Development)</p>
         </div>
+      </div>
+
+      <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-mono rounded">
+        <AlertTriangle size={14} className="text-amber-400 shrink-0 animate-pulse" />
+        <span>
+          <strong className="text-amber-400 font-bold">FEATURE UNDER CONSTRUCTION:</strong> Direct AI MCP Tool execution integration is in active development.
+        </span>
       </div>
 
       <div className="flex-1 flex gap-4 overflow-hidden">

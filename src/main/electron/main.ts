@@ -488,6 +488,58 @@ ipcMain.handle('pick-directory', async (_event, defaultPath) => {
   }
 })
 
+const SKILL_EXPORT_PROFILES = {
+  codex: { label: 'Codex', directory: path.join(os.homedir(), '.codex', 'skills'), format: 'Agent Skills / SKILL.md' },
+  claude: { label: 'Claude', directory: path.join(os.homedir(), '.claude', 'skills'), format: 'Claude Code Skill' },
+  copilot: { label: 'Copilot', directory: path.join(os.homedir(), '.copilot', 'skills'), format: 'GitHub Copilot Agent Skill' },
+  agy: { label: 'AGY', directory: path.join(os.homedir(), '.agents', 'skills'), format: 'AGY Workspace Skill' },
+  hermes: { label: 'Hermes', directory: path.join(os.homedir(), '.hermes', 'skills', 'custom'), format: 'Hermes Agent Skill' },
+} as const
+
+ipcMain.handle('get-skill-export-profiles', () => SKILL_EXPORT_PROFILES)
+
+ipcMain.handle('export-skill-package', async (_event, payload) => {
+  const provider = String(payload?.provider || '') as keyof typeof SKILL_EXPORT_PROFILES
+  const profile = SKILL_EXPORT_PROFILES[provider]
+  const name = String(payload?.name || '')
+  const destinationRoot = path.resolve(String(payload?.destinationRoot || ''))
+  const files = Array.isArray(payload?.files) ? payload.files : []
+  if (!profile) throw new Error('Unsupported skill provider')
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || name.length > 64) throw new Error('Invalid skill name')
+  if (!destinationRoot || files.length === 0 || files.length > 128) throw new Error('Invalid skill export payload')
+
+  const targetDir = path.join(destinationRoot, name)
+  const tempDir = path.join(destinationRoot, `.installing-${name}-${Date.now()}`)
+  try {
+    await fs.mkdir(destinationRoot, { recursive: true })
+    try {
+      await fs.access(targetDir)
+      throw new Error(`A skill named ${name} already exists in this directory`)
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+    await fs.mkdir(tempDir, { recursive: false })
+    for (const entry of files) {
+      const relPath = String(entry?.path || '').replace(/\\/g, '/')
+      const content = entry?.content
+      const resolved = path.resolve(tempDir, relPath)
+      if (!relPath || path.isAbsolute(relPath) || relPath.split('/').includes('..') || !resolved.startsWith(`${tempDir}${path.sep}`)) {
+        throw new Error(`Unsafe skill path: ${relPath || '<empty>'}`)
+      }
+      if (typeof content !== 'string') throw new Error(`Skill file must be text: ${relPath}`)
+      await fs.mkdir(path.dirname(resolved), { recursive: true })
+      await fs.writeFile(resolved, content, 'utf8')
+      if (relPath.startsWith('scripts/') && /\.(sh|bash|py|js|mjs)$/.test(relPath)) await fs.chmod(resolved, 0o755)
+    }
+    await fs.access(path.join(tempDir, 'SKILL.md'))
+    await fs.rename(tempDir, targetDir)
+    return { provider, path: targetDir, format: profile.format }
+  } catch (error) {
+    await fs.rm(tempDir, { recursive: true, force: true })
+    throw error
+  }
+})
+
 ipcMain.handle('list-directory', async (_event, dirPath) => {
   try {
     const entries = await fs.readdir(dirPath, { withFileTypes: true })
