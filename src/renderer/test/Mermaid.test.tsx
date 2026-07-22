@@ -2,6 +2,9 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import Mermaid from '../components/Mermaid'
 import mermaid from 'mermaid'
+import { AthenaMessage } from '../components/shared/AthenaMessage'
+import { normalizeMermaidMarkdown } from '../utils/mermaidMarkdown'
+import { buildAthenaExportDocument } from '../components/tabs/knowledge/utils/chatExport'
 
 describe('Mermaid Component', () => {
   const mockChart = 'graph TD; A-->B;'
@@ -33,5 +36,30 @@ describe('Mermaid Component', () => {
       expect(screen.getByText(/graph/)).toBeInTheDocument()
       expect(screen.getByText(/TD/)).toBeInTheDocument()
     })
+  })
+
+  it('normalizes and visually renders a bare ATHENA flowchart followed by prose', async () => {
+    const response = `graph TD
+  K[knowledge]
+  UI[Knowledge graph UI]
+  UI -->|depends_on| K
+This is the cleanest read of the node neighborhood.`
+
+    expect(normalizeMermaidMarkdown(response)).toContain('```mermaid\ngraph TD')
+    render(<AthenaMessage message={{ sender: 'assistant', text: response }} />)
+
+    await waitFor(() => expect(screen.getByTestId('mermaid-svg')).toBeInTheDocument())
+    expect(screen.getByText('This is the cleanest read of the node neighborhood.')).toBeInTheDocument()
+  })
+
+  it('keeps rendered Mermaid SVG diagrams in standalone downloads', () => {
+    const html = buildAthenaExportDocument('Knowledge chat', [{
+      sender: 'assistant',
+      timestamp: '2026-07-22T12:00:00.000Z',
+      html: '<div class="mermaid"><svg aria-label="knowledge diagram"><path d="M0 0" /></svg></div>',
+    }])
+
+    expect(html).toContain('<svg aria-label="knowledge diagram">')
+    expect(html).toContain('.mermaid svg')
   })
 })

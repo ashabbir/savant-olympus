@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { buildFilteredKnowledgeContext, buildKnowledgeChatContextSnapshot, buildKnowledgeExportPayload, buildKnowledgeImportDiff, deriveKnowledgeVisibility, fetchKnowledgeExportData, getKnowledgeNodeRadius, importKnowledgePayload, inferNodeDomains, KnowledgeView, restoreKnowledgeFocals, validateKnowledgeImportPayload } from '../components/tabs/KnowledgeView'
+import { buildFilteredKnowledgeContext, buildKnowledgeChatContextSnapshot, buildKnowledgeChatPayload, buildKnowledgeExportPayload, buildKnowledgeImportDiff, deriveKnowledgeVisibility, fetchKnowledgeExportData, getKnowledgeNodeRadius, importKnowledgePayload, inferNodeDomains, KnowledgeView, restoreKnowledgeFocals, selectKnowledgeAthenaPersona, validateKnowledgeImportPayload } from '../components/tabs/KnowledgeView'
 
 const graphPayload = {
   nodes: [
@@ -100,6 +100,25 @@ describe('KnowledgeView', () => {
         service: new Set(['n1']),
         domain: new Set(['d1']),
       })
+  })
+
+  it('builds a transparent chat context summary and selects a matching persona', () => {
+    const payload = buildKnowledgeChatPayload({
+      rawNodes: graphPayload.nodes,
+      rawEdges: graphPayload.edges,
+      adjacency: { n1: ['n2', 'd1'], n2: ['n1'], d1: ['n1'] },
+      selectedNodeIds: ['n1'],
+      depth: 1,
+      showInsights: false,
+    })
+
+    expect(payload.nodes.map((node) => node.node_id).sort()).toEqual(['d1', 'n1', 'n2'])
+    expect(payload.edges).toHaveLength(2)
+    expect(payload.nodeTypes).toEqual({ service: 1, technology: 1, domain: 1 })
+    expect(selectKnowledgeAthenaPersona('Review the auth threat model', [
+      { id: 'persona.engineer' },
+      { id: 'persona.security' },
+    ])).toBe('security')
   })
 
   it('opens a saved chat and restores its graph selection', async () => {
@@ -431,6 +450,13 @@ describe('KnowledgeView', () => {
     fireEvent.click(screen.getByRole('button', { name: /expand node details/i }))
     expect(screen.getByRole('button', { name: /expand explore filters/i })).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText('Node Details')).toBeInTheDocument())
+    const resizeHandle = screen.getByRole('separator', { name: /resize knowledge details drawer/i })
+    const inspector = resizeHandle.parentElement as HTMLElement
+    expect(inspector.style.width).toBe('544px')
+    fireEvent.pointerDown(resizeHandle, { clientX: 480 })
+    fireEvent.pointerMove(window, { clientX: 400 })
+    fireEvent.pointerUp(window)
+    await waitFor(() => expect(inspector.style.width).toBe('624px'))
     const connectionsSection = screen.getByText('CONNECTIONS').parentElement as HTMLElement
     expect(connectionsSection).toBeTruthy()
     expect(connectionsSection).toHaveTextContent('uses')
@@ -662,7 +688,8 @@ describe('KnowledgeView', () => {
     fireEvent.click(await screen.findByText('Postgres'))
     fireEvent.click(await screen.findByRole('button', { name: /expand node details/i }))
 
-    expect(await screen.findByText('DOMAIN: Auth Domain')).toBeInTheDocument()
-    expect(screen.getByText('DOMAIN: Auth Domain')).toHaveAttribute('title', 'Inferred 2 hops away')
+    const domainPill = await screen.findByText('SECONDARY DOMAIN: Auth Domain')
+    expect(domainPill).toHaveAttribute('title', 'Secondary domain inferred 2 connections away')
+    expect(domainPill).toHaveClass('text-yellow-200/75')
   })
 })

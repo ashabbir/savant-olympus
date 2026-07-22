@@ -5,6 +5,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
 import { createKnowledgeService } from "@/services/knowledgeService";
 import { createWorkspaceService } from "@/services/workspaceService";
+import { createAbilitiesService } from "@/services/abilitiesService";
 import { buildAthenaPromptSections, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits } from "@/lib/athenaContext";
 import {
   Node,
@@ -39,8 +40,10 @@ import {
   printHtmlDocument,
 } from "./knowledge/utils/chatExport";
 import {
+  buildKnowledgeChatPayload,
   buildKnowledgeChatContextSnapshot,
   restoreKnowledgeFocals,
+  selectKnowledgeAthenaPersona,
 } from "./knowledge/utils/chatContext";
 
 export type { Node, Edge, ChatMessage, AthenaExportEntry, KnowledgeChatContextSnapshot, AthenaThread, KnowledgeGraphIndex, KnowledgeViewProps };
@@ -59,7 +62,9 @@ export {
   importKnowledgePayload,
   fetchKnowledgeExportData,
   buildKnowledgeChatContextSnapshot,
+  buildKnowledgeChatPayload,
   restoreKnowledgeFocals,
+  selectKnowledgeAthenaPersona,
 };
 
 const KNOWLEDGE_CHAT_HISTORY_PREFIX = "savant_knowledge_chat_history_";
@@ -159,9 +164,19 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
   const [searchQuery, setSearchQuery] = useState("");
   const [searchTags, setSearchTags] = useState<string[]>([]);
   const [drawerTab, setDrawerTab] = useState<"info" | "ai">("info");
+  const [inspectorWidth, setInspectorWidth] = useState(() => {
+    const stored = Number(localStorage.getItem("savant_knowledge_inspector_width"));
+    return Number.isFinite(stored) && stored >= 320 ? stored : 544;
+  });
+  const [isResizingInspector, setIsResizingInspector] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [lastAthenaRun, setLastAthenaRun] = useState<{
+    persona: string;
+    knowledgeReferences: number;
+    researchReferences: number;
+  } | null>(null);
   const [isThreadBrowserOpen, setIsThreadBrowserOpen] = useState(false);
   const [chatThreads, setChatThreads] = useState<AthenaThread[]>([]);
   const [isLoadingThreads, setIsLoadingThreads] = useState(false);
@@ -180,6 +195,33 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
   const [showInsights, setShowInsights] = useState(false);
   const [rawNodes, setRawNodes] = useState<any[]>([]);
   const [rawEdges, setRawEdges] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!isResizingInspector) return;
+    const handlePointerMove = (event: PointerEvent) => {
+      const maximum = Math.max(320, window.innerWidth * 0.72);
+      setInspectorWidth(Math.min(maximum, Math.max(320, window.innerWidth - event.clientX)));
+    };
+    const handlePointerUp = () => {
+      setIsResizingInspector(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isResizingInspector]);
+
+  useEffect(() => {
+    localStorage.setItem("savant_knowledge_inspector_width", String(Math.round(inspectorWidth)));
+  }, [inspectorWidth]);
 
   useEffect(() => {
     setShowInsights(false);
@@ -335,17 +377,38 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
   };
   const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
     const baseUrl = serverUrl.replace(/\/+$/, "");
-    const [codeHits, knowledgeHits, tools] = await Promise.all([
-      fetchAthenaCodeContext(baseUrl, apiKey, query),
-      fetchAthenaKnowledgeContext(baseUrl, apiKey, query),
-      fetchAthenaMcpTools(baseUrl, apiKey),
-    ]);
+    let persona = "engineer";
+    let personaPrompt = "Engineer persona selected as the safe default.";
+    try {
+      const listedPersonas = await abilitiesService.listPersonas();
+      persona = selectKnowledgeAthenaPersona(query, Array.isArray(listedPersonas) ? listedPersonas : []);
+      const resolution = await abilitiesService.resolve({
+        persona,
+        tags: ["knowledge", "research", "reasoning"],
+        repo_id: "savant-olympus",
+      });
+      personaPrompt = resolution?.prompt || resolution?.compiled_prompt || resolution?.content || personaPrompt;
+    } catch (error) {
+      console.warn("ATHENA persona resolution unavailable; using engineer fallback:", error);
+    }
+
+    // Knowledge is intentionally retrieved first. Source research supplements it second.
+    const knowledgeHits = await fetchAthenaKnowledgeContext(baseUrl, apiKey, query);
+    const codeHits = await fetchAthenaCodeContext(baseUrl, apiKey, query);
+    const tools = await fetchAthenaMcpTools(baseUrl, apiKey);
+    setLastAthenaRun({
+      persona,
+      knowledgeReferences: knowledgeHits.length,
+      researchReferences: codeHits.length,
+    });
 
     return buildAthenaPromptSections([
+      ["RESOLVED SAVANT ABILITIES PERSONA", `Persona: ${persona}\n${personaPrompt}`],
       ["BASE PROMPT", basePrompt],
-      ["RETRIEVED CODE CONTEXT", formatAthenaContextHits(codeHits)],
-      ["RETRIEVED KNOWLEDGE CONTEXT", formatAthenaContextHits(knowledgeHits)],
+      ["PRIMARY SAVANT KNOWLEDGE MCP CONTEXT", formatAthenaContextHits(knowledgeHits)],
+      ["SECONDARY SAVANT RESEARCH MCP CONTEXT", formatAthenaContextHits(codeHits)],
       ["AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools available."],
+      ["REQUIRED RESPONSE SUMMARY", `End the answer with a concise context summary stating: persona ${persona}; Savant Knowledge MCP ${knowledgeHits.length} references; Savant Research MCP ${codeHits.length} references.`],
     ]);
   };
 
@@ -361,6 +424,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
   const baseUrl = serverUrl.replace(/\/+$/, "");
   const knowledgeService = useMemo(() => createKnowledgeService(serverUrl, apiKey), [serverUrl, apiKey]);
   const workspaceService = useMemo(() => createWorkspaceService(serverUrl, apiKey), [serverUrl, apiKey]);
+  const abilitiesService = useMemo(() => createAbilitiesService(serverUrl, apiKey), [serverUrl, apiKey]);
   // Track which nodes have had their labels loaded
   const loadedLabelsRef = useRef<Set<string>>(new Set());
   const nodeLabelsRef = useRef<Map<string, string>>(new Map());
@@ -511,6 +575,21 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
     }
     return "Knowledge chat";
   }, [activeFilteredContext, focalNodes, graphIndex, selectedNode, selectedNodeId]);
+  const selectedChatNodeIds = useMemo(() => {
+    if (activeFilteredContext) return Array.from(focalNodes);
+    if (selectedNodes.size > 0) return Array.from(selectedNodes.keys());
+    const nodeId = selectedNode?.node_id || selectedNode?.id;
+    return nodeId ? [nodeId] : [];
+  }, [activeFilteredContext, focalNodes, selectedNode, selectedNodes]);
+  const chatContextPayload = useMemo(() => buildKnowledgeChatPayload({
+    rawNodes,
+    rawEdges,
+    adjacency: graphIndex.adjacency,
+    selectedNodeIds: selectedChatNodeIds,
+    depth: exploreDepth,
+    filteredContext: activeAthenaContext,
+    showInsights,
+  }), [activeAthenaContext, exploreDepth, graphIndex.adjacency, rawEdges, rawNodes, selectedChatNodeIds, showInsights]);
 
   const loadGraph = async () => {
     if (!svgRef.current || !containerRef.current) return;
@@ -2515,25 +2594,14 @@ const confirmImport = async () => {
         console.error("Failed to load settings:", err);
       }
 
-      const isFilteredChat = Boolean(activeAthenaContext);
-      const adj = graphIndex.adjacency;
-      const distances = isFilteredChat
-        ? new Map(activeAthenaContext!.nodes.map((node) => [node.node_id, 0]))
-        : bfs(new Set([activeNodeId]), exploreDepth, adj);
-      const neighborNodes = (isFilteredChat
-        ? activeAthenaContext!.nodes
-        : rawNodes.filter(n => n.node_id !== activeNodeId && distances.has(n.node_id)))
-        .filter((node) => showInsights || node.node_type !== "insight");
-      const visibleAthenaNodeIds = new Set(neighborNodes.map((node) => node.node_id || node.id));
-      if (!isFilteredChat && activeNodeId) visibleAthenaNodeIds.add(activeNodeId);
-      const neighborEdges = (isFilteredChat
-        ? activeAthenaContext!.edges
-        : rawEdges.filter(e => distances.has(e.source_id) && distances.has(e.target_id)))
-        .filter((edge) => visibleAthenaNodeIds.has(edge.source_id) && visibleAthenaNodeIds.has(edge.target_id));
+      const isFilteredChat = chatContextPayload.isFiltered;
+      const distances = chatContextPayload.distances;
+      const neighborNodes = chatContextPayload.nodes;
+      const neighborEdges = chatContextPayload.edges;
 
       const neighborsText = neighborNodes.map(n => {
         const dist = distances.get(n.node_id);
-        return `- Neighbor Node (Distance: ${dist} hops): ID=${n.node_id}, Title="${n.title || "Untitled"}", Type=${n.node_type.toUpperCase()}, Status=${n.status || "unknown"}, Content="${n.content || ""}"`;
+        return `- Context Node (Distance: ${dist ?? 0} hops): ID=${n.node_id}, Title="${n.title || "Untitled"}", Type=${n.node_type.toUpperCase()}, Status=${n.status || "unknown"}, Content="${n.content || ""}"`;
       }).join("\n");
 
       const edgesText = neighborEdges.map(e =>
@@ -2558,8 +2626,10 @@ The user is asking questions about a node in the Knowledge Graph and its neighbo
 
 [NEIGHBORHOOD SETTINGS]
 - Neighborhood Depth (Hops): ${exploreDepth}
-- Total Neighbor Nodes: ${neighborNodes.length}
+- Explicitly Selected Nodes: ${selectedChatNodeIds.length}
+- Total Context Nodes: ${neighborNodes.length}
 - Total Connection Edges: ${neighborEdges.length}
+- Node Types: ${Object.entries(chatContextPayload.nodeTypes).map(([type, count]) => `${type}=${count}`).join(", ") || "none"}
 
 [NEIGHBORS WITHIN ${exploreDepth} HOPS]
 ${neighborsText || "No adjacent neighbors found within this depth."}
@@ -2936,10 +3006,10 @@ return (
       <div className="flex-1 min-w-0 relative">
       <div
         ref={containerRef}
-        className="absolute top-0 bottom-0 left-0 border border-[var(--cp-border)] bg-[linear-gradient(180deg,rgba(10,14,24,0.96),rgba(16,22,36,0.96))] overflow-hidden transition-[right] duration-200"
+        className={`absolute top-0 bottom-0 left-0 border border-[var(--cp-border)] bg-[linear-gradient(180deg,rgba(10,14,24,0.96),rgba(16,22,36,0.96))] overflow-hidden ${isResizingInspector ? "" : "transition-[right] duration-200"}`}
         style={{
           right: showInspectorRail
-            ? (isInspectorOpen ? "min(34rem, 46vw)" : "2.75rem")
+            ? (isInspectorOpen ? `${inspectorWidth}px` : "2.75rem")
             : 0,
         }}
       >
@@ -2971,9 +3041,27 @@ return (
       </div>
       {showInspectorRail && (
         <div
-          className={`absolute top-0 right-0 bottom-0 ${isInspectorOpen ? "" : "w-11"} border border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex flex-col overflow-hidden z-20 shadow-2xl transition-all duration-200`}
-          style={isInspectorOpen ? { width: "min(34rem, 46vw)" } : undefined}
+          className={`absolute top-0 right-0 bottom-0 ${isInspectorOpen ? "" : "w-11"} border border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex flex-col overflow-hidden z-20 shadow-2xl ${isResizingInspector ? "" : "transition-all duration-200"}`}
+          style={isInspectorOpen ? { width: inspectorWidth } : undefined}
         >
+          {isInspectorOpen && (
+            <div
+              role="separator"
+              aria-label="Resize knowledge details drawer"
+              aria-orientation="vertical"
+              aria-valuemin={320}
+              aria-valuemax={Math.round(window.innerWidth * 0.72)}
+              aria-valuenow={Math.round(inspectorWidth)}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                setIsResizingInspector(true);
+              }}
+              className="absolute inset-y-0 left-0 z-40 w-2 -translate-x-1/2 cursor-col-resize group"
+              title="Drag to resize"
+            >
+              <span className="absolute inset-y-0 left-1/2 w-px bg-[var(--cp-border)] group-hover:bg-[var(--cp-cyan)] group-active:bg-[var(--cp-cyan)]" />
+            </div>
+          )}
           <div className={`flex border-b border-[var(--cp-border)] shrink-0 bg-[var(--cp-bg-2)] ${isInspectorOpen ? "px-4 py-3" : "px-2 py-1.5"} items-center justify-between`}>
             {isInspectorOpen && (
               <span className="text-xs font-mono tracking-widest uppercase font-bold text-[var(--section-label)]">
@@ -3102,10 +3190,14 @@ return (
                       {inferredDomains.map(({ node: domain, distance }) => (
                         <span
                           key={domain.node_id || domain.id}
-                          title={distance === 0 ? "Selected domain" : `Inferred ${distance} hop${distance === 1 ? "" : "s"} away`}
-                          className="text-[9px] font-mono text-violet-300 uppercase bg-violet-950/20 px-1.5 py-0.5 border border-violet-500/25 rounded"
+                          title={distance === 0 ? "Selected domain" : distance === 1 ? "Directly connected domain" : `Secondary domain inferred ${distance} connections away`}
+                          className={`text-[9px] font-mono uppercase px-1.5 py-0.5 border rounded ${
+                            distance <= 1
+                              ? "text-violet-300 bg-violet-950/20 border-violet-500/25"
+                              : "text-yellow-200/75 bg-yellow-950/10 border-yellow-400/20"
+                          }`}
                         >
-                          DOMAIN: {domain.title || domain.node_id}
+                          {distance <= 1 ? "PRIMARY" : "SECONDARY"} DOMAIN: {domain.title || domain.node_id}
                         </span>
                       ))}
                     </div>
@@ -3263,6 +3355,27 @@ return (
             </>
             )) : (
               <div className="flex flex-col h-full overflow-hidden">
+                <div className="shrink-0 border-b border-[var(--cp-border)] bg-[rgba(0,229,255,0.035)] px-3 py-2 font-mono">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[9px] uppercase tracking-widest font-bold text-[var(--cp-cyan)]">Context summary</span>
+                    <span className="text-[9px] text-muted-foreground">
+                      {chatContextPayload.nodes.length} nodes · {chatContextPayload.edges.length} edges · depth {chatContextPayload.depth}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[10px] text-foreground/80 truncate" title={chatContextPayload.selectedNodes.map((node) => node.title || node.node_id).join(", ")}>
+                    Selected: {chatContextPayload.selectedNodes.map((node) => node.title || node.node_id).join(", ") || (activeFilteredContext ? `${selectedChatNodeIds.length} filter selections` : "current graph scope")}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-muted-foreground">
+                    <span>Types: {Object.entries(chatContextPayload.nodeTypes).map(([type, count]) => `${type} ${count}`).join(" · ") || "none"}</span>
+                    {lastAthenaRun && (
+                      <>
+                        <span className="text-violet-300">Persona: {lastAthenaRun.persona}</span>
+                        <span>Knowledge MCP: {lastAthenaRun.knowledgeReferences} refs</span>
+                        <span>Research MCP: {lastAthenaRun.researchReferences} refs</span>
+                      </>
+                    )}
+                  </div>
+                </div>
                 {chatMessages.length > 0 && (
                   <div className="shrink-0 border-b border-[var(--cp-border)] bg-[var(--cp-bg-2)] px-3 py-2 flex items-center justify-between gap-2">
                     <span className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground">Export conversation</span>

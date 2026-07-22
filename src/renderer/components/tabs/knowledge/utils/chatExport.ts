@@ -44,6 +44,8 @@ export function buildAthenaExportDocument(title: string, entries: AthenaExportEn
     pre { overflow-x: auto; padding: 12px; background: #101827; color: #e5edf7; border-radius: 6px; white-space: pre-wrap; }
     code { font-family: "SFMono-Regular", Consolas, monospace; }
     blockquote { margin-left: 0; padding-left: 14px; border-left: 3px solid #94a3b8; color: #475569; }
+    .mermaid { margin: 16px 0; overflow-x: auto; text-align: center; break-inside: avoid; }
+    .mermaid svg { display: inline-block; max-width: 100%; height: auto; }
     @page { size: A4; margin: 14mm; }
     @media print { body { padding: 0; } }
   </style>

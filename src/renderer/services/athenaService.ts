@@ -24,6 +24,7 @@ export const ATHENA_SYSTEM_DIRECTIVE = [
   "Always use Savant Context, Savant Knowledge, and any available Savant MCP tools relevant to the task before answering.",
   "If code or project structure is needed, retrieve it first and ground your response in the retrieved source.",
   "If the task can benefit from a tool, mention the tool you used or would use and why.",
+  "Always put Mermaid diagrams inside a fenced ```mermaid code block so chat and exported documents can render them visually.",
   "Keep all responses fast, concise, and minimal, avoiding long thought processes or reasoning.",
 ].join(" ")
 
