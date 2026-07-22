@@ -122,11 +122,15 @@ function ServicePanel({
   apiKey?: string;
   includeApiKey?: boolean;
 }) {
+  const [serviceVersion, setServiceVersion] = useState<string | null>(null);
+
   async function checkHealth() {
     onChange({ status: "checking" });
+    setServiceVersion(null);
     try {
-      const online = await runtimeService.checkHealth(config.url, healthPath, includeApiKey ? apiKey : "", 4_000);
-      onChange({ status: online ? "connected" : "failed" });
+      const health = await runtimeService.checkHealthInfo(config.url, healthPath, includeApiKey ? apiKey : "", 4_000);
+      setServiceVersion(health.online ? health.version || null : null);
+      onChange({ status: health.online ? "connected" : "failed" });
     } catch (_e) {
       onChange({ status: "failed" });
     }
@@ -211,6 +215,11 @@ function ServicePanel({
               {config.status === "checking" ? "checking..." : config.status}
             </span>
           </div>
+        )}
+        {config.status === "connected" && serviceVersion && (
+          <span className="text-xs" style={{ color: "var(--foreground)", fontFamily: "'Share Tech Mono', monospace" }}>
+            SERVER v{serviceVersion}
+          </span>
         )}
       </div>
     </div>

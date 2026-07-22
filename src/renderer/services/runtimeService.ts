@@ -13,11 +13,21 @@ async function timedFetch(url: string, init: RequestInit = {}, timeoutMs = 1_500
 }
 
 export class RuntimeService {
-  async checkHealth(baseUrl: string, healthPath: string, apiKey = "", timeoutMs = 4_000): Promise<boolean> {
+  async checkHealthInfo(baseUrl: string, healthPath: string, apiKey = "", timeoutMs = 4_000): Promise<{ online: boolean; version?: string }> {
     const response = await timedFetch(`${normalizeBaseUrl(baseUrl)}${healthPath}`, {
       headers: apiKey ? buildAuthHeaders(apiKey, "") : APP_HEADERS,
     }, timeoutMs);
-    return response.ok;
+    let payload: any = {};
+    try {
+      payload = await response.json();
+    } catch {
+      // Some gateway health endpoints return an empty response.
+    }
+    return { online: response.ok, version: typeof payload?.version === "string" ? payload.version : undefined };
+  }
+
+  async checkHealth(baseUrl: string, healthPath: string, apiKey = "", timeoutMs = 4_000): Promise<boolean> {
+    return (await this.checkHealthInfo(baseUrl, healthPath, apiKey, timeoutMs)).online;
   }
 
   checkGateway(gatewayUrl: string, timeoutMs = 1_500): Promise<boolean> {
