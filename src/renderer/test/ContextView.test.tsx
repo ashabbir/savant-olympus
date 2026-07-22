@@ -22,6 +22,24 @@ describe('ContextView - Sync Audit Trail', () => {
     expect(formatted).toMatch(/20/)
     expect(formatted).toMatch(/:/)
   })
+
+  it('filters execution logs to the opened project', async () => {
+    vi.spyOn(window, 'fetch').mockImplementation((url) => {
+      const u = url.toString()
+      if (u.endsWith('/api/context/repos')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ repos: [{ name: 'opened-project', path: '/base-code/opened-project' }] }) } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ logs: [], status: {} }) } as Response)
+    })
+
+    render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject="opened-project" isAdmin={true} />)
+
+    await waitFor(() => {
+      expect(vi.mocked(window.fetch).mock.calls.some(([url]) =>
+        url.toString().includes('/periodic-sync/logs?repo_name=opened-project&limit=10'),
+      )).toBe(true)
+    })
+  })
 })
 
 describe('ContextView - FileBrowserModal Integration', () => {
@@ -198,6 +216,28 @@ describe('ContextView - FileBrowserModal Integration', () => {
       expect(addCall).toBeDefined()
       expect(JSON.parse(String(addCall?.[1]?.body))).toEqual({ source: 'github', url: 'git@github.com:acme/repo.git' })
     })
+  })
+
+  it('shows repository registration progress while the server downloads the project', async () => {
+    vi.mocked(window.fetch).mockImplementation((url, options) => {
+      const u = url.toString()
+      if (u.includes('/api/context/repos/sources')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sources: { gitlab: { enabled: true } } }) } as Response)
+      }
+      if (u.endsWith('/api/context/repos') && options?.method === 'POST') {
+        return new Promise<Response>(() => {})
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ repos: [] }) } as Response)
+    })
+
+    render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject={null} isAdmin={true} />)
+    fireEvent.click(screen.getByText(/REGISTER REPOSITORY/i))
+    const input = await screen.findByPlaceholderText("git@gitlab.com:group/repo.git")
+    fireEvent.change(input, { target: { value: "https://gitlab.example.org/group/public-repo.git" } })
+    fireEvent.click(screen.getByText("REGISTER PROJECT"))
+
+    expect(await screen.findByText("CHECKING ACCESS...")).toBeInTheDocument()
+    expect(screen.getByText(/anonymous fallback for public repositories/i)).toBeInTheDocument()
   })
 
   it('filters the project tree with full-text search as the user types', async () => {

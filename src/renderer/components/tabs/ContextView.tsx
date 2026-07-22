@@ -94,7 +94,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     try {
       const [statusRes, logsRes] = await Promise.all([
         contextService.getPeriodicSyncStatus().catch(() => null),
-        contextService.getPeriodicSyncLogs(undefined, 10).catch(() => ({ logs: [] })),
+        contextService.getPeriodicSyncLogs(selectedProject || undefined, 10).catch(() => ({ logs: [] })),
       ]);
       if (statusRes) setPeriodicStatus(statusRes);
       if (logsRes?.logs) setPeriodicLogs(sortSyncLogsNewestFirst(logsRes.logs));
@@ -103,7 +103,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     } finally {
       setIsLoadingSyncLogs(false);
     }
-  }, [contextService]);
+  }, [contextService, selectedProject]);
 
   useEffect(() => {
     fetchPeriodicSyncData();
@@ -406,6 +406,20 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const [dirPath, setDirPath] = useState("");
   const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [addProgressStage, setAddProgressStage] = useState("PREPARING...");
+
+  useEffect(() => {
+    if (!isSubmittingAdd) return;
+
+    const stages = selectedSource === "directory"
+      ? ["VALIDATING DIRECTORY...", "REGISTERING PROJECT..."]
+      : ["CHECKING ACCESS...", "DOWNLOADING REPOSITORY...", "REGISTERING PROJECT..."];
+    setAddProgressStage(stages[0]);
+    const timers = stages.slice(1).map((stage, index) =>
+      window.setTimeout(() => setAddProgressStage(stage), (index + 1) * 1200),
+    );
+    return () => timers.forEach(window.clearTimeout);
+  }, [isSubmittingAdd, selectedSource]);
 
   const normalizeFsPath = (input: string) => {
     return String(input || "").replace(/\\/g, "/").replace(/\/+$/, "");
@@ -1335,7 +1349,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                       required
                     />
                     <p className="text-[9px] text-muted-foreground font-mono mt-1 opacity-70">
-                      Savant downloads and authenticates the repository on the server.
+                      Savant downloads the repository on the server using configured credentials, with anonymous fallback for public repositories.
                     </p>
                   </div>
                 </div>
@@ -1354,7 +1368,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   className="flex-1 py-2 text-xs bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold hover:opacity-90 cursor-pointer"
                   disabled={isSubmittingAdd || !sources || !Object.values(sources).some((cfg: any) => cfg?.enabled)}
                 >
-                  {isSubmittingAdd ? "PREPARING..." : "REGISTER PROJECT"}
+                  {isSubmittingAdd ? addProgressStage : "REGISTER PROJECT"}
                 </button>
               </div>
             </form>
