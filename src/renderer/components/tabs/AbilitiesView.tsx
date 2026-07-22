@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Cpu, Save, Plus, Trash2, Shield, RefreshCcw, Sparkles, Folder, FileText, Check, ChevronLeft, ChevronRight } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { Cpu, Save, Plus, Trash2, Shield, RefreshCcw, Sparkles, Folder, FileText, Check, ChevronLeft, ChevronRight, Download, Upload, PackageOpen } from "lucide-react";
 import { createAbilitiesService } from "../../services/abilitiesService";
 import { SearchBar } from "../shared/SearchBar";
 import { ViewHeader } from "../shared/ViewHeader";
@@ -35,6 +35,10 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
     "type:persona": true,
     "type:rule": true,
   });
+  const archiveInputRef = useRef<HTMLInputElement>(null);
+  const [archiveAction, setArchiveAction] = useState<"zip" | "tar" | "import" | null>(null);
+  const [archiveError, setArchiveError] = useState("");
+  const [importReceipt, setImportReceipt] = useState<{ imported_count: number; skipped_count: number } | null>(null);
 
   const abilitiesService = createAbilitiesService(serverUrl, apiKey);
 
@@ -220,6 +224,41 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
     }
   };
 
+  const handleExportArchive = async (format: "zip" | "tar") => {
+    setArchiveAction(format);
+    setArchiveError("");
+    try {
+      const archive = await abilitiesService.exportArchive(format);
+      const url = URL.createObjectURL(archive.blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = archive.filename;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setArchiveError(e?.message || "Could not create the migration package.");
+    } finally {
+      setArchiveAction(null);
+    }
+  };
+
+  const handleImportArchive = async (file?: File) => {
+    if (!file) return;
+    setArchiveAction("import");
+    setArchiveError("");
+    setImportReceipt(null);
+    try {
+      const receipt = await abilitiesService.importArchive(file);
+      setImportReceipt(receipt);
+      await fetchAssets();
+    } catch (e: any) {
+      setArchiveError(e?.message || "Could not import the migration package.");
+    } finally {
+      setArchiveAction(null);
+      if (archiveInputRef.current) archiveInputRef.current.value = "";
+    }
+  };
+
   useEffect(() => {
     const handleVal = () => handleValidate();
     const handleBoot = () => handleBootstrap();
@@ -280,6 +319,61 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
           <p className="text-xs text-muted-foreground opacity-60">System abilities & custom AI prompt builder</p>
         </div>
       </div>
+
+      <section className="border border-[var(--cp-border)] bg-[var(--cp-bg-1)] px-3 py-2.5 flex flex-col lg:flex-row lg:items-center gap-3" aria-label="Ability migration package">
+        <div className="flex items-center gap-2 min-w-0 lg:mr-auto">
+          <div className="h-8 w-8 shrink-0 border border-[var(--cp-cyan)]/30 bg-[var(--cp-cyan)]/5 text-[var(--cp-cyan)] flex items-center justify-center">
+            <PackageOpen size={16} />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-[11px] font-bold font-mono text-foreground uppercase tracking-wider">Migration package</h3>
+            <p className="text-[10px] text-muted-foreground font-mono truncate">Preserves the abilities directory tree. Import adds missing files and safely skips existing paths.</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleExportArchive("zip")}
+            disabled={archiveAction !== null}
+            className="px-2.5 py-1.5 border border-[var(--cp-border)] text-[10px] font-mono text-foreground hover:border-[var(--cp-cyan)] hover:text-[var(--cp-cyan)] disabled:opacity-50 flex items-center gap-1.5"
+          >
+            <Download size={11} /> {archiveAction === "zip" ? "PACKING ZIP..." : "DOWNLOAD ZIP"}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExportArchive("tar")}
+            disabled={archiveAction !== null}
+            className="px-2.5 py-1.5 border border-[var(--cp-border)] text-[10px] font-mono text-foreground hover:border-[var(--cp-cyan)] hover:text-[var(--cp-cyan)] disabled:opacity-50 flex items-center gap-1.5"
+          >
+            <Download size={11} /> {archiveAction === "tar" ? "PACKING TAR..." : "DOWNLOAD TAR"}
+          </button>
+          {isAdmin && (
+            <>
+              <input
+                ref={archiveInputRef}
+                type="file"
+                accept=".zip,.tar,application/zip,application/x-tar"
+                className="hidden"
+                aria-label="Choose abilities archive"
+                onChange={(event) => handleImportArchive(event.target.files?.[0])}
+              />
+              <button
+                type="button"
+                onClick={() => archiveInputRef.current?.click()}
+                disabled={archiveAction !== null}
+                className="px-2.5 py-1.5 border border-[var(--cp-cyan)]/50 bg-[var(--cp-cyan)]/5 text-[10px] font-mono text-[var(--cp-cyan)] hover:bg-[var(--cp-cyan)]/10 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                <Upload size={11} /> {archiveAction === "import" ? "IMPORTING..." : "IMPORT PACKAGE"}
+              </button>
+            </>
+          )}
+        </div>
+        {(importReceipt || archiveError) && (
+          <div className={`text-[10px] font-mono lg:border-l lg:pl-3 ${archiveError ? "text-red-400 border-red-500/30" : "text-emerald-400 border-emerald-500/30"}`} role="status">
+            {archiveError || `${importReceipt?.imported_count || 0} added · ${importReceipt?.skipped_count || 0} existing/unsupported skipped`}
+          </div>
+        )}
+      </section>
 
       <div className="flex-1 flex gap-4 overflow-hidden">
         {/* Left Side: Asset Browser */}

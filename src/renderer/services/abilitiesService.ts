@@ -1,4 +1,4 @@
-import { SavantHttpClient } from "./httpClient";
+import { buildAuthHeaders, SavantHttpClient } from "./httpClient";
 
 export interface AbilityPayload {
   name: string;
@@ -21,8 +21,19 @@ export interface AbilityAssetPayload {
 export class AbilitiesService {
   private client: SavantHttpClient;
 
-  constructor(baseUrl = "http://127.0.0.1:8090", apiKey = "") {
+  constructor(baseUrl = "http://127.0.0.1:8090", private readonly apiKey = "") {
     this.client = new SavantHttpClient(baseUrl, apiKey);
+  }
+
+  private async archiveError(response: Response): Promise<never> {
+    let message = response.statusText || `HTTP ${response.status}`;
+    try {
+      const payload = await response.json();
+      message = payload.error || payload.message || message;
+    } catch {
+      // Status text is the best available detail.
+    }
+    throw new Error(message);
   }
 
   async listAbilities(): Promise<any[]> {
@@ -75,6 +86,32 @@ export class AbilitiesService {
 
   validate(): Promise<{ ok: boolean; error?: string }> {
     return this.client.request("/api/abilities/validate");
+  }
+
+  async exportArchive(format: "zip" | "tar"): Promise<{ blob: Blob; filename: string; count: number }> {
+    const response = await fetch(`${this.client.baseUrl}/api/abilities/export?format=${format}`, {
+      headers: buildAuthHeaders(this.apiKey, ""),
+    });
+    if (!response.ok) return this.archiveError(response);
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || `savant-abilities.${format}`;
+    return {
+      blob: await response.blob(),
+      filename,
+      count: Number(response.headers.get("X-Abilities-Count") || 0),
+    };
+  }
+
+  async importArchive(file: File): Promise<any> {
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch(`${this.client.baseUrl}/api/abilities/import`, {
+      method: "POST",
+      headers: buildAuthHeaders(this.apiKey, ""),
+      body: form,
+    });
+    if (!response.ok) return this.archiveError(response);
+    return response.json();
   }
 }
 

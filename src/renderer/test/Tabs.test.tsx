@@ -642,6 +642,53 @@ describe('AbilitiesView Component', () => {
       expect(screen.queryByText('NEW ABILITY ASSET')).not.toBeInTheDocument()
     })
   })
+
+  it('downloads ZIP or TAR migration packages and imports without overwriting existing files', async () => {
+    const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = []
+    vi.mocked(window.fetch).mockImplementation((url, options) => {
+      calls.push([url, options])
+      const u = url.toString()
+      if (u.includes('/api/abilities/export')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'Content-Disposition': 'attachment; filename="savant-abilities.zip"', 'X-Abilities-Count': '2' }),
+          blob: () => Promise.resolve(new Blob(['archive'])),
+        } as Response)
+      }
+      if (u.includes('/api/abilities/import')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ imported_count: 3, skipped_count: 2 }),
+        } as Response)
+      }
+      if (u.includes('/api/abilities/assets')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ persona: [], rule: [] }) } as Response)
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) } as Response)
+    })
+    const createObjectURL = vi.fn(() => 'blob:abilities')
+    const revokeObjectURL = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
+
+    const { AbilitiesView } = await import('../components/tabs/AbilitiesView')
+    render(<AbilitiesView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /download zip/i }))
+    await waitFor(() => expect(calls.some(([url]) => url.toString().endsWith('/api/abilities/export?format=zip'))).toBe(true))
+
+    fireEvent.click(screen.getByRole('button', { name: /download tar/i }))
+    await waitFor(() => expect(calls.some(([url]) => url.toString().endsWith('/api/abilities/export?format=tar'))).toBe(true))
+
+    const archive = new File(['zip'], 'migration.zip', { type: 'application/zip' })
+    fireEvent.change(screen.getByLabelText(/choose abilities archive/i), { target: { files: [archive] } })
+
+    expect(await screen.findByText(/3 added · 2 existing\/unsupported skipped/i)).toBeInTheDocument()
+    const importCall = calls.find(([url]) => url.toString().endsWith('/api/abilities/import'))
+    expect(importCall?.[1]?.body).toBeInstanceOf(FormData)
+  })
 })
 
 
