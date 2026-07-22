@@ -136,8 +136,8 @@ describe('ContextView - Code Graph Integration', () => {
     expect(screen.getByText('4217')).toBeInTheDocument()
     expect(screen.getByText('SEMANTIC: DONE')).toBeInTheDocument()
     expect(screen.getByText('STRUCTURAL: STALE')).toBeInTheDocument()
-    expect(screen.getByText(/Last Graph Generated:/)).toBeInTheDocument()
-    expect(screen.getByText(/Last Fetched:/)).toBeInTheDocument()
+    expect(screen.getByText('Last Graph Generated')).toBeInTheDocument()
+    expect(screen.getByText('Last Fetched')).toBeInTheDocument()
     expect(screen.queryByText('SELECT GRAPHIFY DIR')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByText('GENERATE GRAPH'))
