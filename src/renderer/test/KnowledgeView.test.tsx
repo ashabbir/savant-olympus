@@ -565,6 +565,23 @@ describe('KnowledgeView', () => {
     await waitFor(() => expect(window.fetch).toHaveBeenCalledWith('http://savant.local/api/knowledge/purge-workspace', expect.objectContaining({ method: 'POST' })))
   })
 
+  it('shows operation and organization filters when those node types are present', async () => {
+    currentGraphPayload = {
+      nodes: [
+        ...graphPayload.nodes,
+        { node_id: 'op1', title: 'Incident Response', node_type: 'operation', content: '', status: 'committed', metadata: {} },
+        { node_id: 'org1', title: 'Platform Team', node_type: 'organization', content: '', status: 'committed', metadata: {} },
+      ],
+      edges: graphPayload.edges,
+    }
+
+    render(<KnowledgeView serverUrl="http://savant.local" apiKey="sk-test" />)
+    await screen.findByText('Knowledge Network')
+
+    expect(await screen.findByRole('button', { name: /operations/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /organizations/i })).toBeInTheDocument()
+  })
+
   it('allows selecting multiple domains from the left filter', async () => {
     const defaultFetch = vi.mocked(window.fetch).getMockImplementation()!
     vi.mocked(window.fetch).mockImplementation((url, init) => {

@@ -79,6 +79,8 @@ const KNOWLEDGE_NODE_TYPES = [
   "person",
   "session",
   "issue",
+  "operation",
+  "organization",
   "insight",
 ];
 
@@ -198,6 +200,15 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
     });
     return sorted;
   }, [graphIndex]);
+  const presentNodeTypes = useMemo(() => {
+    const present = new Set(
+      rawNodes
+        .map((node) => typeof node.node_type === "string" ? node.node_type.trim() : "")
+        .filter(Boolean),
+    );
+    const knownPresent = KNOWLEDGE_NODE_TYPES.filter((nodeType) => present.delete(nodeType));
+    return [...knownPresent, ...Array.from(present).sort()];
+  }, [rawNodes]);
   const nodePositionByType = useMemo(() => {
     const positions = new Map<string, Map<string, number>>();
     sortedNodesByType.forEach((nodes, nodeType) => {
@@ -389,7 +400,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
     };
     const visibleIds = intersect([...reachByType.values()]);
     const allowedByType = new Map<string, Set<string> | null>();
-    for (const nodeType of KNOWLEDGE_NODE_TYPES) {
+    for (const nodeType of presentNodeTypes) {
       allowedByType.set(
         nodeType,
         intersect(activeEntries
@@ -403,12 +414,12 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
           .sort((left, right) => (left.title || left.node_id).localeCompare(right.title || right.node_id))
       : [];
     return { activeEntries, allowedByType, visibleIds, visibleNodes };
-  }, [exploreDepth, focalsByType, graphIndex, rawNodes]);
+  }, [exploreDepth, focalsByType, graphIndex, presentNodeTypes, rawNodes]);
 
   const sidebarNodesByType = useMemo(() => {
     const result = new Map<string, any[]>();
     const query = filterSearch.trim().toLowerCase();
-    for (const nodeType of KNOWLEDGE_NODE_TYPES) {
+    for (const nodeType of presentNodeTypes) {
       const allTypeNodes = sortedNodesByType.get(nodeType) || [];
       const allowed = filterReachability.allowedByType.get(nodeType) || null;
       const selectedInType = focalsByType[nodeType];
@@ -423,7 +434,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
       result.set(nodeType, typeNodes);
     }
     return result;
-  }, [filterReachability, filterSearch, focalsByType, sortedNodesByType]);
+  }, [filterReachability, filterSearch, focalsByType, presentNodeTypes, sortedNodesByType]);
 
   const filteredContext = useMemo(() => {
     const visibleIds = filterReachability.visibleIds;
@@ -2798,7 +2809,7 @@ return (
           return (
             <>
               {/* Per-type filter panels — one panel per node type present in the graph */}
-              {KNOWLEDGE_NODE_TYPES.map((nodeType) => {
+              {presentNodeTypes.map((nodeType) => {
                 const allTypeNodes = sortedNodesByType.get(nodeType) || [];
                 if (allTypeNodes.length === 0) return null;
                 const allowed = allowedForPanel(nodeType);
