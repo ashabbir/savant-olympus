@@ -5,7 +5,7 @@ import {
   Download, Code, FileText, Check, Sparkles, AlertTriangle, 
   Play, RefreshCcw, Save, HelpCircle, ChevronLeft, ChevronRight, X, Copy
 } from "lucide-react";
-import { buildAthenaPromptSections, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits } from "@/lib/athenaContext";
+import { buildAthenaAugmentedPrompt as compileAthenaAugmentedPrompt } from "@/lib/athenaContext";
 import { createSkillsService } from "@/services/skillsService";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
 import { ModalBackdrop } from "@/components/shared/ModalBackdrop";
@@ -295,18 +295,11 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
     removeChatMessage(id);
   };
   const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
-    const [codeHits, knowledgeHits, tools] = await Promise.all([
-      fetchAthenaCodeContext(baseUrl, apiKey, query),
-      fetchAthenaKnowledgeContext(baseUrl, apiKey, query),
-      fetchAthenaMcpTools(baseUrl, apiKey),
-    ]);
-
-    return buildAthenaPromptSections([
-      ["BASE PROMPT", basePrompt],
-      ["RETRIEVED CODE CONTEXT", formatAthenaContextHits(codeHits)],
-      ["RETRIEVED KNOWLEDGE CONTEXT", formatAthenaContextHits(knowledgeHits)],
-      ["AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools available."],
-    ]);
+    return compileAthenaAugmentedPrompt(basePrompt, query, {
+      baseUrl,
+      apiKey,
+      repo: "savant-olympus",
+    });
   };
 
   // Load initial skills

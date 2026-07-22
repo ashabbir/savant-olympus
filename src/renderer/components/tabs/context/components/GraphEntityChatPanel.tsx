@@ -3,11 +3,8 @@ import { Loader2, Sparkles } from "lucide-react";
 import { AthenaMessage, AthenaMessageModel } from "@/components/shared/AthenaMessage";
 import { AthenaThreadStore, useAthenaThread } from "@/hooks/useAthenaThread";
 import {
-  buildAthenaPromptSections,
-  fetchAthenaCodeContext,
-  fetchAthenaKnowledgeContext,
-  fetchAthenaMcpTools,
-  formatAthenaContextHits,
+  buildAthenaAugmentedPrompt,
+  ensureAthenaMcpSummary,
 } from "@/lib/athenaContext";
 
 export interface GraphEntityChatTarget {
@@ -55,20 +52,6 @@ export function GraphEntityChatPanel({ node, repoName, serverUrl, apiKey, active
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isThinking]);
 
-  const buildPrompt = async (basePrompt: string, query: string) => {
-    const [codeHits, knowledgeHits, tools] = await Promise.all([
-      fetchAthenaCodeContext(serverUrl, apiKey, query, repoName),
-      fetchAthenaKnowledgeContext(serverUrl, apiKey, query),
-      fetchAthenaMcpTools(serverUrl, apiKey),
-    ]);
-    return buildAthenaPromptSections([
-      ["BASE PROMPT", basePrompt],
-      ["RETRIEVED CODE CONTEXT", formatAthenaContextHits(codeHits)],
-      ["RETRIEVED KNOWLEDGE CONTEXT", formatAthenaContextHits(knowledgeHits)],
-      ["AVAILABLE SAVANT MCP TOOLS", tools.length ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools available."],
-    ]);
-  };
-
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || isThinking) return;
@@ -98,11 +81,17 @@ ${history.slice(0, -1).map((message) => `${message.sender === "user" ? "User" : 
 ${trimmed}
 
 Explain how this entity fits into the repository, its dependencies and relationships, and suggest relevant code or architectural improvements. Use Savant MCP tools when they can provide stronger evidence.`;
-      const response = await window.ipcRenderer.invoke("run-agent", {
+      const augmentedPrompt = await buildAthenaAugmentedPrompt(prompt, `${node.title} ${trimmed} ${node.content || ""}`, {
+        baseUrl: serverUrl,
+        apiKey,
+        repo: repoName,
+      });
+      const rawResponse = await window.ipcRenderer.invoke("run-agent", {
         provider,
         model,
-        prompt: await buildPrompt(prompt, `${node.title} ${trimmed} ${node.content || ""}`),
+        prompt: augmentedPrompt,
       });
+      const response = ensureAthenaMcpSummary(rawResponse || "No response received from the gateway.", augmentedPrompt);
       setMessages([...history, { id: crypto.randomUUID(), sender: "assistant", text: response || "No response received from the gateway.", timestamp: new Date().toISOString() }]);
     } catch (error: any) {
       setMessages([...history, { id: crypto.randomUUID(), sender: "assistant", text: `Error calling ATHENA agent: ${error.message || "Unknown error"}. Make sure Savant Gateway is running.`, timestamp: new Date().toISOString() }]);

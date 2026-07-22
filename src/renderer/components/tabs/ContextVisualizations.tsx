@@ -3,7 +3,7 @@ import * as d3 from "d3";
 import { Folder, FileCode, CheckCircle, Database, AlertTriangle, Square, Trash, Zap, Clock, Info, ShieldAlert, FileText, ChevronRight, ChevronDown, Layers, HelpCircle, MessageSquare, Send, Sparkles, Trash2, Loader2, Copy } from "lucide-react";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
 import { useAthenaThread } from "@/hooks/useAthenaThread";
-import { buildAthenaAugmentedPrompt as compileAthenaAugmentedPrompt } from "@/services/athenaService";
+import { buildAthenaAugmentedPrompt as compileAthenaAugmentedPrompt, ensureAthenaMcpSummary } from "@/services/athenaService";
 import { ASTNode, ComplexityFunction, ComplexityFile, CodeDoc, Finding, AnalysisResults } from "./context/types";
 import { computeAstComplexity, complexityColor } from "./context/utils/complexityUtils";
 import { analyzeProjectSource } from "./context/utils/heuristicsEngine";
@@ -582,15 +582,17 @@ You have access to a variety of Savant MCP tools. Use them to investigate code, 
 Always prefer using a tool if it can provide more accurate or deep information.
 `;
 
-      const response = await window.system.runAgentViaGateway({
+      const augmentedPrompt = await compileAthenaAugmentedPrompt(prompt, `${repoName} ${textToSend} ${analysisSummary}`, {
+        baseUrl: serverUrl,
+        apiKey,
+        repo: repoName,
+      });
+      const rawResponse = await window.system.runAgentViaGateway({
         provider,
         model,
-        prompt: await compileAthenaAugmentedPrompt(prompt, `${repoName} ${textToSend} ${analysisSummary}`, {
-          baseUrl: serverUrl,
-          apiKey,
-          repo: repoName,
-        }),
+        prompt: augmentedPrompt,
       });
+      const response = ensureAthenaMcpSummary(rawResponse || "No response from ATHENA.", augmentedPrompt);
 
       const aiMsg: ChatMessage = {
         id: Math.random().toString(),

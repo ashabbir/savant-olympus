@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Copy, Trash, Trash2, Sparkles, Loader2, ChevronRight, ChevronDown } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { buildAthenaAugmentedPrompt as compileAthenaAugmentedPrompt } from "@/services/athenaService";
+import { buildAthenaAugmentedPrompt as compileAthenaAugmentedPrompt, ensureAthenaMcpSummary } from "@/services/athenaService";
 import { Finding } from "../types";
 
 interface ChatMessage {
@@ -243,15 +243,17 @@ You have access to a variety of Savant MCP tools. Use them to investigate code, 
 Always prefer using a tool if it can provide more accurate or deep information.
 `;
 
-      const responseText = await window.system.runAgentViaGateway({
+      const augmentedPrompt = await compileAthenaAugmentedPrompt(contextPrompt, `${name} ${textToSend} ${filePath || ""}`, {
+        baseUrl: serverUrl,
+        apiKey,
+        repo: repoName,
+      });
+      const rawResponseText = await window.system.runAgentViaGateway({
         provider,
         model,
-        prompt: await compileAthenaAugmentedPrompt(contextPrompt, `${name} ${textToSend} ${filePath || ""}`, {
-          baseUrl: serverUrl,
-          apiKey,
-          repo: repoName,
-        }),
+        prompt: augmentedPrompt,
       });
+      const responseText = ensureAthenaMcpSummary(rawResponseText || "No response from ATHENA.", augmentedPrompt);
 
       const newAiMessage: ChatMessage = {
         id: Math.random().toString(),

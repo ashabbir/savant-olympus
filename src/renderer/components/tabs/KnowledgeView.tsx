@@ -5,8 +5,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
 import { createKnowledgeService } from "@/services/knowledgeService";
 import { createWorkspaceService } from "@/services/workspaceService";
-import { createAbilitiesService } from "@/services/abilitiesService";
-import { buildAthenaPromptSections, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits } from "@/lib/athenaContext";
+import { buildAthenaPromptSections, buildAthenaResearchQuery, ensureAthenaMcpSummary, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits, requiresAthenaImpactAnalysis, resolveAthenaAbility } from "@/lib/athenaContext";
 import {
   Node,
   Edge,
@@ -377,25 +376,15 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
   };
   const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
     const baseUrl = serverUrl.replace(/\/+$/, "");
-    let persona = "engineer";
-    let personaPrompt = "Engineer persona selected as the safe default.";
-    try {
-      const listedPersonas = await abilitiesService.listPersonas();
-      persona = selectKnowledgeAthenaPersona(query, Array.isArray(listedPersonas) ? listedPersonas : []);
-      const resolution = await abilitiesService.resolve({
-        persona,
-        tags: ["knowledge", "research", "reasoning"],
-        repo_id: "savant-olympus",
-      });
-      personaPrompt = resolution?.prompt || resolution?.compiled_prompt || resolution?.content || personaPrompt;
-    } catch (error) {
-      console.warn("ATHENA persona resolution unavailable; using engineer fallback:", error);
-    }
+    const ability = await resolveAthenaAbility(baseUrl, apiKey, query);
+    const { persona } = ability;
 
     // Knowledge is intentionally retrieved first. Source research supplements it second.
     const knowledgeHits = await fetchAthenaKnowledgeContext(baseUrl, apiKey, query);
-    const codeHits = await fetchAthenaCodeContext(baseUrl, apiKey, query);
+    const researchQuery = buildAthenaResearchQuery(query);
+    const codeHits = await fetchAthenaCodeContext(baseUrl, apiKey, researchQuery);
     const tools = await fetchAthenaMcpTools(baseUrl, apiKey);
+    const impactSearched = requiresAthenaImpactAnalysis(query);
     setLastAthenaRun({
       persona,
       knowledgeReferences: knowledgeHits.length,
@@ -403,12 +392,13 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
     });
 
     return buildAthenaPromptSections([
-      ["RESOLVED SAVANT ABILITIES PERSONA", `Persona: ${persona}\n${personaPrompt}`],
+      ["RESOLVED SAVANT ABILITIES PERSONA", `Persona: ${persona}\n${ability.prompt}`],
       ["BASE PROMPT", basePrompt],
       ["PRIMARY SAVANT KNOWLEDGE MCP CONTEXT", formatAthenaContextHits(knowledgeHits)],
       ["SECONDARY SAVANT RESEARCH MCP CONTEXT", formatAthenaContextHits(codeHits)],
-      ["AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools available."],
-      ["REQUIRED RESPONSE SUMMARY", `End the answer with a concise context summary stating: persona ${persona}; Savant Knowledge MCP ${knowledgeHits.length} references; Savant Research MCP ${codeHits.length} references.`],
+      ["UPSTREAM AND DOWNSTREAM IMPACT SEARCH", impactSearched ? `Performed using research query: ${researchQuery}` : "Not required for this question."],
+      ["ADDITIONAL AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No additional catalogued tools; Savant Abilities, Knowledge, and Research results above are available MCP evidence."],
+      ["REQUIRED MCP SUMMARY", `- Persona: ${persona}\n- Savant Abilities: used\n- Savant Knowledge MCP: ${knowledgeHits.length} references\n- Savant Research MCP: ${codeHits.length} references\n- Upstream/downstream impact search: ${impactSearched ? "performed" : "not required"}`],
     ]);
   };
 
@@ -424,7 +414,6 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
   const baseUrl = serverUrl.replace(/\/+$/, "");
   const knowledgeService = useMemo(() => createKnowledgeService(serverUrl, apiKey), [serverUrl, apiKey]);
   const workspaceService = useMemo(() => createWorkspaceService(serverUrl, apiKey), [serverUrl, apiKey]);
-  const abilitiesService = useMemo(() => createAbilitiesService(serverUrl, apiKey), [serverUrl, apiKey]);
   // Track which nodes have had their labels loaded
   const loadedLabelsRef = useRef<Set<string>>(new Set());
   const nodeLabelsRef = useRef<Map<string, string>>(new Map());
@@ -2648,16 +2637,18 @@ ${userText}
 
 Please analyze the node information, the neighboring nodes, and the connection edges, and provide a helpful, technical response answering the user's question.`;
 
-      const responseText = await window.ipcRenderer.invoke("run-agent", {
+      const augmentedPrompt = await buildAthenaAugmentedPrompt(
+        promptPayload,
+        isFilteredChat
+          ? `${neighborNodes.map((node) => `${node.title || ""} ${node.content || ""}`).join(" ")} ${userText}`
+          : `${activeNode?.title || ""} ${userText} ${activeNode?.content || ""}`
+      );
+      const rawResponseText = await window.ipcRenderer.invoke("run-agent", {
         provider,
         model,
-        prompt: await buildAthenaAugmentedPrompt(
-          promptPayload,
-          isFilteredChat
-            ? `${neighborNodes.map((node) => `${node.title || ""} ${node.content || ""}`).join(" ")} ${userText}`
-            : `${activeNode?.title || ""} ${userText} ${activeNode?.content || ""}`
-        )
+        prompt: augmentedPrompt,
       });
+      const responseText = ensureAthenaMcpSummary(rawResponseText || "No response received from the gateway.", augmentedPrompt);
 
       const latestStored = localStorage.getItem(key);
       let latestMessages: ChatMessage[] = updatedMessages;
