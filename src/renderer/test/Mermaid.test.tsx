@@ -61,5 +61,10 @@ This is the cleanest read of the node neighborhood.`
 
     expect(html).toContain('<svg aria-label="knowledge diagram">')
     expect(html).toContain('.mermaid svg')
+    expect(html).toContain('SAVANT</div>')
+    expect(html).toContain('Olympus · Athena export')
+    expect(html).toContain('<footer class="savant-footer">')
+    expect(html).toContain('.message.user { margin-left: auto; margin-right: 0;')
+    expect(html).toContain('.message.assistant { margin-left: 0; margin-right: auto;')
   })
 })
