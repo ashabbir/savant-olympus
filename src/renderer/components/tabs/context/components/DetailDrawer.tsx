@@ -19,7 +19,9 @@ export function DetailDrawer({
   findings = [],
   repoName,
   serverUrl = "http://127.0.0.1:3100",
-  apiKey = ""
+  apiKey = "",
+  visualization = "Complexity Tree",
+  screenContext,
 }: {
   selectedNode: any;
   isOpen: boolean;
@@ -29,6 +31,8 @@ export function DetailDrawer({
   repoName: string;
   serverUrl?: string;
   apiKey?: string;
+  visualization?: "Complexity Tree" | "Radial Complexity" | "Radial Cluster";
+  screenContext?: Record<string, unknown>;
 }) {
   if (!isOpen || !selectedNode) return null;
 
@@ -83,6 +87,19 @@ export function DetailDrawer({
     }
     curr = curr.parent;
   }
+  const selectedComponentContext = {
+    ...nodeData,
+    id,
+    name,
+    type,
+    path: filePath,
+    startLine: line || null,
+    endLine: endLine || null,
+    lineSpan,
+    complexity,
+    nestedComponentCount: nestedCount,
+    ancestry: pathParts,
+  };
 
   const [activeTab, setActiveTab] = useState<"details" | "chat">("details");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -212,14 +229,20 @@ export function DetailDrawer({
 The user is having a conversation with you regarding code refactoring and planning.
 
 [USER CONTEXT]
-- Current View: Context > Viz > Radial (Interactive D3 Sunburst chart of the codebase)
-- Selected Node: ${name}
-- Node Type: ${type.toUpperCase()}
+- Current View: Context > Project > Visualization and Heuristics > ${visualization}
+- Selected Component: ${name}
+- Component Type: ${type.toUpperCase()}
 - Target File: ${filePath}
 - Target Line Range: ${line ? `L${line}${endLine ? ` - L${endLine}` : ""}` : "Unknown"}
 - Cyclomatic Complexity Score: ${complexity}
 - McCabe Assessment Grade: ${gradeInfo.grade} (${gradeInfo.label})
 - Goal: Help the user plan, refactor, and reduce complexity/address issues in this code section.
+
+[SELECTED COMPONENT DATA]
+${JSON.stringify(selectedComponentContext, null, 2)}
+
+[VISUALIZATION SCREEN CONTEXT]
+${screenContext ? JSON.stringify(screenContext, null, 2) : "No additional screen context supplied."}
 
 [STATIC ANALYSIS FINDINGS]
 ${nodeFindings.length > 0 ? 
@@ -236,7 +259,7 @@ ${messages.length > 0 ?
 [NEW USER MESSAGE]
 ${textToSend}
 
-Please analyze the code context and the history, then respond to the user's message. Explain why the section is red if they ask (red/orange signifies high complexity or analysis findings). Suggest refactoring strategies and code changes to help them plan and execute their refactoring goal.
+Treat the selected component above as the primary refactoring target. State its name, type, file, and line range when beginning a new analysis so the user can confirm what is in context. Use all supplied selected-component, visualization-screen, complexity, hierarchy, and finding data. Explain why the section is red if they ask (red/orange signifies high complexity or analysis findings). Suggest refactoring strategies and code changes to help them plan and execute their refactoring goal.
 
 [INSTRUCTIONS FOR MCP USAGE]
 You have access to a variety of Savant MCP tools. Use them to investigate code, query knowledge, or perform actions as needed. 

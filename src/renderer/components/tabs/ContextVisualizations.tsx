@@ -1725,7 +1725,7 @@ function TreeVisualizer({ nodes, repoName, showLabels, setShowLabels, findings =
 
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
         <div ref={containerRef} className="flex-1 h-full w-full overflow-hidden" />
-        <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={handleToggleCollapse} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} />
+        <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={handleToggleCollapse} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} visualization="Complexity Tree" screenContext={{ repository: repoName, visibleNodeCount: nodes.length, activeDepth, labelsVisible: showLabels, totalFindingCount: findings.length }} />
       </div>
     </div>
   );
@@ -1842,7 +1842,7 @@ function RadialVisualizer({ nodes, repoName, findings = [], serverUrl, apiKey }:
   return (
     <div className="h-full w-full flex min-h-0 overflow-hidden relative">
       <div ref={containerRef} className="flex-1 h-full w-full overflow-hidden flex items-center justify-center bg-[rgba(0,0,0,0.12)]" />
-      <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={() => {}} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} />
+      <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={() => {}} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} visualization="Radial Complexity" screenContext={{ repository: repoName, analyzedNodeCount: nodes.length, fileCount: computeAstComplexity(nodes).length, totalComplexity: computeAstComplexity(nodes).reduce((sum, file) => sum + file.total_complexity, 0), totalFindingCount: findings.length }} />
     </div>
   );
 }
@@ -2025,7 +2025,7 @@ function ClusterVisualizer({ nodes, repoName, findings = [], serverUrl, apiKey }
 
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
         <div ref={containerRef} className="flex-1 h-full w-full overflow-hidden flex items-center justify-center" />
-        <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={handleToggleCollapse} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} />
+        <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={handleToggleCollapse} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} visualization="Radial Cluster" screenContext={{ repository: repoName, visibleNodeCount: nodes.length, activeDepth, totalFindingCount: findings.length }} />
       </div>
     </div>
   );

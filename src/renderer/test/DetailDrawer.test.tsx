@@ -82,6 +82,8 @@ describe('DetailDrawer Component ATHENA Integration', () => {
         onToggleCollapse={vi.fn()}
         findings={[]}
         repoName="test-repo"
+        visualization="Radial Cluster"
+        screenContext={{ visibleNodeCount: 42, activeDepth: 'function', totalFindingCount: 3 }}
       />
     )
 
@@ -113,5 +115,11 @@ describe('DetailDrawer Component ATHENA Integration', () => {
       model: '3.5',
       prompt: expect.stringContaining('How can I fix this?')
     }))
+    const prompt = vi.mocked(window.system.runAgentViaGateway).mock.calls[0][0].prompt
+    expect(prompt).toContain('Context > Project > Visualization and Heuristics > Radial Cluster')
+    expect(prompt).toContain('Selected Component: testFunc')
+    expect(prompt).toContain('"visibleNodeCount": 42')
+    expect(prompt).toContain('"activeDepth": "function"')
+    expect(prompt).toContain('"path": "src/main.ts"')
   })
 })
