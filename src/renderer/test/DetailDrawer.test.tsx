@@ -117,7 +117,7 @@ describe('DetailDrawer Component ATHENA Integration', () => {
     }))
     const prompt = vi.mocked(window.system.runAgentViaGateway).mock.calls[0][0].prompt
     expect(prompt).toContain('Context > Project > Visualization and Heuristics > Radial Cluster')
-    expect(prompt).toContain('Selected Component: testFunc')
+    expect(prompt).toContain('"name": "testFunc"')
     expect(prompt).toContain('"visibleNodeCount": 42')
     expect(prompt).toContain('"activeDepth": "function"')
     expect(prompt).toContain('"path": "src/main.ts"')

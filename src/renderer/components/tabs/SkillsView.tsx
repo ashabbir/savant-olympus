@@ -5,9 +5,10 @@ import {
   Download, Code, FileText, Check, Sparkles, AlertTriangle, 
   Play, RefreshCcw, Save, HelpCircle, ChevronLeft, ChevronRight, X, Copy
 } from "lucide-react";
-import { buildAthenaAugmentedPrompt as compileAthenaAugmentedPrompt } from "@/lib/athenaContext";
+import { buildAthenaConversationPrompt } from "@/lib/athenaContext";
 import { createSkillsService } from "@/services/skillsService";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
+import { AthenaConversationExport, AthenaMessageExportActions } from "@/components/shared/AthenaExportActions";
 import { ModalBackdrop } from "@/components/shared/ModalBackdrop";
 import { createScopedLocalAthenaThreadStore, readLocalAthenaHistory, useAthenaThread } from "@/hooks/useAthenaThread";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -294,14 +295,6 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
   const handleDeleteMessage = (id: string) => {
     removeChatMessage(id);
   };
-  const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
-    return compileAthenaAugmentedPrompt(basePrompt, query, {
-      baseUrl,
-      apiKey,
-      repo: "savant-olympus",
-    });
-  };
-
   // Load initial skills
   useEffect(() => {
     fetchSkills();
@@ -571,10 +564,23 @@ The user wishes to refine the file with these changes:
 
 Please output the FULL updated contents of the file. Do NOT include markdown styling or surrounding explanations, return ONLY the raw contents of the updated file so it can be directly saved.`;
 
-      const response = await window.ipcRenderer.invoke("run-agent", {
+      const response = await window.system.runAgentViaGateway({
         provider: activeModel?.provider || "gemini",
         model: activeModel?.model || "3.5",
-        prompt: await buildAthenaAugmentedPrompt(promptPayload, `${selectedSkill.name} ${selectedSkill.description || ""} ${refinePrompt} ${editorContent.slice(0, 500)}`)
+        prompt: await buildAthenaConversationPrompt({
+          context: {
+            area: "Skills > Skill Editor > Refine with Athena",
+            repository: "savant-olympus",
+            selected: { skill: selectedSkill, activeFile, editorContent },
+          },
+          history: [],
+          userMessage: refinePrompt,
+          instructions: promptPayload,
+          query: `${selectedSkill.name} ${selectedSkill.description || ""} ${refinePrompt} ${editorContent.slice(0, 500)}`,
+          baseUrl,
+          apiKey,
+          repo: "savant-olympus",
+        })
       });
 
       if (response && !response.startsWith("Error:")) {
@@ -715,10 +721,19 @@ STEERING RULES:
 - Keep SKILL.md concise and move detailed domain material into references/ for progressive disclosure.
 - Use lowercase hyphen-case names under 64 characters and never emit metadata.json because the server owns it.`;
 
-      const res = await window.ipcRenderer.invoke("run-agent", {
+      const res = await window.system.runAgentViaGateway({
         provider: activeModel?.provider || "gemini",
         model: activeModel?.model || "3.5",
-        prompt: await buildAthenaAugmentedPrompt(promptPayload, `${chatInput} ${chatHistory}`)
+        prompt: await buildAthenaConversationPrompt({
+          context: { area: "Skills > Create with Athena > Replay", repository: "savant-olympus", selected: { type: "new-skill-design" } },
+          history: historyBefore,
+          userMessage: lastUserMsg.text,
+          instructions: promptPayload,
+          query: `${lastUserMsg.text} ${chatHistory}`,
+          baseUrl,
+          apiKey,
+          repo: "savant-olympus",
+        })
       });
 
       let cleanRes = res || "";
@@ -865,10 +880,24 @@ STEERING RULES:
 - Keep SKILL.md concise and move detailed domain material into references/ for progressive disclosure.
 - Use lowercase hyphen-case names under 64 characters and never emit metadata.json because the server owns it.`;
 
-      const res = await window.ipcRenderer.invoke("run-agent", {
+      const res = await window.system.runAgentViaGateway({
         provider: activeModel?.provider || "gemini",
         model: activeModel?.model || "3.5",
-        prompt: promptPayload
+        prompt: await buildAthenaConversationPrompt({
+          context: {
+            area: "Skills > Create with Athena",
+            repository: "savant-olympus",
+            selected: { type: "new-skill-design", proposal: skillProposal },
+            screen: { mode: finalize ? "finalize" : "conversation" },
+          },
+          history: chatMessages,
+          userMessage: pendingText || "Finalize the skill design using the pinned context and complete conversation.",
+          instructions: promptPayload,
+          query: `${pendingText || "finalize skill design"} ${chatHistory}`,
+          baseUrl,
+          apiKey,
+          repo: "savant-olympus",
+        })
       });
 
       let cleanRes = res || "";
@@ -1107,8 +1136,9 @@ STEERING RULES:
               </div>
 
               {/* Chat Messages */}
+              <AthenaConversationExport messages={chatMessages} title="Athena skill creator" scope="skills-athena" />
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {chatMessages.map(msg => <AthenaMessage key={msg.id} message={msg} variant="skill" onCopy={handleCopyMessage} onDelete={() => handleDeleteMessage(msg.id)} />)}
+                {chatMessages.map((msg, index) => <AthenaMessage key={msg.id} message={msg} messageIndex={index} exportScope="skills-athena" variant="skill" onCopy={handleCopyMessage} onDelete={() => handleDeleteMessage(msg.id)} actions={<AthenaMessageExportActions message={msg} index={index} title="Athena skill creator" scope="skills-athena" />} />)}
                 
                 {isAiChatLoading && (
                   <div className="flex items-center gap-2.5 mr-auto max-w-[85%]">

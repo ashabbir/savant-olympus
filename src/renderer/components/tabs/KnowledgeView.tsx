@@ -5,7 +5,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
 import { createKnowledgeService } from "@/services/knowledgeService";
 import { createWorkspaceService } from "@/services/workspaceService";
-import { buildAthenaPromptSections, buildAthenaResearchQuery, ensureAthenaMcpSummary, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits, requiresAthenaImpactAnalysis, resolveAthenaAbility } from "@/lib/athenaContext";
+import { buildAthenaConversationPrompt, ensureAthenaMcpSummary } from "@/lib/athenaContext";
 import {
   Node,
   Edge,
@@ -374,34 +374,6 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
     saveChatMessages(next);
     writeSharedAthenaHistory(readSharedAthenaHistory().filter((msg: any) => msg.id !== id));
   };
-  const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
-    const baseUrl = serverUrl.replace(/\/+$/, "");
-    const ability = await resolveAthenaAbility(baseUrl, apiKey, query);
-    const { persona } = ability;
-
-    // Knowledge is intentionally retrieved first. Source research supplements it second.
-    const knowledgeHits = await fetchAthenaKnowledgeContext(baseUrl, apiKey, query);
-    const researchQuery = buildAthenaResearchQuery(query);
-    const codeHits = await fetchAthenaCodeContext(baseUrl, apiKey, researchQuery);
-    const tools = await fetchAthenaMcpTools(baseUrl, apiKey);
-    const impactSearched = requiresAthenaImpactAnalysis(query);
-    setLastAthenaRun({
-      persona,
-      knowledgeReferences: knowledgeHits.length,
-      researchReferences: codeHits.length,
-    });
-
-    return buildAthenaPromptSections([
-      ["RESOLVED SAVANT ABILITIES PERSONA", `Persona: ${persona}\n${ability.prompt}`],
-      ["BASE PROMPT", basePrompt],
-      ["PRIMARY SAVANT KNOWLEDGE MCP CONTEXT", formatAthenaContextHits(knowledgeHits)],
-      ["SECONDARY SAVANT RESEARCH MCP CONTEXT", formatAthenaContextHits(codeHits)],
-      ["UPSTREAM AND DOWNSTREAM IMPACT SEARCH", impactSearched ? `Performed using research query: ${researchQuery}` : "Not required for this question."],
-      ["ADDITIONAL AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No additional catalogued tools; Savant Abilities, Knowledge, and Research results above are available MCP evidence."],
-      ["REQUIRED MCP SUMMARY", `- Persona: ${persona}\n- Savant Abilities: used\n- Savant Knowledge MCP: ${knowledgeHits.length} references\n- Savant Research MCP: ${codeHits.length} references\n- Upstream/downstream impact search: ${impactSearched ? "performed" : "not required"}`],
-    ]);
-  };
-
   // Connect Node State
   const [connectType, setConnectType] = useState("relates_to");
   const [connectTargetIds, setConnectTargetIds] = useState<string[]>([]);
@@ -2597,53 +2569,38 @@ const confirmImport = async () => {
         `- Edge: ${e.source_id} --[${e.edge_type || "relates_to"}]--> ${e.target_id}`
       ).join("\n");
 
-      const promptPayload = `You are an AI assistant integrated into the Savant Olympus app.
-The user is asking questions about a node in the Knowledge Graph and its neighborhood context.
-
-[INSTRUCTIONS FOR THE AGENT]
-- Use the provided graph nodes, adjacent relationships, and edges to reference and understand the underlying LOGIC, facts, code architecture, and software relationships they represent.
-- Answer the user's question directly by focusing on these logical relationships, engineering logic, facts, and code concepts.
-- Do NOT talk about the layout, visual structure, node IDs, edge weights, or graph theory terminology unless explicitly requested. Speak in terms of actual code architecture, functionalities, and logical concepts.
-- Treat the canvas-visible graph as the complete context. Do not infer from or mention hidden insight nodes. Insights are context only when the user explicitly enables Show insights.
-
-[${isFilteredChat ? "FILTERED GRAPH CONTEXT" : "SELECTED NODE"}]
-- ID: ${activeNodeId}
-- Type: ${isFilteredChat ? "FILTERED NODE SET" : (activeNode?.node_type || "unknown").toUpperCase()}
-- Title: ${isFilteredChat ? `${neighborNodes.length} Filtered Nodes` : activeNode?.title || "Untitled"}
-- Status: ${isFilteredChat ? "active filter result" : activeNode?.status || "unknown"}
-- Content: ${isFilteredChat ? "Use every filtered node and edge listed below as the complete chat context." : activeNode?.content || "No content available."}
-
-[NEIGHBORHOOD SETTINGS]
-- Neighborhood Depth (Hops): ${exploreDepth}
-- Explicitly Selected Nodes: ${selectedChatNodeIds.length}
-- Total Context Nodes: ${neighborNodes.length}
-- Total Connection Edges: ${neighborEdges.length}
-- Node Types: ${Object.entries(chatContextPayload.nodeTypes).map(([type, count]) => `${type}=${count}`).join(", ") || "none"}
-
-[NEIGHBORS WITHIN ${exploreDepth} HOPS]
-${neighborsText || "No adjacent neighbors found within this depth."}
-
-[CONNECTION EDGES]
-${edgesText || "No connection edges found within this depth."}
-
-[CONVERSATION HISTORY]
-${updatedMessages.length > 0 ?
-  updatedMessages.map(msg => `${msg.sender === "user" ? "User" : "AI"}: ${msg.text}`).join("\n")
-  : "No previous messages in this conversation."
-}
-
-[NEW USER QUESTION]
-${userText}
-
-Please analyze the node information, the neighboring nodes, and the connection edges, and provide a helpful, technical response answering the user's question.`;
-
-      const augmentedPrompt = await buildAthenaAugmentedPrompt(
-        promptPayload,
-        isFilteredChat
+      const augmentedPrompt = await buildAthenaConversationPrompt({
+        context: {
+          area: isFilteredChat ? "Knowledge > Filtered Graph Context" : "Knowledge > Selected Node",
+          repository: activeNode?.metadata?.repo,
+          selected: isFilteredChat ? { type: "filtered-node-set", nodes: neighborNodes } : activeNode,
+          screen: {
+            depth: exploreDepth,
+            explicitlySelectedNodes: selectedChatNodeIds,
+            nodeTypes: chatContextPayload.nodeTypes,
+            neighbors: neighborsText,
+            edges: edgesText,
+            edgeRecords: neighborEdges,
+            showInsights,
+          },
+        },
+        history: currentMessages,
+        userMessage: userText,
+        instructions: "Use the pinned graph nodes, relationships, and edges to explain the represented logic, facts, code architecture, and software relationships. Do not discuss graph layout or graph theory unless asked. Treat the canvas-visible graph as complete context; hidden insights are excluded unless Show insights is enabled.",
+        query: isFilteredChat
           ? `${neighborNodes.map((node) => `${node.title || ""} ${node.content || ""}`).join(" ")} ${userText}`
-          : `${activeNode?.title || ""} ${userText} ${activeNode?.content || ""}`
-      );
-      const rawResponseText = await window.ipcRenderer.invoke("run-agent", {
+          : `${activeNode?.title || ""} ${userText} ${activeNode?.content || ""}`,
+        baseUrl: serverUrl.replace(/\/+$/, ""),
+        apiKey,
+        repo: activeNode?.metadata?.repo,
+      });
+      const summary = augmentedPrompt.match(/\[REQUIRED MCP SUMMARY\]\n([\s\S]*?)(?=\n\n\[|$)/)?.[1] || "";
+      setLastAthenaRun({
+        persona: summary.match(/Persona: ([^\n]+)/)?.[1] || "engineer",
+        knowledgeReferences: Number(summary.match(/Knowledge MCP: (\d+)/)?.[1] || 0),
+        researchReferences: Number(summary.match(/Context\/Research MCP: (\d+)/)?.[1] || 0),
+      });
+      const rawResponseText = await window.system.runAgentViaGateway({
         provider,
         model,
         prompt: augmentedPrompt,

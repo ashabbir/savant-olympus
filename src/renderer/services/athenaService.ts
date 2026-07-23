@@ -19,11 +19,43 @@ export interface AthenaThreadRecord {
   updated_at?: string
 }
 
+export interface AthenaConversationContext {
+  area: string
+  repository?: string
+  selected: unknown
+  screen?: unknown
+}
+
+export interface AthenaConversationMessage {
+  sender: "user" | "assistant"
+  text: string
+}
+
+export interface AthenaConversationPromptOptions {
+  context: AthenaConversationContext
+  history: AthenaConversationMessage[]
+  userMessage: string
+  instructions: string
+  query?: string
+  baseUrl: string
+  apiKey: string
+  repo?: string
+}
+
+export const ATHENA_WORKSPACE = {
+  id: "7119319046949260117",
+  name: "savant-olympus-athena",
+}
+
 export const ATHENA_SYSTEM_DIRECTIVE = [
   "You are ATHENA inside Savant Olympus.",
   "For every request, first use Savant Abilities to select and load the best persona and rules for the question.",
   "Use Savant Knowledge as the primary source, then use Savant Research/Context when source-level evidence or clarification is needed.",
   "Use every other available Savant MCP tool when it is relevant to the task.",
+  `Track your work in the Savant workspace ${ATHENA_WORKSPACE.name} (${ATHENA_WORKSPACE.id}). Use Savant Workspace without asking permission: create or update tasks for work, add session notes for decisions and findings, and store new durable knowledge graph entities in this workspace.`,
+  "Never ask permission before using an available Savant MCP tool. Prefer Savant Abilities, Workspace, Knowledge, and Context/Research over generic alternatives.",
+  "You have access to the complete available MCP catalog in the prompt. Infer external MCP use from the user's message: use Jira for Jira issues/work, Confluence or Atlassian for documentation and Atlassian content, and any other matching MCP when it improves the result. Do not ask permission to use an available read or in-scope work-tracking tool.",
+  "The selected user context is pinned. Re-read it on every turn, never replace it with retrieved context, and never lose it as the conversation grows.",
   "When a request concerns change, dependencies, relationships, architecture, removal, or refactoring, investigate both upstream callers/consumers and downstream dependencies before answering.",
   "If code or project structure is needed, retrieve it first and ground your response in the retrieved source.",
   "Do not claim Savant MCP tools were unavailable when the prompt contains retrieved Savant Abilities, Knowledge, or Research results; those sections are MCP evidence gathered by Olympus before the model run.",
@@ -167,10 +199,30 @@ export async function fetchAthenaMcpTools(baseUrl: string, apiKey: string) {
 
   const data = await res.json()
   const tools = Array.isArray(data?.tools) ? data.tools : Array.isArray(data) ? data : []
-  return tools.slice(0, 20).map((tool: any) => ({
+  return tools.map((tool: any) => ({
     name: tool.name || "unknown",
     description: tool.description || "",
   }))
+}
+
+function formatConversationHistory(history: AthenaConversationMessage[]) {
+  return history.length > 0
+    ? history.map((message) => `${message.sender === "user" ? "USER" : "ATHENA"}: ${message.text}`).join("\n")
+    : "No previous messages in this conversation."
+}
+
+function inferRelevantMcpTools(query: string, tools: Array<{ name: string; description: string }>) {
+  const normalized = query.toLowerCase()
+  const intentTerms = new Set<string>(["savant"])
+  if (/\b(jira|ticket|issue|epic|sprint|backlog)\b/i.test(normalized)) intentTerms.add("jira")
+  if (/\b(confluence|atlassian|wiki|documentation|docs|page)\b/i.test(normalized)) {
+    intentTerms.add("confluence")
+    intentTerms.add("atlassian")
+  }
+  return tools.filter((tool) => {
+    const haystack = `${tool.name} ${tool.description}`.toLowerCase()
+    return [...intentTerms].some((term) => haystack.includes(term))
+  })
 }
 
 export async function buildAthenaAugmentedPrompt(
@@ -194,6 +246,33 @@ export async function buildAthenaAugmentedPrompt(
     ["UPSTREAM AND DOWNSTREAM IMPACT SEARCH", impactSearched ? `Performed using research query: ${researchQuery}` : "Not required for this question."],
     ["ADDITIONAL AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No additional catalogued tools; Savant Abilities, Knowledge, and Research results above are available MCP evidence."],
     ["REQUIRED MCP SUMMARY", `- Persona: ${ability.persona}\n- Savant Abilities: used\n- Savant Knowledge MCP: ${knowledgeHits.length} references\n- Savant Research MCP: ${codeHits.length} references\n- Upstream/downstream impact search: ${impactSearched ? "performed" : "not required"}`],
+  ])
+}
+
+export async function buildAthenaConversationPrompt(options: AthenaConversationPromptOptions) {
+  const userMessage = options.userMessage.trim()
+  const query = options.query?.trim() || userMessage
+  const ability = await resolveAthenaAbility(options.baseUrl, options.apiKey, query, options.repo)
+  const knowledgeHits = await fetchAthenaKnowledgeContext(options.baseUrl, options.apiKey, query)
+  const researchQuery = buildAthenaResearchQuery(query)
+  const codeHits = await fetchAthenaCodeContext(options.baseUrl, options.apiKey, researchQuery, options.repo)
+  const tools: Array<{ name: string; description: string }> = await fetchAthenaMcpTools(options.baseUrl, options.apiKey)
+  const relevantTools = inferRelevantMcpTools(query, tools)
+  const impactSearched = requiresAthenaImpactAnalysis(query)
+
+  return buildAthenaPromptSections([
+    ["SELECTED USER CONTEXT — PINNED, ALWAYS FIRST, NEVER DROP", JSON.stringify(options.context, null, 2)],
+    ["AREA-SPECIFIC INSTRUCTIONS", options.instructions],
+    ["COMPLETE CONVERSATION HISTORY — UNTRUNCATED", formatConversationHistory(options.history)],
+    ["LATEST USER MESSAGE — HANDLE ONCE", userMessage],
+    ["RESOLVED SAVANT ABILITIES", `Persona: ${ability.persona}\n${ability.prompt}`],
+    ["MANDATORY SAVANT WORKSPACE TRACKING", `Workspace: ${ATHENA_WORKSPACE.name}\nWorkspace ID: ${ATHENA_WORKSPACE.id}\nUse Savant Workspace tools autonomously for tasks and notes. Store durable new knowledge with Savant Knowledge in this workspace.`],
+    ["PRIMARY SAVANT KNOWLEDGE MCP RESULTS", formatAthenaContextHits(knowledgeHits)],
+    ["SECONDARY SAVANT CONTEXT AND RESEARCH MCP RESULTS", formatAthenaContextHits(codeHits)],
+    ["UPSTREAM AND DOWNSTREAM IMPACT SEARCH", impactSearched ? `Performed using research query: ${researchQuery}` : "Not required for this question."],
+    ["INFERRED MCP TOOLS FOR THIS USER MESSAGE", relevantTools.length > 0 ? relevantTools.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n") : "No external MCP matched explicitly; continue to prefer the mandatory Savant MCP tools."],
+    ["COMPLETE AVAILABLE MCP CATALOG — ALL TOOLS ACCESSIBLE", tools.length > 0 ? tools.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools were returned by the catalog endpoint."],
+    ["REQUIRED MCP SUMMARY", `- Persona: ${ability.persona}\n- Savant Abilities: used\n- Savant Workspace: ${ATHENA_WORKSPACE.name} (${ATHENA_WORKSPACE.id})\n- Savant Knowledge MCP: ${knowledgeHits.length} references\n- Savant Context/Research MCP: ${codeHits.length} references\n- Available MCP tools: ${tools.length}\n- Inferred relevant MCP tools: ${relevantTools.map((tool) => tool.name).join(", ") || "mandatory Savant MCP only"}\n- Upstream/downstream impact search: ${impactSearched ? "performed" : "not required"}`],
   ])
 }
 
