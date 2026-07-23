@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { AthenaMessage, AthenaMessageModel } from "@/components/shared/AthenaMessage";
+import { AthenaConversationExport, AthenaMessageExportActions } from "@/components/shared/AthenaExportActions";
 import { AthenaThreadStore, useAthenaThread } from "@/hooks/useAthenaThread";
 import {
-  buildAthenaAugmentedPrompt,
+  buildAthenaConversationPrompt,
   ensureAthenaMcpSummary,
 } from "@/lib/athenaContext";
 
@@ -66,27 +67,21 @@ export function GraphEntityChatPanel({ node, repoName, serverUrl, apiKey, active
       const chain = settings?.["provider:chain"] || [];
       const provider = activeModel?.provider || chain[0]?.provider || "gemini";
       const model = activeModel?.model || chain[0]?.model || "3.5";
-      const prompt = `You are ATHENA, an AI assistant integrated into Savant Olympus.
-The user is discussing a Project Graph entity:
-- Name: ${node.title}
-- Node Type: ${node.node_type.toUpperCase()}
-- Node ID: ${node.node_id}
-${node.content ? `- Content:\n${node.content}\n` : ""}
-${node.metadata ? `- Metadata: ${JSON.stringify(node.metadata)}\n` : ""}
-
-[CONVERSATION HISTORY]
-${history.slice(0, -1).map((message) => `${message.sender === "user" ? "User" : "ATHENA"}: ${message.text}`).join("\n")}
-
-[NEW USER MESSAGE]
-${trimmed}
-
-Explain how this entity fits into the repository, its dependencies and relationships, and suggest relevant code or architectural improvements. Use Savant MCP tools when they can provide stronger evidence.`;
-      const augmentedPrompt = await buildAthenaAugmentedPrompt(prompt, `${node.title} ${trimmed} ${node.content || ""}`, {
+      const augmentedPrompt = await buildAthenaConversationPrompt({
+        context: {
+          area: "Context > Project > Graphify > Entity Inspector",
+          repository: repoName,
+          selected: node,
+        },
+        history: messages,
+        userMessage: trimmed,
+        instructions: "Explain how the pinned graph entity fits into the repository, including dependencies and relationships, and suggest relevant code or architectural improvements grounded in Savant MCP evidence.",
+        query: `${node.title} ${trimmed} ${node.content || ""}`,
         baseUrl: serverUrl,
         apiKey,
         repo: repoName,
       });
-      const rawResponse = await window.ipcRenderer.invoke("run-agent", {
+      const rawResponse = await window.system.runAgentViaGateway({
         provider,
         model,
         prompt: augmentedPrompt,
@@ -102,6 +97,7 @@ Explain how this entity fits into the repository, its dependencies and relations
 
   return (
     <div className="flex-1 flex flex-col min-h-0 space-y-3">
+      <AthenaConversationExport messages={messages} title={`Graph entity ${node.title}`} scope="graph-entity-athena" />
       <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2 space-y-3 min-h-0 flex flex-col pr-1">
         {messages.length === 0 ? (
           <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-4 my-auto">
@@ -114,7 +110,7 @@ Explain how this entity fits into the repository, its dependencies and relations
           </div>
         ) : (
           <div className="space-y-3 flex-1">
-            {messages.map((message) => <AthenaMessage key={message.id} message={message} variant="compact" onCopy={(text) => navigator.clipboard.writeText(text)} onDelete={() => removeMessage(message.id)} />)}
+            {messages.map((message, index) => <AthenaMessage key={message.id} message={message} messageIndex={index} exportScope="graph-entity-athena" variant="compact" onCopy={(text) => navigator.clipboard.writeText(text)} onDelete={() => removeMessage(message.id)} actions={<AthenaMessageExportActions message={message} index={index} title={`Graph entity ${node.title}`} scope="graph-entity-athena" />} />)}
             {isThinking && <div className="flex items-center gap-2 p-2 border border-[var(--cp-border)] bg-[var(--cp-bg-3)] text-[10px]"><Loader2 size={12} className="animate-spin text-[var(--cp-cyan)]" /><span>ATHENA IS THINKING...</span></div>}
             <div ref={chatEndRef} />
           </div>

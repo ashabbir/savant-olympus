@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Copy, Trash, Trash2, Sparkles, Loader2, ChevronRight, ChevronDown } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import { buildAthenaAugmentedPrompt as compileAthenaAugmentedPrompt, ensureAthenaMcpSummary } from "@/services/athenaService";
+import { Trash2, Sparkles, Loader2, ChevronRight, ChevronDown } from "lucide-react";
+import { AthenaMessage } from "@/components/shared/AthenaMessage";
+import { AthenaConversationExport, AthenaMessageExportActions } from "@/components/shared/AthenaExportActions";
+import { buildAthenaConversationPrompt, ensureAthenaMcpSummary } from "@/services/athenaService";
 import { Finding } from "../types";
 
 interface ChatMessage {
@@ -19,7 +20,9 @@ export function DetailDrawer({
   findings = [],
   repoName,
   serverUrl = "http://127.0.0.1:3100",
-  apiKey = ""
+  apiKey = "",
+  visualization = "Complexity Tree",
+  screenContext,
 }: {
   selectedNode: any;
   isOpen: boolean;
@@ -29,6 +32,8 @@ export function DetailDrawer({
   repoName: string;
   serverUrl?: string;
   apiKey?: string;
+  visualization?: "Complexity Tree" | "Radial Complexity" | "Radial Cluster";
+  screenContext?: Record<string, unknown>;
 }) {
   if (!isOpen || !selectedNode) return null;
 
@@ -83,6 +88,19 @@ export function DetailDrawer({
     }
     curr = curr.parent;
   }
+  const selectedComponentContext = {
+    ...nodeData,
+    id,
+    name,
+    type,
+    path: filePath,
+    startLine: line || null,
+    endLine: endLine || null,
+    lineSpan,
+    complexity,
+    nestedComponentCount: nestedCount,
+    ancestry: pathParts,
+  };
 
   const [activeTab, setActiveTab] = useState<"details" | "chat">("details");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -208,42 +226,21 @@ export function DetailDrawer({
         }
       }
 
-      const contextPrompt = `You are ATHENA, an AI assistant integrated into the Savant Olympus app.
-The user is having a conversation with you regarding code refactoring and planning.
-
-[USER CONTEXT]
-- Current View: Context > Viz > Radial (Interactive D3 Sunburst chart of the codebase)
-- Selected Node: ${name}
-- Node Type: ${type.toUpperCase()}
-- Target File: ${filePath}
-- Target Line Range: ${line ? `L${line}${endLine ? ` - L${endLine}` : ""}` : "Unknown"}
-- Cyclomatic Complexity Score: ${complexity}
-- McCabe Assessment Grade: ${gradeInfo.grade} (${gradeInfo.label})
-- Goal: Help the user plan, refactor, and reduce complexity/address issues in this code section.
-
-[STATIC ANALYSIS FINDINGS]
-${nodeFindings.length > 0 ? 
-  nodeFindings.map((f, i) => `${i + 1}. [${f.severity.toUpperCase()}] ${f.title}: ${f.detail} (Line ${f.line})`).join("\n") 
-  : "No static analysis issues or warnings were found for this section."
-}
-
-[CONVERSATION HISTORY]
-${messages.length > 0 ? 
-  messages.map(msg => `${msg.sender === "user" ? "User" : "ATHENA"}: ${msg.text}`).join("\n")
-  : "No previous messages in this conversation."
-}
-
-[NEW USER MESSAGE]
-${textToSend}
-
-Please analyze the code context and the history, then respond to the user's message. Explain why the section is red if they ask (red/orange signifies high complexity or analysis findings). Suggest refactoring strategies and code changes to help them plan and execute their refactoring goal.
-
-[INSTRUCTIONS FOR MCP USAGE]
-You have access to a variety of Savant MCP tools. Use them to investigate code, query knowledge, or perform actions as needed. 
-Always prefer using a tool if it can provide more accurate or deep information.
-`;
-
-      const augmentedPrompt = await compileAthenaAugmentedPrompt(contextPrompt, `${name} ${textToSend} ${filePath || ""}`, {
+      const augmentedPrompt = await buildAthenaConversationPrompt({
+        context: {
+          area: `Context > Project > Visualization and Heuristics > ${visualization}`,
+          repository: repoName,
+          selected: {
+            ...selectedComponentContext,
+            grade: gradeInfo,
+            findings: nodeFindings,
+          },
+          screen: screenContext || {},
+        },
+        history: messages,
+        userMessage: textToSend,
+        instructions: "Treat the selected component as the primary refactoring target. State its name, type, file, and line range when beginning a new analysis so the user can confirm the pinned context. Use its metrics, hierarchy, findings, and visualization state. Red or orange indicates high complexity or analysis findings. Suggest concrete refactoring strategies and code changes.",
+        query: `${name} ${textToSend} ${filePath || ""}`,
         baseUrl: serverUrl,
         apiKey,
         repo: repoName,
@@ -473,6 +470,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
             </button>
           </div>
 
+          <AthenaConversationExport messages={messages} title={`${visualization} component`} scope="complexity-athena" />
           <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2 space-y-3 min-h-0 flex flex-col pr-1">
             {messages.length === 0 ? (
               <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-4 my-auto">
@@ -509,52 +507,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
               </div>
             ) : (
               <div className="space-y-3 flex-1">
-                {messages.map((msg, i) => (
-                  <div
-                    key={i}
-                    className={`flex flex-col space-y-1 group relative ${
-                      msg.sender === "user" ? "items-end" : "items-start"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 text-[8px] text-muted-foreground opacity-60">
-                      <span>{msg.sender === "user" ? "USER" : "ATHENA"}</span>
-                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={() => navigator.clipboard.writeText(msg.text)}
-                          title="Copy message text"
-                          className="hover:text-[var(--cp-cyan)] cursor-pointer"
-                        >
-                          <Copy size={9} />
-                        </button>
-                        <button
-                          onClick={() => {
-                            const newMessages = messages.filter((_, idx) => idx !== i);
-                            saveMessages(newMessages);
-                          }}
-                          title="Delete message"
-                          className="hover:text-red-400 cursor-pointer"
-                        >
-                          <Trash size={9} />
-                        </button>
-                      </div>
-                    </div>
-                    <div
-                      className={`p-2 rounded border max-w-full overflow-hidden font-mono text-[10px] leading-relaxed break-words text-foreground ${
-                        msg.sender === "user"
-                          ? "bg-[rgba(0,229,255,0.06)] border-[rgba(0,229,255,0.25)] text-right"
-                          : "bg-[rgba(167,139,250,0.06)] border-[rgba(167,139,250,0.2)] text-left"
-                      }`}
-                    >
-                      {msg.sender === "user" ? (
-                        <span className="whitespace-pre-wrap">{msg.text}</span>
-                      ) : (
-                        <div className="prose prose-invert max-w-none text-[10px] leading-relaxed [&>p]:mb-2 [&>p:last-child]:mb-0 [&>pre]:bg-[var(--cp-bg-1)] [&>pre]:p-1.5 [&>pre]:rounded [&>pre]:my-1.5 [&>pre]:border [&>pre]:border-[var(--cp-border)] [&>pre>code]:text-[9px] [&>pre]:overflow-x-auto [&>pre]:max-w-full [&>ul]:list-disc [&>ul]:pl-4 [&>ul]:mb-2 [&>ol]:list-decimal [&>ol]:pl-4 [&>ol]:mb-2 [&_code]:break-all [&_code]:whitespace-pre-wrap font-sans">
-                          <ReactMarkdown>{msg.text}</ReactMarkdown>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                {messages.map((msg, i) => <AthenaMessage key={msg.id || i} message={msg} messageIndex={i} exportScope="complexity-athena" variant="compact" onCopy={text => navigator.clipboard.writeText(text)} onDelete={() => saveMessages(messages.filter((_, index) => index !== i))} actions={<AthenaMessageExportActions message={msg} index={i} title={`${visualization} component`} scope="complexity-athena" />} />)}
                 {isLoading && (
                   <div className="flex flex-col space-y-1 items-start">
                     <span className="text-[8px] text-[var(--cp-cyan)] uppercase tracking-wider animate-pulse">ATHENA IS THINKING...</span>

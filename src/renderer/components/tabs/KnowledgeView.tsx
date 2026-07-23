@@ -5,7 +5,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
 import { createKnowledgeService } from "@/services/knowledgeService";
 import { createWorkspaceService } from "@/services/workspaceService";
-import { buildAthenaPromptSections, buildAthenaResearchQuery, ensureAthenaMcpSummary, fetchAthenaCodeContext, fetchAthenaKnowledgeContext, fetchAthenaMcpTools, formatAthenaContextHits, requiresAthenaImpactAnalysis, resolveAthenaAbility } from "@/lib/athenaContext";
+import { buildAthenaConversationPrompt, ensureAthenaMcpSummary } from "@/lib/athenaContext";
 import {
   Node,
   Edge,
@@ -22,6 +22,9 @@ import {
   validateKnowledgeImportPayload,
   buildKnowledgeImportDiff,
   buildKnowledgeGraphIndex,
+  buildKnowledgeDistanceMap,
+  deriveKnowledgeFilterState,
+  formatKnowledgePurgePreview,
   inferNodeDomainsFromIndex,
   inferNodeDomains,
   buildFilteredKnowledgeContextFromIndex,
@@ -44,6 +47,16 @@ import {
   restoreKnowledgeFocals,
   selectKnowledgeAthenaPersona,
 } from "./knowledge/utils/chatContext";
+import {
+  useKnowledgeEventSubscriptions,
+  useKnowledgeKeyboardShortcuts,
+} from "./knowledge/hooks/useKnowledgeSubscriptions";
+import { reportKnowledgeError } from "./knowledge/utils/errors";
+import { useKnowledgeGraphActions } from "./knowledge/hooks/useKnowledgeGraphActions";
+import {
+  KnowledgeAddModal,
+  KnowledgeImportExportPanel,
+} from "./knowledge/components/KnowledgeDialogs";
 
 export type { Node, Edge, ChatMessage, AthenaExportEntry, KnowledgeChatContextSnapshot, AthenaThread, KnowledgeGraphIndex, KnowledgeViewProps };
 export {
@@ -52,6 +65,9 @@ export {
   validateKnowledgeImportPayload,
   buildKnowledgeImportDiff,
   buildKnowledgeGraphIndex,
+  buildKnowledgeDistanceMap,
+  deriveKnowledgeFilterState,
+  formatKnowledgePurgePreview,
   inferNodeDomainsFromIndex,
   inferNodeDomains,
   buildFilteredKnowledgeContextFromIndex,
@@ -194,6 +210,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
   const [showInsights, setShowInsights] = useState(false);
   const [rawNodes, setRawNodes] = useState<any[]>([]);
   const [rawEdges, setRawEdges] = useState<any[]>([]);
+  const { runGraphAction } = useKnowledgeGraphActions(setIsLoading);
 
   useEffect(() => {
     if (!isResizingInspector) return;
@@ -291,7 +308,8 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
     try {
       const stored = localStorage.getItem(ATHENA_CHAT_HISTORY_KEY);
       return stored ? JSON.parse(stored) : [];
-    } catch {
+    } catch (error) {
+      reportKnowledgeError("read shared ATHENA history", error);
       return [];
     }
   };
@@ -374,34 +392,6 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
     saveChatMessages(next);
     writeSharedAthenaHistory(readSharedAthenaHistory().filter((msg: any) => msg.id !== id));
   };
-  const buildAthenaAugmentedPrompt = async (basePrompt: string, query: string) => {
-    const baseUrl = serverUrl.replace(/\/+$/, "");
-    const ability = await resolveAthenaAbility(baseUrl, apiKey, query);
-    const { persona } = ability;
-
-    // Knowledge is intentionally retrieved first. Source research supplements it second.
-    const knowledgeHits = await fetchAthenaKnowledgeContext(baseUrl, apiKey, query);
-    const researchQuery = buildAthenaResearchQuery(query);
-    const codeHits = await fetchAthenaCodeContext(baseUrl, apiKey, researchQuery);
-    const tools = await fetchAthenaMcpTools(baseUrl, apiKey);
-    const impactSearched = requiresAthenaImpactAnalysis(query);
-    setLastAthenaRun({
-      persona,
-      knowledgeReferences: knowledgeHits.length,
-      researchReferences: codeHits.length,
-    });
-
-    return buildAthenaPromptSections([
-      ["RESOLVED SAVANT ABILITIES PERSONA", `Persona: ${persona}\n${ability.prompt}`],
-      ["BASE PROMPT", basePrompt],
-      ["PRIMARY SAVANT KNOWLEDGE MCP CONTEXT", formatAthenaContextHits(knowledgeHits)],
-      ["SECONDARY SAVANT RESEARCH MCP CONTEXT", formatAthenaContextHits(codeHits)],
-      ["UPSTREAM AND DOWNSTREAM IMPACT SEARCH", impactSearched ? `Performed using research query: ${researchQuery}` : "Not required for this question."],
-      ["ADDITIONAL AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No additional catalogued tools; Savant Abilities, Knowledge, and Research results above are available MCP evidence."],
-      ["REQUIRED MCP SUMMARY", `- Persona: ${persona}\n- Savant Abilities: used\n- Savant Knowledge MCP: ${knowledgeHits.length} references\n- Savant Research MCP: ${codeHits.length} references\n- Upstream/downstream impact search: ${impactSearched ? "performed" : "not required"}`],
-    ]);
-  };
-
   // Connect Node State
   const [connectType, setConnectType] = useState("relates_to");
   const [connectTargetIds, setConnectTargetIds] = useState<string[]>([]);
@@ -418,56 +408,16 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
   const loadedLabelsRef = useRef<Set<string>>(new Set());
   const nodeLabelsRef = useRef<Map<string, string>>(new Map());
 
-  const bfs = (focals: Set<string>, depth: number, adj: Record<string, string[]>) => {
-    const distances = new Map<string, number>();
-    const queue: string[] = [];
-    focals.forEach((id) => {
-      distances.set(id, 0);
-      queue.push(id);
-    });
-    let i = 0;
-    while (i < queue.length) {
-      const cur = queue[i++];
-      const d = distances.get(cur)!;
-      if (d >= depth) continue;
-      for (const nb of adj[cur] || []) {
-        if (!distances.has(nb)) {
-          distances.set(nb, d + 1);
-          queue.push(nb);
-        }
-      }
-    }
-    return distances;
-  };
-
-  const filterReachability = useMemo(() => {
-    const activeEntries = Object.entries(focalsByType).filter(([, bucket]) => bucket.size > 0);
-    const reachByType = new Map<string, Set<string>>();
-    for (const [nodeType, seeds] of activeEntries) {
-      reachByType.set(nodeType, new Set(bfs(seeds, exploreDepth, graphIndex.adjacency).keys()));
-    }
-    const intersect = (sets: Set<string>[]) => {
-      if (sets.length === 0) return null;
-      const [first, ...rest] = [...sets].sort((left, right) => left.size - right.size);
-      return new Set([...first].filter((nodeId) => rest.every((set) => set.has(nodeId))));
-    };
-    const visibleIds = intersect([...reachByType.values()]);
-    const allowedByType = new Map<string, Set<string> | null>();
-    for (const nodeType of presentNodeTypes) {
-      allowedByType.set(
-        nodeType,
-        intersect(activeEntries
-          .filter(([activeType]) => activeType !== nodeType)
-          .map(([activeType]) => reachByType.get(activeType)!)),
-      );
-    }
-    const visibleNodes = visibleIds
-      ? rawNodes
-          .filter((node) => visibleIds.has(node.node_id || node.id))
-          .sort((left, right) => (left.title || left.node_id).localeCompare(right.title || right.node_id))
-      : [];
-    return { activeEntries, allowedByType, visibleIds, visibleNodes };
-  }, [exploreDepth, focalsByType, graphIndex, presentNodeTypes, rawNodes]);
+  const filterReachability = useMemo(
+    () => deriveKnowledgeFilterState(
+      focalsByType,
+      exploreDepth,
+      graphIndex,
+      rawNodes,
+      presentNodeTypes,
+    ),
+    [exploreDepth, focalsByType, graphIndex, presentNodeTypes, rawNodes],
+  );
 
   const sidebarNodesByType = useMemo(() => {
     const result = new Map<string, any[]>();
@@ -1220,7 +1170,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
         if (distMapCacheRef.current.config !== exploreConfig) {
           distMapCacheRef.current = {
             config: exploreConfig,
-            distMap: bfs(activeFocalNodes, activeExploreDepth, adj)
+            distMap: buildKnowledgeDistanceMap(activeFocalNodes, activeExploreDepth, adj)
           };
         }
         distMap = distMapCacheRef.current.distMap;
@@ -1592,23 +1542,12 @@ useEffect(() => {
   };
 }, []);
 
-useEffect(() => {
-  const handleKeyDown = (e: KeyboardEvent) => {
-    // Don't intercept when typing in an input
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-    if (e.key === "f" || e.key === "F") {
-      fitToGraphRef.current();
-    } else if (e.key === "+" || e.key === "=") {
-      zoomInRef.current();
-    } else if (e.key === "-") {
-      zoomOutRef.current();
-    } else if (e.key === "Escape") {
-      clearExploreMode();
-    }
-  };
-  window.addEventListener("keydown", handleKeyDown);
-  return () => window.removeEventListener("keydown", handleKeyDown);
-}, []);
+useKnowledgeKeyboardShortcuts({
+  fitToGraph: () => fitToGraphRef.current(),
+  zoomIn: () => zoomInRef.current(),
+  zoomOut: () => zoomOutRef.current(),
+  clearExploreMode,
+});
 
 useEffect(() => {
   if (!svgRef.current) return;
@@ -1670,9 +1609,9 @@ useEffect(() => {
     const activeBuckets = Object.values(focalsByType).filter(s => s.size > 0);
     let distMap: Map<string, number>;
     if (activeBuckets.length <= 1) {
-      distMap = bfs(focalNodes, exploreDepth, adj);
+      distMap = buildKnowledgeDistanceMap(focalNodes, exploreDepth, adj);
     } else {
-      const perBucket = activeBuckets.map(b => bfs(b, exploreDepth, adj));
+      const perBucket = activeBuckets.map(b => buildKnowledgeDistanceMap(b, exploreDepth, adj));
       const intersectIds = perBucket.reduce<Set<string>>((acc, m, i) => {
         const keys = new Set(m.keys());
         return i === 0 ? keys : new Set([...acc].filter(k => keys.has(k)));
@@ -1909,16 +1848,11 @@ const handleBulkDelete = async () => {
 };
 
 const handleCommitNode = async (nodeId: string) => {
-  setIsLoading(true);
-  try {
+  await runGraphAction("commit node", async () => {
     await knowledgeService.commitNodes([nodeId]);
     await loadGraph();
     setSelectedNode(await knowledgeService.getNode(nodeId));
-  } catch (err: any) {
-    alert("Failed: " + err.message);
-  } finally {
-    setIsLoading(false);
-  }
+  }, (message) => alert("Failed: " + message));
 };
 
 const handleUpdateNodeMeta = async () => {
@@ -1974,15 +1908,10 @@ const handleUpdateNodeMeta = async () => {
 
 const handleCommitAll = async () => {
   if (!confirm("Are you sure you want to commit all staged nodes in this workspace?")) return;
-  setIsLoading(true);
-  try {
+  await runGraphAction("commit workspace", async () => {
     await knowledgeService.commitWorkspace("olympus");
     await loadGraph();
-  } catch (e: any) {
-    alert("Failed: " + e.message);
-  } finally {
-    setIsLoading(false);
-  }
+  }, (message) => alert("Failed: " + message));
 };
 
 const handleDeleteSelected = async () => {
@@ -2021,9 +1950,7 @@ const handlePurgeGraph = async () => {
         .filter((edge: any) => deleteNodeIds.includes(edge.source_id) || deleteNodeIds.includes(edge.target_id))
         .map((edge: any) => edge.edge_id || `${edge.source_id}:${edge.target_id}:${edge.edge_type || "relates_to"}`)
     );
-    const purgeMessage = `I’m going to purge ${preview.to_delete || 0} nodes and ${edgeIds.size} edges.\n\n` +
-      `This will delete exclusive nodes and unlink shared nodes for workspace "olympus".\n` +
-      `Nodes without edges remain committed. Orphaned edges are not part of this purge.`;
+    const purgeMessage = formatKnowledgePurgePreview(preview, edgeIds.size, "olympus");
     if (!confirm(purgeMessage)) return;
   } catch (err: any) {
     alert(`Failed to prepare purge: ${err.message || String(err)}`);
@@ -2041,12 +1968,11 @@ const handlePurgeGraph = async () => {
 
 const handlePruneGraph = async () => {
   if (!confirm("Are you sure you want to prune dangling edges and orphaned nodes?")) return;
-  setIsLoading(true);
-  try {
+  await runGraphAction("prune workspace", async () => {
     await knowledgeService.pruneWorkspace("olympus");
     setSelectedNode(null);
     await loadGraph();
-  } catch (e: any) { alert("Prune failed: " + e.message); } finally { setIsLoading(false); }
+  }, (message) => alert("Prune failed: " + message));
 };
 
 const targetNodeOptions = useMemo(
@@ -2173,48 +2099,6 @@ const confirmImport = async () => {
       }
     }
   };
-
-  useEffect(() => {
-    const handleReload = () => {
-      void loadGraph();
-    };
-    const handleAddNode = () => {
-      setIsAddModalOpen(true);
-    };
-    const handleCommitAllEvent = () => {
-      void handleCommitAll();
-    };
-    const handlePurge = () => {
-      void handlePurgeGraph();
-    };
-    const handleUpload = () => {
-      triggerUpload();
-    };
-    const handleDownload = () => {
-      void triggerDownload();
-    };
-    const handleChatHistory = () => {
-      openChatHistory();
-    };
-
-    window.addEventListener("knowledge-reload", handleReload);
-    window.addEventListener("knowledge-add-node", handleAddNode);
-    window.addEventListener("knowledge-commit-all", handleCommitAllEvent);
-    window.addEventListener("knowledge-purge", handlePurge);
-    window.addEventListener("knowledge-upload", handleUpload);
-    window.addEventListener("knowledge-download", handleDownload);
-    window.addEventListener("knowledge-chat-history", handleChatHistory);
-
-    return () => {
-      window.removeEventListener("knowledge-reload", handleReload);
-      window.removeEventListener("knowledge-add-node", handleAddNode);
-      window.removeEventListener("knowledge-commit-all", handleCommitAllEvent);
-      window.removeEventListener("knowledge-purge", handlePurge);
-      window.removeEventListener("knowledge-upload", handleUpload);
-      window.removeEventListener("knowledge-download", handleDownload);
-      window.removeEventListener("knowledge-chat-history", handleChatHistory);
-    };
-  }, [apiKey, baseUrl, rawNodes, rawEdges, selectedNode, selectedNodes]);
 
   const ToolbarButton = ({
     title,
@@ -2372,6 +2256,16 @@ const confirmImport = async () => {
     setIsThreadBrowserOpen(true);
     void loadKnowledgeThreads();
   };
+
+  useKnowledgeEventSubscriptions({
+    reload: () => void loadGraph(),
+    openAddNode: () => setIsAddModalOpen(true),
+    commitAll: () => void handleCommitAll(),
+    purge: () => void handlePurgeGraph(),
+    upload: triggerUpload,
+    download: () => void triggerDownload(),
+    openChatHistory,
+  });
 
   const restoreChatThread = async (thread: AthenaThread) => {
     const snapshot = thread.context;
@@ -2597,53 +2491,38 @@ const confirmImport = async () => {
         `- Edge: ${e.source_id} --[${e.edge_type || "relates_to"}]--> ${e.target_id}`
       ).join("\n");
 
-      const promptPayload = `You are an AI assistant integrated into the Savant Olympus app.
-The user is asking questions about a node in the Knowledge Graph and its neighborhood context.
-
-[INSTRUCTIONS FOR THE AGENT]
-- Use the provided graph nodes, adjacent relationships, and edges to reference and understand the underlying LOGIC, facts, code architecture, and software relationships they represent.
-- Answer the user's question directly by focusing on these logical relationships, engineering logic, facts, and code concepts.
-- Do NOT talk about the layout, visual structure, node IDs, edge weights, or graph theory terminology unless explicitly requested. Speak in terms of actual code architecture, functionalities, and logical concepts.
-- Treat the canvas-visible graph as the complete context. Do not infer from or mention hidden insight nodes. Insights are context only when the user explicitly enables Show insights.
-
-[${isFilteredChat ? "FILTERED GRAPH CONTEXT" : "SELECTED NODE"}]
-- ID: ${activeNodeId}
-- Type: ${isFilteredChat ? "FILTERED NODE SET" : (activeNode?.node_type || "unknown").toUpperCase()}
-- Title: ${isFilteredChat ? `${neighborNodes.length} Filtered Nodes` : activeNode?.title || "Untitled"}
-- Status: ${isFilteredChat ? "active filter result" : activeNode?.status || "unknown"}
-- Content: ${isFilteredChat ? "Use every filtered node and edge listed below as the complete chat context." : activeNode?.content || "No content available."}
-
-[NEIGHBORHOOD SETTINGS]
-- Neighborhood Depth (Hops): ${exploreDepth}
-- Explicitly Selected Nodes: ${selectedChatNodeIds.length}
-- Total Context Nodes: ${neighborNodes.length}
-- Total Connection Edges: ${neighborEdges.length}
-- Node Types: ${Object.entries(chatContextPayload.nodeTypes).map(([type, count]) => `${type}=${count}`).join(", ") || "none"}
-
-[NEIGHBORS WITHIN ${exploreDepth} HOPS]
-${neighborsText || "No adjacent neighbors found within this depth."}
-
-[CONNECTION EDGES]
-${edgesText || "No connection edges found within this depth."}
-
-[CONVERSATION HISTORY]
-${updatedMessages.length > 0 ?
-  updatedMessages.map(msg => `${msg.sender === "user" ? "User" : "AI"}: ${msg.text}`).join("\n")
-  : "No previous messages in this conversation."
-}
-
-[NEW USER QUESTION]
-${userText}
-
-Please analyze the node information, the neighboring nodes, and the connection edges, and provide a helpful, technical response answering the user's question.`;
-
-      const augmentedPrompt = await buildAthenaAugmentedPrompt(
-        promptPayload,
-        isFilteredChat
+      const augmentedPrompt = await buildAthenaConversationPrompt({
+        context: {
+          area: isFilteredChat ? "Knowledge > Filtered Graph Context" : "Knowledge > Selected Node",
+          repository: activeNode?.metadata?.repo,
+          selected: isFilteredChat ? { type: "filtered-node-set", nodes: neighborNodes } : activeNode,
+          screen: {
+            depth: exploreDepth,
+            explicitlySelectedNodes: selectedChatNodeIds,
+            nodeTypes: chatContextPayload.nodeTypes,
+            neighbors: neighborsText,
+            edges: edgesText,
+            edgeRecords: neighborEdges,
+            showInsights,
+          },
+        },
+        history: currentMessages,
+        userMessage: userText,
+        instructions: "Use the pinned graph nodes, relationships, and edges to explain the represented logic, facts, code architecture, and software relationships. Do not discuss graph layout or graph theory unless asked. Treat the canvas-visible graph as complete context; hidden insights are excluded unless Show insights is enabled.",
+        query: isFilteredChat
           ? `${neighborNodes.map((node) => `${node.title || ""} ${node.content || ""}`).join(" ")} ${userText}`
-          : `${activeNode?.title || ""} ${userText} ${activeNode?.content || ""}`
-      );
-      const rawResponseText = await window.ipcRenderer.invoke("run-agent", {
+          : `${activeNode?.title || ""} ${userText} ${activeNode?.content || ""}`,
+        baseUrl: serverUrl.replace(/\/+$/, ""),
+        apiKey,
+        repo: activeNode?.metadata?.repo,
+      });
+      const summary = augmentedPrompt.match(/\[REQUIRED MCP SUMMARY\]\n([\s\S]*?)(?=\n\n\[|$)/)?.[1] || "";
+      setLastAthenaRun({
+        persona: summary.match(/Persona: ([^\n]+)/)?.[1] || "engineer",
+        knowledgeReferences: Number(summary.match(/Knowledge MCP: (\d+)/)?.[1] || 0),
+        researchReferences: Number(summary.match(/Context\/Research MCP: (\d+)/)?.[1] || 0),
+      });
+      const rawResponseText = await window.system.runAgentViaGateway({
         provider,
         model,
         prompt: augmentedPrompt,
@@ -3518,71 +3397,16 @@ return (
         </div>
       </div>
     </div>
-    {pendingImport && (
-      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-        <div className="bg-[var(--cp-bg-1)] border border-[var(--cp-border)] w-full max-w-lg p-6 rounded shadow-2xl space-y-4">
-          <div className="flex justify-between items-center border-b border-[var(--cp-border)] pb-2">
-            <div>
-              <h3 className="text-sm font-mono text-[var(--section-label)] tracking-wider font-bold">IMPORT PREVIEW</h3>
-              <p className="text-[10px] font-mono text-muted-foreground mt-1">Review the graph diff before adding anything.</p>
-            </div>
-            <button onClick={() => setPendingImport(null)} className="text-muted-foreground hover:text-foreground text-xs font-mono">✕</button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className={`border p-3 flex items-start gap-2 cursor-pointer ${importNodes ? "border-[var(--cp-cyan)] bg-[var(--cp-cyan)]/5" : "border-[var(--cp-border)]"}`}>
-              <input
-                type="checkbox"
-                checked={importNodes}
-                disabled={pendingImport.newNodes.length === 0}
-                onChange={(event) => setImportNodes(event.target.checked)}
-                className="mt-0.5 accent-[var(--cp-cyan)]"
-              />
-              <span>
-                <span className="block text-xs font-mono text-foreground">ADD NODES</span>
-                <span className="block text-lg font-mono font-bold text-[var(--cp-cyan)]">{pendingImport.newNodes.length}</span>
-              </span>
-            </label>
-            <label className={`border p-3 flex items-start gap-2 cursor-pointer ${importEdges ? "border-[var(--cp-cyan)] bg-[var(--cp-cyan)]/5" : "border-[var(--cp-border)]"}`}>
-              <input
-                type="checkbox"
-                checked={importEdges}
-                disabled={pendingImport.newEdges.length === 0}
-                onChange={(event) => setImportEdges(event.target.checked)}
-                className="mt-0.5 accent-[var(--cp-cyan)]"
-              />
-              <span>
-                <span className="block text-xs font-mono text-foreground">ADD EDGES</span>
-                <span className="block text-lg font-mono font-bold text-[var(--cp-cyan)]">{pendingImport.newEdges.length}</span>
-              </span>
-            </label>
-          </div>
-
-          <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] p-3 text-[10px] font-mono text-muted-foreground space-y-1">
-            <div className="text-emerald-400">Required node and edge fields validated.</div>
-            <div>{pendingImport.existingNodeCount} existing nodes will be skipped.</div>
-            <div>{pendingImport.existingEdgeCount} existing edges will be skipped.</div>
-            {pendingImport.newNodes.length === 0 && pendingImport.newEdges.length === 0 && (
-              <div className="text-amber-400">No additions are needed. This graph is already up to date.</div>
-            )}
-          </div>
-
-          <div className="flex gap-2 justify-end pt-2">
-            <button type="button" onClick={() => setPendingImport(null)} className="px-4 py-2 border border-[var(--cp-border)] text-xs uppercase font-mono">
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={confirmImport}
-              disabled={isLoading || (!importNodes && !importEdges) || (pendingImport.newNodes.length === 0 && pendingImport.newEdges.length === 0)}
-              className="px-4 py-2 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase font-mono disabled:opacity-50"
-            >
-              {isLoading ? "IMPORTING..." : "OK, LET'S DO THIS"}
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
+    <KnowledgeImportExportPanel
+      pendingImport={pendingImport}
+      importNodes={importNodes}
+      importEdges={importEdges}
+      isLoading={isLoading}
+      onImportNodesChange={setImportNodes}
+      onImportEdgesChange={setImportEdges}
+      onClose={() => setPendingImport(null)}
+      onConfirm={() => void confirmImport()}
+    />
     {isConnectModalOpen && (selectedNode || selectedNodes.size >= 2) && (
       <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
         <div className="bg-[var(--cp-bg-1)] border border-[var(--cp-border)] w-full max-w-md p-6 rounded shadow-2xl space-y-4">
@@ -3660,38 +3484,19 @@ return (
         </div>
       </div>
     )}
-    {isAddModalOpen && (
-      <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-        <div className="bg-[var(--cp-bg-1)] border border-[var(--cp-border)] w-full max-w-md p-6 rounded shadow-2xl space-y-4">
-          <div className="flex justify-between items-center border-b border-[var(--cp-border)] pb-2">
-            <h3 className="text-sm font-mono text-[var(--section-label)] tracking-wider font-bold">ADD NODE</h3>
-            <button onClick={() => setIsAddModalOpen(false)} className="text-muted-foreground hover:text-foreground text-xs font-mono">✕</button>
-          </div>
-          <form onSubmit={handleAddNode} className="space-y-4">
-            <div>
-              <label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1">Node Title</label>
-              <input type="text" required value={newNodeTitle} onChange={(e) => setNewNodeTitle(e.target.value)} className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono text-xs" />
-            </div>
-            <div>
-              <label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1">Node Type</label>
-              <select value={newNodeType} onChange={(e) => setNewNodeType(e.target.value)} className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono text-xs">
-                {KNOWLEDGE_NODE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[10px] uppercase font-mono text-muted-foreground mb-1">Content</label>
-              <textarea rows={4} value={newNodeContent} onChange={(e) => setNewNodeContent(e.target.value)} className="w-full bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground text-xs px-2.5 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] resize-none font-mono text-xs" />
-            </div>
-            <div className="flex gap-2 justify-end pt-2">
-              <button type="button" onClick={() => setIsAddModalOpen(false)} className="px-4 py-2 border border-[var(--cp-border)] text-xs uppercase font-mono">Cancel</button>
-              <button type="submit" disabled={isSubmittingNode} className="px-4 py-2 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold text-xs uppercase hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5">
-                <Plus size={14} />{isSubmittingNode ? "CREATING..." : "CREATE_NODE"}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    )}
+    <KnowledgeAddModal
+      isOpen={isAddModalOpen}
+      title={newNodeTitle}
+      nodeType={newNodeType}
+      content={newNodeContent}
+      isSubmitting={isSubmittingNode}
+      nodeTypes={KNOWLEDGE_NODE_TYPES}
+      onTitleChange={setNewNodeTitle}
+      onNodeTypeChange={setNewNodeType}
+      onContentChange={setNewNodeContent}
+      onClose={() => setIsAddModalOpen(false)}
+      onSubmit={handleAddNode}
+    />
   </div>
 );
 }

@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 import { Folder, FileCode, CheckCircle, Database, AlertTriangle, Square, Trash, Zap, Clock, Info, ShieldAlert, FileText, ChevronRight, ChevronDown, Layers, HelpCircle, MessageSquare, Send, Sparkles, Trash2, Loader2, Copy } from "lucide-react";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
+import { AthenaConversationExport, AthenaMessageExportActions } from "@/components/shared/AthenaExportActions";
 import { useAthenaThread } from "@/hooks/useAthenaThread";
-import { buildAthenaAugmentedPrompt as compileAthenaAugmentedPrompt, ensureAthenaMcpSummary } from "@/services/athenaService";
+import { buildAthenaConversationPrompt, ensureAthenaMcpSummary } from "@/services/athenaService";
 import { ASTNode, ComplexityFunction, ComplexityFile, CodeDoc, Finding, AnalysisResults } from "./context/types";
 import { computeAstComplexity, complexityColor } from "./context/utils/complexityUtils";
 import { analyzeProjectSource } from "./context/utils/heuristicsEngine";
@@ -563,26 +564,17 @@ DETAILED FINDINGS (Truncated to first 100):
 ${analysis.findings.slice(0, 100).map((f, i) => `${i + 1}. [${f.severity.toUpperCase()}] ${f.title} in ${f.path}:${f.line} - ${f.detail}`).join("\n")}
       `;
 
-      const prompt = `You are ATHENA, an expert software architect and security auditor integrated into the Savant Olympus dashboard.
-The user is investigating static analysis results for the repository "${repoName}".
-
-[FULL ANALYSIS DATA]
-${analysisSummary}
-
-[CHAT HISTORY]
-${updated.map(m => `${m.sender === "user" ? "USER" : "ATHENA"}: ${m.text}`).join("\n")}
-
-[TASK]
-Respond to the user's latest query using the provided analysis data. 
-Provide deep technical insights, prioritize the most dangerous or structural issues, and suggest concrete refactoring plans.
-Maintain a professional, helpful, and highly technical tone.
-
-[INSTRUCTIONS FOR MCP USAGE]
-You have access to a variety of Savant MCP tools. Use them to investigate code, query knowledge, or perform actions as needed. 
-Always prefer using a tool if it can provide more accurate or deep information.
-`;
-
-      const augmentedPrompt = await compileAthenaAugmentedPrompt(prompt, `${repoName} ${textToSend} ${analysisSummary}`, {
+      const augmentedPrompt = await buildAthenaConversationPrompt({
+        context: {
+          area: filePath ? "Context > Project > Visualization and Heuristics > Complexity Heatmap" : "Context > Project > Visualization and Heuristics > Analysis",
+          repository: repoName,
+          selected: filePath ? { type: "file", path: filePath } : { type: "repository", name: repoName },
+          screen: { analysis: analysisSummary },
+        },
+        history: messages,
+        userMessage: textToSend,
+        instructions: "Act as an expert software architect and security auditor. Use the pinned analysis data, prioritize dangerous or structural issues, and suggest concrete refactoring plans. For a selected heatmap file, keep that file as the primary target while using repository analysis only as supporting context.",
+        query: `${repoName} ${filePath || ""} ${textToSend} ${analysisSummary}`,
         baseUrl: serverUrl,
         apiKey,
         repo: repoName,
@@ -656,6 +648,7 @@ Always prefer using a tool if it can provide more accurate or deep information.
       </div>
 
       {/* Messages Area */}
+      <AthenaConversationExport messages={messages} title="Olympus analysis" scope="analysis-athena" />
       <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2 space-y-3 min-h-0 flex flex-col pr-1">
         {messages.length === 0 ? (
           <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-4 my-auto">
@@ -695,9 +688,12 @@ Always prefer using a tool if it can provide more accurate or deep information.
               <AthenaMessage
                 key={`${msg.timestamp}-${i}`}
                 message={msg}
+                messageIndex={i}
+                exportScope="analysis-athena"
                 variant="compact"
                 onCopy={(text) => navigator.clipboard.writeText(text)}
                 onDelete={() => saveMessages(messages.filter((_, index) => index !== i))}
+                actions={<AthenaMessageExportActions message={msg} index={i} title="Olympus analysis" scope="analysis-athena" />}
               />
             ))}
             {isLoading && (
@@ -1725,7 +1721,7 @@ function TreeVisualizer({ nodes, repoName, showLabels, setShowLabels, findings =
 
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
         <div ref={containerRef} className="flex-1 h-full w-full overflow-hidden" />
-        <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={handleToggleCollapse} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} />
+        <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={handleToggleCollapse} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} visualization="Complexity Tree" screenContext={{ repository: repoName, visibleNodeCount: nodes.length, activeDepth, labelsVisible: showLabels, totalFindingCount: findings.length }} />
       </div>
     </div>
   );
@@ -1842,7 +1838,7 @@ function RadialVisualizer({ nodes, repoName, findings = [], serverUrl, apiKey }:
   return (
     <div className="h-full w-full flex min-h-0 overflow-hidden relative">
       <div ref={containerRef} className="flex-1 h-full w-full overflow-hidden flex items-center justify-center bg-[rgba(0,0,0,0.12)]" />
-      <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={() => {}} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} />
+      <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={() => {}} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} visualization="Radial Complexity" screenContext={{ repository: repoName, analyzedNodeCount: nodes.length, fileCount: computeAstComplexity(nodes).length, totalComplexity: computeAstComplexity(nodes).reduce((sum, file) => sum + file.total_complexity, 0), totalFindingCount: findings.length }} />
     </div>
   );
 }
@@ -2025,7 +2021,7 @@ function ClusterVisualizer({ nodes, repoName, findings = [], serverUrl, apiKey }
 
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
         <div ref={containerRef} className="flex-1 h-full w-full overflow-hidden flex items-center justify-center" />
-        <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={handleToggleCollapse} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} />
+        <DetailDrawer selectedNode={selectedNode} isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} onToggleCollapse={handleToggleCollapse} findings={findings} repoName={repoName} serverUrl={serverUrl} apiKey={apiKey} visualization="Radial Cluster" screenContext={{ repository: repoName, visibleNodeCount: nodes.length, activeDepth, totalFindingCount: findings.length }} />
       </div>
     </div>
   );

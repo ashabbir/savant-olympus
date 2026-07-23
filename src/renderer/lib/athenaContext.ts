@@ -1,6 +1,7 @@
 export {
   ATHENA_SYSTEM_DIRECTIVE,
   buildAthenaAugmentedPrompt,
+  buildAthenaConversationPrompt,
   buildAthenaResearchQuery,
   buildAthenaPromptSections,
   fetchAthenaCodeContext,

@@ -3,7 +3,7 @@ import { Activity, GitBranch, FileText, Upload, Sparkles, Search, ListChecks, Te
 import { AreaChart, Area, LineChart, Line, ResponsiveContainer } from "recharts";
 import { motion, AnimatePresence } from "motion/react";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { Thinking } from "../App";
+import type { Thinking } from "@/types/thinking";
 import { createContextService } from "@/services/contextService";
 
 const TABS = [

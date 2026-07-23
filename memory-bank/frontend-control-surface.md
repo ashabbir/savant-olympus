@@ -2,7 +2,11 @@
 
 ## App shell
 
-`src/renderer/App.tsx` is the renderer orchestrator.
+`src/renderer/App.tsx` is a thin renderer shell coordinator. Authentication,
+settings, gateway initialization, and live-role refresh live in
+`src/renderer/hooks/useOlympusSession.ts`; runtime defaults and selectors live
+in `src/renderer/services/olympusRuntime.ts`; tab-to-feature composition lives
+in `src/renderer/components/OlympusViewport.tsx`.
 
 Startup flow:
 1. Show `StartupScreen` while initializing.

@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ATHENA_SYSTEM_DIRECTIVE,
+  ATHENA_WORKSPACE,
+  buildAthenaConversationPrompt,
   buildAthenaResearchQuery,
   ensureAthenaMcpSummary,
   requiresAthenaImpactAnalysis,
@@ -47,5 +49,47 @@ describe("Athena MCP orchestration", () => {
     expect(result).toContain("Useful analysis.");
     expect(result).toContain("Refactor safely.");
     expect(result).toContain("Savant MCP Summary");
+  });
+
+  it("pins selected context, keeps full history, exposes every MCP, and infers Jira use", async () => {
+    const tools = Array.from({ length: 30 }, (_, index) => ({
+      name: index === 0 ? "savant-workspace-create_task" : index === 1 ? "jira-search" : index === 2 ? "confluence-read-page" : `external-tool-${index}`,
+      description: `Tool ${index}`,
+    }));
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url.includes("/api/mcp/tools")) return { ok: true, json: async () => ({ tools }) } as Response;
+      if (url.includes("/api/knowledge/graph")) return { ok: true, json: async () => ({ nodes: [] }) } as Response;
+      if (url.includes("/api/context/search")) return { ok: true, json: async () => ({ results: [] }) } as Response;
+      return { ok: false, json: async () => ({}) } as Response;
+    });
+    const history = Array.from({ length: 75 }, (_, index) => ({
+      sender: index % 2 === 0 ? "user" as const : "assistant" as const,
+      text: `historic-message-${index}`,
+    }));
+
+    const prompt = await buildAthenaConversationPrompt({
+      context: {
+        area: "Knowledge > Selected Node",
+        repository: "savant-olympus",
+        selected: { id: "component-42", name: "PinnedComponent" },
+      },
+      history,
+      userMessage: "Create a Jira issue for this selected component",
+      instructions: "Refactor the selected component.",
+      baseUrl: "http://127.0.0.1:8090",
+      apiKey: "test-key",
+      repo: "savant-olympus",
+    });
+
+    expect(prompt.indexOf("SELECTED USER CONTEXT")).toBeLessThan(prompt.indexOf("COMPLETE CONVERSATION HISTORY"));
+    expect(prompt).toContain("PinnedComponent");
+    expect(prompt).toContain("historic-message-0");
+    expect(prompt).toContain("historic-message-74");
+    expect(prompt).toContain("jira-search");
+    expect(prompt).toContain("confluence-read-page");
+    expect(prompt).toContain("external-tool-29");
+    expect(prompt).toContain(ATHENA_WORKSPACE.id);
+    expect(prompt).toContain("Never ask permission before using an available Savant MCP tool");
   });
 });

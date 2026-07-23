@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { buildFilteredKnowledgeContext, buildKnowledgeChatContextSnapshot, buildKnowledgeChatPayload, buildKnowledgeExportPayload, buildKnowledgeImportDiff, deriveKnowledgeVisibility, fetchKnowledgeExportData, getKnowledgeNodeRadius, importKnowledgePayload, inferNodeDomains, KnowledgeView, restoreKnowledgeFocals, selectKnowledgeAthenaPersona, validateKnowledgeImportPayload } from '../components/tabs/KnowledgeView'
+import { buildFilteredKnowledgeContext, buildKnowledgeChatContextSnapshot, buildKnowledgeChatPayload, buildKnowledgeExportPayload, buildKnowledgeImportDiff, deriveKnowledgeFilterState, deriveKnowledgeVisibility, fetchKnowledgeExportData, formatKnowledgePurgePreview, getKnowledgeNodeRadius, importKnowledgePayload, inferNodeDomains, KnowledgeView, restoreKnowledgeFocals, selectKnowledgeAthenaPersona, validateKnowledgeImportPayload } from '../components/tabs/KnowledgeView'
 
 const graphPayload = {
   nodes: [
@@ -16,6 +16,26 @@ const graphPayload = {
 let currentGraphPayload = graphPayload
 
 describe('KnowledgeView', () => {
+  it('derives cross-type reachability and purge preview text outside the component', () => {
+    const index = {
+      nodesById: new Map(graphPayload.nodes.map((node) => [node.node_id, node])),
+      nodesByType: new Map(),
+      edgesByNode: new Map(),
+      adjacency: { n1: ['n2', 'd1'], n2: ['n1'], d1: ['n1'] },
+    }
+    const state = deriveKnowledgeFilterState(
+      { service: new Set(['n1']), technology: new Set(['n2']) },
+      1,
+      index,
+      graphPayload.nodes,
+      ['domain', 'service', 'technology'],
+    )
+
+    expect(state.visibleNodes.map((node) => node.node_id).sort()).toEqual(['n1', 'n2'])
+    expect(state.allowedByType.get('domain')).toEqual(new Set(['n1', 'n2']))
+    expect(formatKnowledgePurgePreview({ to_delete: 2 }, 3, 'olympus')).toContain('2 nodes and 3 edges')
+  })
+
   it('increases node size as linked edge count grows', () => {
     const isolatedRadius = getKnowledgeNodeRadius(0)
     const connectedRadius = getKnowledgeNodeRadius(4)
@@ -415,8 +435,8 @@ describe('KnowledgeView', () => {
       target: { value: 'Summarize what is visible.' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'ASK' }))
-    await waitFor(() => expect(window.ipcRenderer.invoke).toHaveBeenCalledTimes(1))
-    expect(vi.mocked(window.ipcRenderer.invoke).mock.calls[0][1].prompt).not.toContain('Private signal')
+    await waitFor(() => expect(window.system.runAgentViaGateway).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(window.system.runAgentViaGateway).mock.calls[0][0].prompt).not.toContain('Private signal')
 
     fireEvent.click(screen.getByRole('button', { name: 'Show insights' }))
 
@@ -426,8 +446,8 @@ describe('KnowledgeView', () => {
       target: { value: 'Now include visible insights.' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'ASK' }))
-    await waitFor(() => expect(window.ipcRenderer.invoke).toHaveBeenCalledTimes(2))
-    expect(vi.mocked(window.ipcRenderer.invoke).mock.calls[1][1].prompt).toContain('Private signal')
+    await waitFor(() => expect(window.system.runAgentViaGateway).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(window.system.runAgentViaGateway).mock.calls[1][0].prompt).toContain('Private signal')
   })
 
   it('loads and renders graph nodes, filters search, and shows selected details', async () => {
@@ -509,8 +529,7 @@ describe('KnowledgeView', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'ASK' }))
     await waitFor(() => {
-      expect(window.ipcRenderer.invoke).toHaveBeenCalledWith(
-        'run-agent',
+      expect(window.system.runAgentViaGateway).toHaveBeenCalledWith(
         expect.objectContaining({
           prompt: expect.stringContaining('Authentication boundary'),
         })
@@ -543,10 +562,9 @@ describe('KnowledgeView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'ASK' }))
 
     await waitFor(() => {
-      expect(window.ipcRenderer.invoke).toHaveBeenCalledWith(
-        'run-agent',
+      expect(window.system.runAgentViaGateway).toHaveBeenCalledWith(
         expect.objectContaining({
-          prompt: expect.stringMatching(/FILTERED GRAPH CONTEXT[\s\S]*Auth Service[\s\S]*Postgres[\s\S]*d1 --\[contains\]--> n1/),
+          prompt: expect.stringMatching(/Filtered Graph Context[\s\S]*Auth Service[\s\S]*Postgres[\s\S]*d1 --\[contains\]--> n1/),
         })
       )
     })

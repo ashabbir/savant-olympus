@@ -192,7 +192,7 @@ describe('SkillsView Component', () => {
   })
 
   it('reviews Athena suggested files before creating them on the server', async () => {
-    vi.mocked(window.ipcRenderer.invoke).mockResolvedValueOnce(JSON.stringify({
+    vi.mocked(window.system.runAgentViaGateway).mockResolvedValueOnce(JSON.stringify({
       status: 'ready',
       name: 'summarize-releases',
       description: 'Summarize release history',
@@ -225,7 +225,7 @@ describe('SkillsView Component', () => {
   })
 
   it('shows Athena recommendation while asking a necessary question', async () => {
-    vi.mocked(window.ipcRenderer.invoke).mockResolvedValueOnce(JSON.stringify({
+    vi.mocked(window.system.runAgentViaGateway).mockResolvedValueOnce(JSON.stringify({
       status: 'clarifying',
       question: 'Should the skill publish releases or only draft them?',
       suggestion: 'Draft by default so publishing remains an explicit human action.',
