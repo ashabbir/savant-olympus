@@ -133,7 +133,7 @@ describe('ContextView - Code Graph Integration', () => {
     expect(await screen.findByText('GENERATE GRAPH')).toBeInTheDocument()
     expect(screen.queryByText(/graphify/i)).not.toBeInTheDocument()
     expect(await screen.findByText(/The code graph is stale/i)).toBeInTheDocument()
-    expect(screen.getByText('4217')).toBeInTheDocument()
+    expect(await screen.findByText('4217')).toBeInTheDocument()
     expect(screen.getByText('SEMANTIC: DONE')).toBeInTheDocument()
     expect(screen.getByText('STRUCTURAL: STALE')).toBeInTheDocument()
     expect(screen.getByText('Last Graph Generated')).toBeInTheDocument()
