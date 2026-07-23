@@ -114,6 +114,79 @@ export function buildKnowledgeGraphIndex(nodes: any[], edges: any[]): KnowledgeG
   return { nodesById, adjacency, edgesByNode, nodesByType };
 }
 
+export function buildKnowledgeDistanceMap(
+  seeds: Set<string>,
+  depth: number,
+  adjacency: Record<string, string[]>,
+) {
+  const distances = new Map<string, number>();
+  const queue = [...seeds];
+  seeds.forEach((nodeId) => distances.set(nodeId, 0));
+  for (let index = 0; index < queue.length; index += 1) {
+    const nodeId = queue[index];
+    const nodeDepth = distances.get(nodeId)!;
+    if (nodeDepth >= depth) continue;
+    for (const neighborId of adjacency[nodeId] || []) {
+      if (distances.has(neighborId)) continue;
+      distances.set(neighborId, nodeDepth + 1);
+      queue.push(neighborId);
+    }
+  }
+  return distances;
+}
+
+function intersectNodeSets(sets: Set<string>[]) {
+  if (sets.length === 0) return null;
+  const [smallest, ...rest] = [...sets].sort((left, right) => left.size - right.size);
+  return new Set([...smallest].filter((nodeId) => rest.every((set) => set.has(nodeId))));
+}
+
+export function deriveKnowledgeFilterState(
+  focalsByType: Record<string, Set<string>>,
+  depth: number,
+  index: KnowledgeGraphIndex,
+  nodes: any[],
+  nodeTypes: string[],
+) {
+  const activeEntries = Object.entries(focalsByType).filter(([, bucket]) => bucket.size > 0);
+  const reachByType = new Map(
+    activeEntries.map(([nodeType, seeds]) => [
+      nodeType,
+      new Set(buildKnowledgeDistanceMap(seeds, depth, index.adjacency).keys()),
+    ]),
+  );
+  const visibleIds = intersectNodeSets([...reachByType.values()]);
+  const allowedByType = new Map<string, Set<string> | null>();
+  nodeTypes.forEach((nodeType) => {
+    allowedByType.set(
+      nodeType,
+      intersectNodeSets(
+        activeEntries
+          .filter(([activeType]) => activeType !== nodeType)
+          .map(([activeType]) => reachByType.get(activeType)!),
+      ),
+    );
+  });
+  const visibleNodes = visibleIds
+    ? nodes
+        .filter((node) => visibleIds.has(node.node_id || node.id))
+        .sort((left, right) =>
+          (left.title || left.node_id).localeCompare(right.title || right.node_id),
+        )
+    : [];
+  return { activeEntries, allowedByType, visibleIds, visibleNodes };
+}
+
+export function formatKnowledgePurgePreview(
+  preview: { to_delete?: number },
+  edgeCount: number,
+  workspace: string,
+) {
+  return `I’m going to purge ${preview.to_delete || 0} nodes and ${edgeCount} edges.\n\n` +
+    `This will delete exclusive nodes and unlink shared nodes for workspace "${workspace}".\n` +
+    "Nodes without edges remain committed. Orphaned edges are not part of this purge.";
+}
+
 export function inferNodeDomainsFromIndex(nodeId: string, index: KnowledgeGraphIndex, maxDepth = 2) {
   const queue: Array<{ id: string; depth: number }> = [{ id: nodeId, depth: 0 }];
   const visited = new Set([nodeId]);

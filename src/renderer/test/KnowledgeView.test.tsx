@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { buildFilteredKnowledgeContext, buildKnowledgeChatContextSnapshot, buildKnowledgeChatPayload, buildKnowledgeExportPayload, buildKnowledgeImportDiff, deriveKnowledgeVisibility, fetchKnowledgeExportData, getKnowledgeNodeRadius, importKnowledgePayload, inferNodeDomains, KnowledgeView, restoreKnowledgeFocals, selectKnowledgeAthenaPersona, validateKnowledgeImportPayload } from '../components/tabs/KnowledgeView'
+import { buildFilteredKnowledgeContext, buildKnowledgeChatContextSnapshot, buildKnowledgeChatPayload, buildKnowledgeExportPayload, buildKnowledgeImportDiff, deriveKnowledgeFilterState, deriveKnowledgeVisibility, fetchKnowledgeExportData, formatKnowledgePurgePreview, getKnowledgeNodeRadius, importKnowledgePayload, inferNodeDomains, KnowledgeView, restoreKnowledgeFocals, selectKnowledgeAthenaPersona, validateKnowledgeImportPayload } from '../components/tabs/KnowledgeView'
 
 const graphPayload = {
   nodes: [
@@ -16,6 +16,26 @@ const graphPayload = {
 let currentGraphPayload = graphPayload
 
 describe('KnowledgeView', () => {
+  it('derives cross-type reachability and purge preview text outside the component', () => {
+    const index = {
+      nodesById: new Map(graphPayload.nodes.map((node) => [node.node_id, node])),
+      nodesByType: new Map(),
+      edgesByNode: new Map(),
+      adjacency: { n1: ['n2', 'd1'], n2: ['n1'], d1: ['n1'] },
+    }
+    const state = deriveKnowledgeFilterState(
+      { service: new Set(['n1']), technology: new Set(['n2']) },
+      1,
+      index,
+      graphPayload.nodes,
+      ['domain', 'service', 'technology'],
+    )
+
+    expect(state.visibleNodes.map((node) => node.node_id).sort()).toEqual(['n1', 'n2'])
+    expect(state.allowedByType.get('domain')).toEqual(new Set(['n1', 'n2']))
+    expect(formatKnowledgePurgePreview({ to_delete: 2 }, 3, 'olympus')).toContain('2 nodes and 3 edges')
+  })
+
   it('increases node size as linked edge count grows', () => {
     const isolatedRadius = getKnowledgeNodeRadius(0)
     const connectedRadius = getKnowledgeNodeRadius(4)
