@@ -764,6 +764,32 @@ export function ContextVisualizations({ nodes, repoName, analysis, activeModel, 
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchDropOpen, setIsSearchDropOpen] = useState(false);
 
+  // Filters for Pain Points & Findings
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [selectedSeverities, setSelectedSeverities] = useState<string[]>([]);
+  // Heatmap function/finding level severity filter
+  const [selectedHeatmapSeverity, setSelectedHeatmapSeverity] = useState<string | null>(null);
+
+  const handleCategoryClick = (cat: string) => {
+    setSelectedCategories((prev) => {
+      if (prev.includes(cat)) {
+        return prev.filter((c) => c !== cat);
+      } else {
+        return [...prev, cat];
+      }
+    });
+  };
+
+  const handleSeverityClick = (sev: string) => {
+    setSelectedSeverities((prev) => {
+      if (prev.includes(sev)) {
+        return prev.filter((s) => s !== sev);
+      } else {
+        return [...prev, sev];
+      }
+    });
+  };
+
   // For D3 collapsing state logic
   const treeContainerRef = useRef<HTMLDivElement>(null);
   const radialContainerRef = useRef<HTMLDivElement>(null);
@@ -1152,8 +1178,11 @@ export function ContextVisualizations({ nodes, repoName, analysis, activeModel, 
               const med = analysis.summary?.by_severity?.medium || 0;
               const low = analysis.summary?.by_severity?.low || 0;
               const filesCount = analysis.summary?.filesAnalyzed || 0;
-              // Health score: 100 minus weighted penalties
-              const rawScore = Math.max(0, 100 - (high * 15) - (med * 5) - (low * 1));
+              // Health score: 100 minus weighted penalties (capped per tier for realistic evaluation)
+              const highPenalty = Math.min(50, high * 12);
+              const medPenalty = Math.min(30, med * 3);
+              const lowPenalty = Math.min(15, low * 0.5);
+              const rawScore = Math.max(0, Math.round(100 - highPenalty - medPenalty - lowPenalty));
               const grade = rawScore >= 90 ? "A" : rawScore >= 75 ? "B" : rawScore >= 60 ? "C" : rawScore >= 40 ? "D" : "F";
               const gradeColor = rawScore >= 90 ? "#4ade80" : rawScore >= 75 ? "#a3e635" : rawScore >= 60 ? "#facc15" : rawScore >= 40 ? "#fb923c" : "#f87171";
               const categoryColors: Record<string, { border: string; bg: string; icon: string }> = {
@@ -1168,25 +1197,59 @@ export function ContextVisualizations({ nodes, repoName, analysis, activeModel, 
               <div className="space-y-4">
                 {/* Health Score + Severity Summary */}
                 <div className="flex gap-3 items-stretch">
-                  <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-3)] rounded p-4 flex flex-col items-center justify-center min-w-[100px]">
-                    <span className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Health</span>
+                  <div 
+                    className="border border-[var(--cp-border)] bg-[var(--cp-bg-3)] rounded p-3 flex flex-col items-center justify-center min-w-[120px] relative group cursor-help"
+                    title={`Base Score: 100\nPenalties: High (-15 ea, max -50), Medium (-5 ea, max -30), Low (-1 ea, max -15)\nFindings: ${total} total (${high} Critical, ${med} Warning, ${low} Info)`}
+                  >
+                    <span className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1 font-bold">Health Score</span>
                     <span className="text-3xl font-black font-[Orbitron,monospace]" style={{ color: gradeColor }}>{grade}</span>
-                    <span className="text-[10px] font-mono" style={{ color: gradeColor }}>{rawScore}/100</span>
+                    <span className="text-[10px] font-mono font-bold mt-0.5" style={{ color: gradeColor }}>{rawScore}/100</span>
+                    <span className="text-[8px] text-muted-foreground/80 mt-1 text-center font-mono leading-tight">
+                      {total === 0 ? "Perfect Codebase" : `${high} Crit · ${med} Warn · ${low} Info`}
+                    </span>
                   </div>
+
                   <div className="flex-1 grid grid-cols-3 gap-2">
-                    <div className="border border-red-900/50 bg-red-950/10 rounded p-3 flex flex-col items-center justify-center">
-                      <span className="text-[9px] text-red-400 uppercase tracking-wider">Critical</span>
+                    <div 
+                      onClick={() => handleSeverityClick("high")}
+                      className={`border border-red-900/50 bg-red-950/10 rounded p-3 flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-[1.02] ${
+                        selectedSeverities.includes("high") ? "ring-2 ring-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)] bg-red-950/30" : selectedSeverities.length > 0 ? "opacity-40" : ""
+                      }`}
+                    >
+                      <span className="text-[9px] text-red-400 uppercase tracking-wider font-bold flex items-center gap-1">
+                        <span>Critical</span>
+                        {selectedSeverities.includes("high") && <span className="text-[8px] text-red-400">●</span>}
+                      </span>
                       <span className="text-2xl font-bold text-red-400">{high}</span>
                     </div>
-                    <div className="border border-amber-900/50 bg-amber-950/10 rounded p-3 flex flex-col items-center justify-center">
-                      <span className="text-[9px] text-amber-400 uppercase tracking-wider">Warning</span>
+
+                    <div 
+                      onClick={() => handleSeverityClick("medium")}
+                      className={`border border-amber-900/50 bg-amber-950/10 rounded p-3 flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-[1.02] ${
+                        selectedSeverities.includes("medium") ? "ring-2 ring-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)] bg-amber-950/30" : selectedSeverities.length > 0 ? "opacity-40" : ""
+                      }`}
+                    >
+                      <span className="text-[9px] text-amber-400 uppercase tracking-wider font-bold flex items-center gap-1">
+                        <span>Warning</span>
+                        {selectedSeverities.includes("medium") && <span className="text-[8px] text-amber-400">●</span>}
+                      </span>
                       <span className="text-2xl font-bold text-amber-400">{med}</span>
                     </div>
-                    <div className="border border-green-900/50 bg-green-950/10 rounded p-3 flex flex-col items-center justify-center">
-                      <span className="text-[9px] text-green-400 uppercase tracking-wider">Info</span>
+
+                    <div 
+                      onClick={() => handleSeverityClick("low")}
+                      className={`border border-green-900/50 bg-green-950/10 rounded p-3 flex flex-col items-center justify-center cursor-pointer transition-all hover:scale-[1.02] ${
+                        selectedSeverities.includes("low") ? "ring-2 ring-green-500 shadow-[0_0_10px_rgba(34,197,94,0.3)] bg-green-950/30" : selectedSeverities.length > 0 ? "opacity-40" : ""
+                      }`}
+                    >
+                      <span className="text-[9px] text-green-400 uppercase tracking-wider font-bold flex items-center gap-1">
+                        <span>Info</span>
+                        {selectedSeverities.includes("low") && <span className="text-[8px] text-green-400">●</span>}
+                      </span>
                       <span className="text-2xl font-bold text-green-400">{low}</span>
                     </div>
                   </div>
+
                   <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-3)] rounded p-4 flex flex-col items-center justify-center min-w-[100px]">
                     <span className="text-[9px] text-muted-foreground uppercase tracking-widest mb-1">Files</span>
                     <span className="text-2xl font-bold text-[var(--section-label)]">{filesCount}</span>
@@ -1198,54 +1261,136 @@ export function ContextVisualizations({ nodes, repoName, analysis, activeModel, 
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
                   {Object.entries(analysis?.summary?.by_category || {}).map(([cat, count]) => {
                     const cc = categoryColors[cat] || { border: "border-[var(--cp-border)]", bg: "bg-[var(--cp-bg-3)]", icon: "📋" };
+                    const isSelected = selectedCategories.includes(cat);
                     return (
-                    <div key={cat} className={`${cc.border} ${cc.bg} border p-2.5 rounded transition-all hover:scale-[1.02]`}>
-                      <span className="block text-[9px] text-muted-foreground uppercase">{cc.icon} {cat.replace("_", " ")}</span>
-                      <span className="text-lg font-bold text-foreground">{count as number}</span>
-                    </div>
+                      <div
+                        key={cat}
+                        onClick={() => handleCategoryClick(cat)}
+                        className={`${cc.border} ${cc.bg} border p-2.5 rounded transition-all hover:scale-[1.02] cursor-pointer ${
+                          isSelected ? "ring-2 ring-[var(--cp-cyan)] shadow-[0_0_10px_rgba(0,229,255,0.3)] bg-opacity-80" : selectedCategories.length > 0 ? "opacity-40" : ""
+                        }`}
+                      >
+                        <span className="block text-[9px] text-muted-foreground uppercase flex items-center justify-between">
+                          <span>{cc.icon} {cat.replace("_", " ")}</span>
+                          {isSelected && <span className="text-[8px] text-[var(--cp-cyan)] font-bold">ACTIVE</span>}
+                        </span>
+                        <span className="text-lg font-bold text-foreground">{count as number}</span>
+                      </div>
                     );
                   })}
                 </div>
 
+                {/* Active Filter Bar if any filters selected */}
+                {(selectedCategories.length > 0 || selectedSeverities.length > 0) && (
+                  <div className="flex items-center justify-between bg-[rgba(0,229,255,0.06)] border border-[var(--cp-cyan)]/40 p-2 rounded text-xs font-mono">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] uppercase font-bold text-[var(--cp-cyan)]">Active Filters:</span>
+                      {selectedSeverities.map((sev) => (
+                        <span 
+                          key={sev}
+                          onClick={() => handleSeverityClick(sev)}
+                          className="px-2 py-0.5 rounded text-[10px] font-bold bg-muted/30 border border-[var(--cp-border)] text-foreground flex items-center gap-1 cursor-pointer hover:border-red-400"
+                        >
+                          SEVERITY: {sev.toUpperCase()} <span className="text-muted-foreground hover:text-red-400">✕</span>
+                        </span>
+                      ))}
+                      {selectedCategories.map((cat) => (
+                        <span 
+                          key={cat}
+                          onClick={() => handleCategoryClick(cat)}
+                          className="px-2 py-0.5 rounded text-[10px] font-bold bg-muted/30 border border-[var(--cp-border)] text-foreground flex items-center gap-1 cursor-pointer hover:border-red-400"
+                        >
+                          CATEGORY: {cat.toUpperCase()} <span className="text-muted-foreground hover:text-red-400">✕</span>
+                        </span>
+                      ))}
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setSelectedCategories([]);
+                        setSelectedSeverities([]);
+                      }}
+                      className="text-[10px] uppercase font-bold text-[var(--cp-cyan)] hover:underline cursor-pointer ml-2 shrink-0"
+                    >
+                      Clear All Filters
+                    </button>
+                  </div>
+                )}
+
                 {/* Findings List */}
                 <div className="space-y-2">
-                  <h4 className="text-xs uppercase text-[var(--section-label)] tracking-wider flex items-center gap-1.5">
-                    <ShieldAlert size={14} /> PAIN POINTS &amp; FINDINGS ({total})
-                  </h4>
-                  <div className="space-y-2">
-                    {(analysis.findings || []).map((f, idx) => {
-                      const isHigh = f.severity === "high";
-                      const isMed = f.severity === "medium";
-                      const cc = categoryColors[f.category] || { border: "border-[var(--cp-border)]", bg: "bg-[var(--cp-bg-3)]", icon: "📋" };
-                      return (
-                        <div
-                          key={idx}
-                          className={`p-3 border rounded text-xs leading-relaxed ${
-                            isHigh ? "border-red-900 bg-red-950/10" : isMed ? "border-amber-900 bg-amber-950/10" : "border-[var(--cp-border)] bg-[var(--cp-bg-3)]"
-                          }`}
-                        >
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="font-semibold text-foreground flex items-center gap-1.5">
-                              <span className={`w-1.5 h-1.5 rounded-full ${isHigh ? "bg-red-500 animate-pulse" : isMed ? "bg-amber-500" : "bg-green-500"}`} />
-                              <span className="opacity-70 mr-0.5">{cc.icon}</span>
-                              {f.title}
+                  {(() => {
+                    const filteredFindings = (analysis.findings || []).filter((f) => {
+                      const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(f.category);
+                      const matchesSeverity = selectedSeverities.length === 0 || selectedSeverities.includes(f.severity);
+                      return matchesCategory && matchesSeverity;
+                    });
+
+                    return (
+                      <>
+                        <h4 className="text-xs uppercase text-[var(--section-label)] tracking-wider flex items-center justify-between">
+                          <span className="flex items-center gap-1.5">
+                            <ShieldAlert size={14} /> PAIN POINTS &amp; FINDINGS ({filteredFindings.length} / {total})
+                          </span>
+                          {(selectedCategories.length > 0 || selectedSeverities.length > 0) && (
+                            <span className="text-[10px] font-normal text-muted-foreground">
+                              Filtered from {total} total findings
                             </span>
-                            <span className="text-[10px] text-muted-foreground font-mono">
-                              {f.path}:{f.line}
-                            </span>
-                          </div>
-                          <p className="text-muted-foreground">{f.detail}</p>
-                          <div className="mt-1.5 flex gap-3 text-[9px] font-mono text-muted-foreground opacity-60">
-                            <span className="px-1.5 py-0.5 rounded" style={{ background: isHigh ? "rgba(239,68,68,0.15)" : isMed ? "rgba(245,158,11,0.15)" : "rgba(34,197,94,0.15)" }}>
-                              {f.severity.toUpperCase()}
-                            </span>
-                            <span>CATEGORY: {f.category?.toUpperCase() || ""}</span>
-                            <span>RULE: {f.rule_id}</span>
-                          </div>
+                          )}
+                        </h4>
+                        <div className="space-y-2">
+                          {filteredFindings.length === 0 ? (
+                            <div className="p-6 border border-dashed border-[var(--cp-border)] rounded text-center text-muted-foreground space-y-1">
+                              <p className="text-xs font-bold uppercase">No findings match the selected filters</p>
+                              <button
+                                onClick={() => {
+                                  setSelectedCategories([]);
+                                  setSelectedSeverities([]);
+                                }}
+                                className="text-[10px] text-[var(--cp-cyan)] underline hover:opacity-80 cursor-pointer"
+                              >
+                                Reset filters to show all {total} findings
+                              </button>
+                            </div>
+                          ) : (
+                            filteredFindings.map((f, idx) => {
+                              const isHigh = f.severity === "high";
+                              const isMed = f.severity === "medium";
+                              const cc = categoryColors[f.category] || { border: "border-[var(--cp-border)]", bg: "bg-[var(--cp-bg-3)]", icon: "📋" };
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`p-3 border rounded text-xs leading-relaxed ${
+                                    isHigh ? "border-red-900 bg-red-950/10" : isMed ? "border-amber-900 bg-amber-950/10" : "border-[var(--cp-border)] bg-[var(--cp-bg-3)]"
+                                  }`}
+                                >
+                                  <div className="flex justify-between items-center mb-1">
+                                    <span className="font-semibold text-foreground flex items-center gap-1.5">
+                                      <span className={`w-1.5 h-1.5 rounded-full ${isHigh ? "bg-red-500 animate-pulse" : isMed ? "bg-amber-500" : "bg-green-500"}`} />
+                                      <span className="opacity-70 mr-0.5">{cc.icon}</span>
+                                      {f.title}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground font-mono">
+                                      {f.path}:{f.line}
+                                    </span>
+                                  </div>
+                                  <p className="text-muted-foreground">{f.detail}</p>
+                                  <div className="mt-1.5 flex gap-3 text-[9px] font-mono text-muted-foreground opacity-60">
+                                    <span className="px-1.5 py-0.5 rounded cursor-pointer hover:opacity-100" onClick={() => handleSeverityClick(f.severity)} style={{ background: isHigh ? "rgba(239,68,68,0.15)" : isMed ? "rgba(245,158,11,0.15)" : "rgba(34,197,94,0.15)" }}>
+                                      {f.severity.toUpperCase()}
+                                    </span>
+                                    <span className="cursor-pointer hover:opacity-100" onClick={() => handleCategoryClick(f.category)}>
+                                      CATEGORY: {f.category?.toUpperCase() || ""}
+                                    </span>
+                                    <span>RULE: {f.rule_id}</span>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
                         </div>
-                      );
-                    })}
-                  </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
               );
@@ -1275,33 +1420,97 @@ export function ContextVisualizations({ nodes, repoName, analysis, activeModel, 
         )}
 
         {activeSubTab === "heatmap" && (
-          <div className="h-full flex gap-3 overflow-hidden">
-            {/* Left explorer list */}
-            <div className="w-72 border-r border-[var(--cp-border)] pr-2 overflow-y-auto space-y-2 select-none shrink-0">
-              {complexityFiles.map((file) => {
-                const c = complexityColor(file.total_complexity);
-                const isSelected = selectedFile?.path === file.path;
+          <div className="h-full flex flex-col gap-2 overflow-hidden">
+            {/* Heatmap Top Bar & Global Filter Controls */}
+            <div className="flex items-center justify-between bg-[var(--cp-bg-3)] border border-[var(--cp-border)] p-2 rounded shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-[var(--cp-cyan)] uppercase tracking-wider">File Filter:</span>
+                {(["all", "high", "risky", "moderate", "low"] as const).map((tier) => {
+                  const isSelected = (selectedHeatmapSeverity === tier) || (tier === "all" && !selectedHeatmapSeverity);
+                  return (
+                    <button
+                      key={tier}
+                      onClick={() => {
+                        if (tier === "all") setSelectedHeatmapSeverity(null);
+                        else setSelectedHeatmapSeverity(prev => prev === tier ? null : tier);
+                      }}
+                      className={`px-2 py-0.5 text-[9px] uppercase font-mono border rounded transition-all cursor-pointer ${
+                        isSelected
+                          ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.15)] text-[var(--cp-cyan)] font-bold shadow-[0_0_8px_rgba(0,229,255,0.2)]"
+                          : "border-[var(--cp-border)] text-muted-foreground hover:text-foreground hover:border-[var(--cp-cyan)]/40"
+                      }`}
+                    >
+                      {tier}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Heatmap Search Box */}
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Filter files by path..."
+                className="w-48 bg-[var(--cp-bg-0)] text-foreground border border-[var(--cp-border)] rounded px-2 py-0.5 text-xs focus:outline-none focus:border-[var(--cp-cyan)] font-mono"
+              />
+            </div>
+
+            <div className="flex-1 flex gap-3 min-h-0 overflow-hidden">
+              {/* Left explorer list */}
+              {(() => {
+                const filteredFiles = complexityFiles.filter((file) => {
+                  const matchesSearch = !searchQuery || file.path.toLowerCase().includes(searchQuery.toLowerCase());
+                  if (!matchesSearch) return false;
+                  if (!selectedHeatmapSeverity) return true;
+                  const c = file.total_complexity;
+                  if (selectedHeatmapSeverity === "high") return c > 20 || file.functions.some(f => f.complexity > 20);
+                  if (selectedHeatmapSeverity === "risky") return (c > 10 && c <= 20) || file.functions.some(f => f.complexity > 10 && f.complexity <= 20);
+                  if (selectedHeatmapSeverity === "medium" || selectedHeatmapSeverity === "moderate") return (c > 5 && c <= 10) || file.functions.some(f => f.complexity > 5 && f.complexity <= 10);
+                  if (selectedHeatmapSeverity === "low") return c <= 5;
+                  return true;
+                });
+
                 return (
-                  <div
-                    key={file.path}
-                    onClick={() => setSelectedFile(file)}
-                    className={`p-2 border transition-all cursor-pointer flex justify-between items-center ${
-                      isSelected
-                        ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.06)]"
-                        : "border-[var(--cp-border)] bg-[var(--cp-bg-3)] hover:border-[rgba(0,229,255,0.2)]"
-                    }`}
-                  >
-                    <div className="truncate pr-2">
-                      <span className="text-[11px] font-bold text-foreground block truncate">{file.path.split("/").pop()}</span>
-                      <span className="text-[9px] text-muted-foreground block truncate">{file.path}</span>
+                  <div className="w-72 border-r border-[var(--cp-border)] pr-2 overflow-y-auto space-y-1 select-none shrink-0">
+                    <div className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider px-1 pb-1 flex justify-between">
+                      <span>Files ({filteredFiles.length} / {complexityFiles.length})</span>
+                      {selectedHeatmapSeverity && (
+                        <span className="text-[var(--cp-cyan)]">[{selectedHeatmapSeverity.toUpperCase()}]</span>
+                      )}
                     </div>
-                    <span className="px-2 py-0.5 text-[10px] font-bold rounded" style={{ backgroundColor: c.bg, color: c.fg }}>
-                      {file.total_complexity}
-                    </span>
+                    {filteredFiles.length === 0 ? (
+                      <div className="p-4 text-center text-[10px] text-muted-foreground font-mono">
+                        No files match filter criteria
+                      </div>
+                    ) : (
+                      filteredFiles.map((file) => {
+                        const c = complexityColor(file.total_complexity);
+                        const isSelected = selectedFile?.path === file.path;
+                        return (
+                          <div
+                            key={file.path}
+                            onClick={() => setSelectedFile(prev => prev?.path === file.path ? null : file)}
+                            className={`p-2 border transition-all cursor-pointer flex justify-between items-center rounded ${
+                              isSelected
+                                ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.06)] shadow-[0_0_8px_rgba(0,229,255,0.15)]"
+                                : "border-[var(--cp-border)] bg-[var(--cp-bg-3)] hover:border-[rgba(0,229,255,0.2)]"
+                            }`}
+                          >
+                            <div className="truncate pr-2">
+                              <span className="text-[11px] font-bold text-foreground block truncate">{file.path.split("/").pop()}</span>
+                              <span className="text-[9px] text-muted-foreground block truncate">{file.path}</span>
+                            </div>
+                            <span className="px-2 py-0.5 text-[10px] font-bold rounded shrink-0" style={{ backgroundColor: c.bg, color: c.fg }}>
+                              {file.total_complexity}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 );
-              })}
-            </div>
+              })()}
 
             {/* Right breakdown detail */}
             <div className="flex-1 overflow-y-auto">
@@ -1348,41 +1557,88 @@ export function ContextVisualizations({ nodes, repoName, analysis, activeModel, 
                     </div>
                   </div>
 
-                  {/* Metrics Grid */}
+                  {/* Overview Metrics (Non-filterable summary row) */}
                   <div className="grid grid-cols-3 gap-2">
                     <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2.5 text-center">
-                      <span className="block text-[8px] text-muted-foreground uppercase tracking-wider">{grade}</span>
-                      <span className="text-xl font-black" style={{ color: cxColor.fg }}>{totalCx}</span>
+                      <span className="block text-[8px] text-muted-foreground uppercase tracking-wider font-mono">
+                        {grade.toUpperCase()} FILE SCORE
+                      </span>
+                      <span className="text-xl font-black font-mono" style={{ color: cxColor.fg }}>{totalCx}</span>
                     </div>
+
                     <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2.5 text-center">
-                      <span className="block text-[8px] text-muted-foreground uppercase tracking-wider">Functions</span>
-                      <span className="text-xl font-black text-foreground">{fnCount}</span>
+                      <span className="block text-[8px] text-muted-foreground uppercase tracking-wider font-mono">TOTAL FUNCTIONS</span>
+                      <span className="text-xl font-black text-foreground font-mono">{fnCount}</span>
                     </div>
+
                     <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2.5 text-center">
-                      <span className="block text-[8px] text-muted-foreground uppercase tracking-wider">High</span>
-                      <span className="text-xl font-black text-red-400">{highFns}</span>
+                      <span className="block text-[8px] text-muted-foreground uppercase tracking-wider font-mono">COMPLEXITY GRADE</span>
+                      <span className="text-lg font-bold font-mono" style={{ color: cxColor.fg }}>{cxColor.label}</span>
                     </div>
                   </div>
 
-                  {/* Severity Breakdown */}
+                  {/* Filterable Severity Breakdown (Row 2) */}
                   <div className="grid grid-cols-3 gap-2">
-                    <div className="border border-amber-900/40 bg-amber-950/10 rounded p-2 text-center">
-                      <span className="block text-[8px] text-amber-400 uppercase tracking-wider">Medium</span>
-                      <span className="text-lg font-bold text-amber-400">{medFns}</span>
+                    <div 
+                      onClick={() => setSelectedHeatmapSeverity(prev => prev === "high" ? null : "high")}
+                      className={`border border-red-900/50 bg-red-950/10 rounded p-2.5 text-center cursor-pointer transition-all hover:scale-[1.02] ${
+                        selectedHeatmapSeverity === "high" ? "ring-2 ring-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)] bg-red-950/30" : selectedHeatmapSeverity ? "opacity-40" : ""
+                      }`}
+                    >
+                      <span className="block text-[8px] text-red-400 uppercase tracking-wider font-bold font-mono flex items-center justify-center gap-1">
+                        <span>HIGH COMPLEXITY ({">"}20)</span>
+                        {selectedHeatmapSeverity === "high" && <span className="text-[8px] text-red-400">●</span>}
+                      </span>
+                      <span className="text-xl font-black text-red-400 font-mono">{highFns}</span>
                     </div>
-                    <div className="border border-green-900/40 bg-green-950/10 rounded p-2 text-center">
-                      <span className="block text-[8px] text-green-400 uppercase tracking-wider">Low</span>
-                      <span className="text-lg font-bold text-green-400">{lowFns}</span>
+
+                    <div 
+                      onClick={() => setSelectedHeatmapSeverity(prev => prev === "medium" || prev === "moderate" ? null : "medium")}
+                      className={`border border-amber-900/40 bg-amber-950/10 rounded p-2.5 text-center cursor-pointer transition-all hover:scale-[1.02] ${
+                        (selectedHeatmapSeverity === "medium" || selectedHeatmapSeverity === "moderate") ? "ring-2 ring-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)] bg-amber-950/30" : selectedHeatmapSeverity ? "opacity-40" : ""
+                      }`}
+                    >
+                      <span className="block text-[8px] text-amber-400 uppercase tracking-wider font-bold font-mono flex items-center justify-center gap-1">
+                        <span>MEDIUM (6-20)</span>
+                        {(selectedHeatmapSeverity === "medium" || selectedHeatmapSeverity === "moderate") && <span className="text-[8px] text-amber-400">●</span>}
+                      </span>
+                      <span className="text-xl font-black text-amber-400 font-mono">{medFns}</span>
                     </div>
-                    <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2 text-center">
-                      <span className="block text-[8px] text-muted-foreground uppercase tracking-wider">Grade</span>
-                      <span className="text-lg font-bold" style={{ color: cxColor.fg }}>{cxColor.label}</span>
+
+                    <div 
+                      onClick={() => setSelectedHeatmapSeverity(prev => prev === "low" ? null : "low")}
+                      className={`border border-green-900/40 bg-green-950/10 rounded p-2.5 text-center cursor-pointer transition-all hover:scale-[1.02] ${
+                        selectedHeatmapSeverity === "low" ? "ring-2 ring-green-500 shadow-[0_0_10px_rgba(34,197,94,0.3)] bg-green-950/30" : selectedHeatmapSeverity ? "opacity-40" : ""
+                      }`}
+                    >
+                      <span className="block text-[8px] text-green-400 uppercase tracking-wider font-bold font-mono flex items-center justify-center gap-1">
+                        <span>LOW (1-5)</span>
+                        {selectedHeatmapSeverity === "low" && <span className="text-[8px] text-green-400">●</span>}
+                      </span>
+                      <span className="text-xl font-black text-green-400 font-mono">{lowFns}</span>
                     </div>
                   </div>
 
                   {/* Function Breakdown Table */}
                   <div className="space-y-1">
-                    <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest">Function Breakdown</h5>
+                    <div className="flex items-center justify-between">
+                      <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest flex items-center gap-1.5">
+                        Function Breakdown
+                        {selectedHeatmapSeverity && (
+                          <span className="text-[9px] font-normal text-[var(--cp-cyan)] uppercase">
+                            (Filtered: {selectedHeatmapSeverity.toUpperCase()})
+                          </span>
+                        )}
+                      </h5>
+                      {selectedHeatmapSeverity && (
+                        <button
+                          onClick={() => setSelectedHeatmapSeverity(null)}
+                          className="text-[9px] text-[var(--cp-cyan)] hover:underline uppercase font-bold cursor-pointer"
+                        >
+                          Show All Functions
+                        </button>
+                      )}
+                    </div>
                     <table className="w-full text-xs text-left border-collapse">
                       <thead>
                         <tr className="border-b border-[var(--cp-border)] text-muted-foreground text-[9px] uppercase font-mono">
@@ -1394,9 +1650,17 @@ export function ContextVisualizations({ nodes, repoName, analysis, activeModel, 
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedFile.functions.map((fn, idx) => {
+                        {selectedFile.functions
+                          .filter((fn) => {
+                            if (!selectedHeatmapSeverity) return true;
+                            if (selectedHeatmapSeverity === "high") return fn.complexity > 20;
+                            if (selectedHeatmapSeverity === "medium") return fn.complexity > 5 && fn.complexity <= 20;
+                            if (selectedHeatmapSeverity === "low") return fn.complexity <= 5;
+                            return true;
+                          })
+                          .map((fn, idx) => {
                           const fc = complexityColor(fn.complexity);
-                          const icon = typeIcons[fn.node_type] || "◉";
+                          const icon = typeIcons[fn.node_type] || "λ";
                           return (
                             <tr key={idx} className="border-b border-[var(--cp-border)]/30 hover:bg-[var(--cp-bg-3)]/40 transition-colors">
                               <td className="py-1.5 font-mono text-[10px] text-foreground truncate max-w-[140px]" title={fn.name}>
@@ -1466,13 +1730,122 @@ export function ContextVisualizations({ nodes, repoName, analysis, activeModel, 
                   )}
                 </div>
                 );
-              })() : (
-                <div className="flex flex-col items-center justify-center h-full text-center opacity-40">
-                  <span className="text-2xl mb-2">📊</span>
-                  <span className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Select a file</span>
-                  <p className="text-[10px] text-muted-foreground max-w-xs mt-1">Click a file from the list to view its complexity breakdown and analysis findings.</p>
-                </div>
-              )}
+              })() : (() => {
+                const total = analysis?.summary?.totalFindings || 0;
+                const high = analysis?.summary?.by_severity?.high || 0;
+                const med = analysis?.summary?.by_severity?.medium || 0;
+                const low = analysis?.summary?.by_severity?.low || 0;
+                const filesCount = analysis?.summary?.filesAnalyzed || 0;
+                const categoryColors: Record<string, { border: string; bg: string; icon: string }> = {
+                  security: { border: "border-red-800", bg: "bg-red-950/20", icon: "🔒" },
+                  structural: { border: "border-orange-800", bg: "bg-orange-950/20", icon: "🏗️" },
+                  performance: { border: "border-purple-800", bg: "bg-purple-950/20", icon: "⚡" },
+                  modernization: { border: "border-blue-800", bg: "bg-blue-950/20", icon: "🔄" },
+                  style: { border: "border-slate-700", bg: "bg-slate-950/20", icon: "🎨" },
+                  dead_code: { border: "border-zinc-700", bg: "bg-zinc-950/20", icon: "💀" },
+                };
+
+                const filteredProjectFindings = (analysis?.findings || []).filter((f) => {
+                  if (!selectedHeatmapSeverity) return true;
+                  return f.severity === selectedHeatmapSeverity || (selectedHeatmapSeverity === "moderate" && f.severity === "medium");
+                });
+
+                return (
+                  <div className="space-y-4 p-2 font-mono">
+                    <div className="bg-[rgba(0,229,255,0.06)] border border-[var(--cp-cyan)]/40 p-3 rounded flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">📦</span>
+                          <h4 className="text-sm font-black text-foreground uppercase tracking-wider">Whole Project Analysis Overview</h4>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          Viewing project-wide rules, findings, and complexity metrics for <strong className="text-[var(--cp-cyan)]">{repoName}</strong>. Select a file from the explorer on the left to inspect file-specific findings.
+                        </p>
+                      </div>
+                      <span className="px-2 py-1 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded text-[9px] text-[var(--cp-cyan)] font-bold shrink-0">
+                        {filesCount} Files Analyzed
+                      </span>
+                    </div>
+
+                    {/* Summary Row */}
+                    <div className="grid grid-cols-4 gap-2">
+                      <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2.5 text-center">
+                        <span className="block text-[8px] text-muted-foreground uppercase font-bold tracking-wider">Total Findings</span>
+                        <span className="text-xl font-black text-foreground">{total}</span>
+                      </div>
+                      <div className="border border-red-900/50 bg-red-950/10 rounded p-2.5 text-center">
+                        <span className="block text-[8px] text-red-400 uppercase font-bold tracking-wider">Critical High</span>
+                        <span className="text-xl font-black text-red-400">{high}</span>
+                      </div>
+                      <div className="border border-amber-900/40 bg-amber-950/10 rounded p-2.5 text-center">
+                        <span className="block text-[8px] text-amber-400 uppercase font-bold tracking-wider">Warning Medium</span>
+                        <span className="text-xl font-black text-amber-400">{med}</span>
+                      </div>
+                      <div className="border border-green-900/40 bg-green-950/10 rounded p-2.5 text-center">
+                        <span className="block text-[8px] text-green-400 uppercase font-bold tracking-wider">Info Low</span>
+                        <span className="text-xl font-black text-green-400">{low}</span>
+                      </div>
+                    </div>
+
+                    {/* Category Breakdown */}
+                    <div className="space-y-1">
+                      <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest">Findings by Category</h5>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+                        {Object.entries(analysis?.summary?.by_category || {}).map(([cat, count]) => {
+                          const cc = categoryColors[cat] || { border: "border-[var(--cp-border)]", bg: "bg-[var(--cp-bg-3)]", icon: "📋" };
+                          return (
+                            <div key={cat} className={`${cc.border} ${cc.bg} border p-2 rounded text-xs`}>
+                              <span className="block text-[9px] text-muted-foreground uppercase">{cc.icon} {cat.replace("_", " ")}</span>
+                              <span className="text-base font-bold text-foreground">{count as number}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Project Findings List */}
+                    <div className="space-y-2">
+                      <h5 className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest flex items-center justify-between">
+                        <span>Project Pain Points &amp; Findings ({filteredProjectFindings.length} / {total})</span>
+                        {selectedHeatmapSeverity && (
+                          <span className="text-[var(--cp-cyan)] text-[9px] font-normal">Filtered: {selectedHeatmapSeverity.toUpperCase()}</span>
+                        )}
+                      </h5>
+                      <div className="space-y-1.5 max-h-[380px] overflow-y-auto pr-1">
+                        {filteredProjectFindings.map((f, idx) => {
+                          const isHigh = f.severity === "high";
+                          const isMed = f.severity === "medium";
+                          const cc = categoryColors[f.category] || { border: "border-[var(--cp-border)]", bg: "bg-[var(--cp-bg-3)]", icon: "📋" };
+                          return (
+                            <div
+                              key={idx}
+                              onClick={() => {
+                                const targetFile = complexityFiles.find(cf => cf.path === f.path);
+                                if (targetFile) setSelectedFile(targetFile);
+                              }}
+                              className={`p-2.5 border rounded text-[10px] leading-relaxed cursor-pointer transition-all hover:scale-[1.01] ${
+                                isHigh ? "border-red-900 bg-red-950/10 hover:border-red-500" : isMed ? "border-amber-900/50 bg-amber-950/10 hover:border-amber-500" : "border-[var(--cp-border)] bg-[var(--cp-bg-3)] hover:border-[var(--cp-cyan)]"
+                              }`}
+                            >
+                              <div className="flex justify-between items-center mb-1">
+                                <span className="font-semibold text-foreground flex items-center gap-1.5">
+                                  <span className={`w-1.5 h-1.5 rounded-full ${isHigh ? "bg-red-500 animate-pulse" : isMed ? "bg-amber-500" : "bg-green-500"}`} />
+                                  <span className="opacity-70 mr-0.5">{cc.icon}</span>
+                                  {f.title}
+                                </span>
+                                <span className="text-[9px] text-[var(--cp-cyan)] font-mono hover:underline">
+                                  {f.path}:{f.line} ›
+                                </span>
+                              </div>
+                              <p className="text-muted-foreground text-[10px]">{f.detail}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
             {isHeatmapChatOpen && analysis && selectedFile && (
               <AnalysisChatPanel 
@@ -1485,6 +1858,7 @@ export function ContextVisualizations({ nodes, repoName, analysis, activeModel, 
                 filePath={selectedFile.path}
               />
             )}
+          </div>
           </div>
         )}
 
