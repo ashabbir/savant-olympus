@@ -43,6 +43,10 @@ export class ContextService {
     return this.client.request("/api/context/repos/stop", { method: "POST", body: { name } });
   }
 
+  cancelJob(jobId: string): Promise<any> {
+    return this.client.request("/api/jobs/cancel", { method: "POST", body: { job_id: jobId } });
+  }
+
   purgeRepository(name: string): Promise<any> {
     return this.client.request("/api/context/repos/purge", { method: "POST", body: { name } });
   }

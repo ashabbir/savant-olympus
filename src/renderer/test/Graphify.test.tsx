@@ -144,6 +144,13 @@ describe('ContextView - Code Graph Integration', () => {
     await waitFor(() => expect(vi.mocked(window.fetch).mock.calls.some(([url]) => url.toString().includes('/api/context/code-intelligence/repos/repo-42/sync'))).toBe(true))
     expect(screen.getByTestId('graph-generation-progress')).toHaveTextContent('Graph Generation Queued')
     expect(screen.getByText('STRUCTURAL: QUEUED')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /stop graph job/i }))
+    await waitFor(() => {
+      const cancelCall = vi.mocked(window.fetch).mock.calls.find(([url]) => url.toString().includes('/api/jobs/cancel'))
+      expect(cancelCall).toBeTruthy()
+      expect(cancelCall?.[1]?.method).toBe('POST')
+      expect(cancelCall?.[1]?.body).toBe(JSON.stringify({ job_id: 'job-1' }))
+    })
 
     const healthCall = vi.mocked(window.fetch).mock.calls.find(([url]) => url.toString().includes('/api/context/code-intelligence/repos/repo-42/health'))
     expect(healthCall).toBeTruthy()

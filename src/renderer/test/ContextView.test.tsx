@@ -479,7 +479,7 @@ describe('ContextView - FileBrowserModal Integration', () => {
         return Promise.resolve({
           ok: true,
           // The server returns the repository map directly, not { status: ... }.
-          json: () => Promise.resolve({ repo: { status: 'indexing', progress: 42, phase: 'Embedding files' } }),
+          json: () => Promise.resolve({ repo: { status: 'indexing', progress: 42, phase: 'Embedding files', job_id: 'index-job-1' } }),
         } as Response)
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
@@ -490,5 +490,11 @@ describe('ContextView - FileBrowserModal Integration', () => {
     expect((await screen.findAllByText('42%')).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText(/INDEXING IN PROGRESS/i)).toBeInTheDocument()
     expect(screen.getByText(/PHASE: Embedding files/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /stop index job/i }))
+    await waitFor(() => {
+      const cancelCall = vi.mocked(window.fetch).mock.calls.find(([url]) => url.toString().includes('/api/jobs/cancel'))
+      expect(cancelCall).toBeTruthy()
+      expect(cancelCall?.[1]?.body).toBe(JSON.stringify({ job_id: 'index-job-1' }))
+    })
   })
 })

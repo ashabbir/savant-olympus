@@ -686,6 +686,22 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     }
   };
 
+  const handleCancelJob = async (jobId: string, label: "Index" | "Graph") => {
+    try {
+      const result = await contextService.cancelJob(jobId);
+      if (!result.cancelled) {
+        throw new Error("The job has already finished or no longer exists.");
+      }
+      toast.info(`${label} job stop requested`);
+      await fetchIndexingStatus();
+      if (label === "Graph" && selectedRepo) {
+        await fetchStructuralHealth(selectedRepo);
+      }
+    } catch (e: any) {
+      toast.error(`Failed to stop ${label.toLowerCase()} job`, { description: e.message });
+    }
+  };
+
   const handlePurgeRepo = async (repoName: string) => {
     if (!confirm(`Purge all indexed data for "${repoName}"? The project will be kept but all vectors and chunks will be removed.`)) return;
     try {
@@ -709,10 +725,10 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
   const statusInfo = selectedProject ? indexingStatus[selectedProject] || {} : {};
   const liveStatus = (statusInfo.status || selectedRepo?.status || "ready").toLowerCase();
-  const isCurrentlyIndexing = liveStatus === "indexing" || liveStatus === "running" || liveStatus === "queued" || liveStatus === "processing";
+  const isCurrentlyIndexing = ["indexing", "running", "queued", "processing", "cancelling"].includes(liveStatus);
   const structuralJob = statusInfo.structural_job || structuralHealth?.current_job;
   const structuralJobStatus = String(structuralJob?.status || "").toLowerCase();
-  const isStructuralJobActive = ["indexing", "running", "queued", "processing"].includes(structuralJobStatus);
+  const isStructuralJobActive = ["indexing", "running", "queued", "processing", "cancelling"].includes(structuralJobStatus);
   const hasStructuralJobResult = ["done", "failed", "cancelled"].includes(structuralJobStatus);
   const structuralProvider = structuralHealth?.provider || selectedRepo?.provider || selectedRepo?.code_intelligence?.provider || "legacy";
   const structuralFreshness = structuralHealth?.freshness || selectedRepo?.freshness || selectedRepo?.code_intelligence?.freshness || "unavailable";
@@ -1167,6 +1183,18 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         </span>
                         <span className="text-amber-400">{Math.round(statusInfo.progress || 0)}%</span>
                       </div>
+                      {statusInfo.job_id && (
+                        <button
+                          type="button"
+                          onClick={() => handleCancelJob(statusInfo.job_id, "Index")}
+                          disabled={liveStatus === "cancelling"}
+                          className="inline-flex items-center gap-1 rounded border border-red-700/70 px-2 py-1 text-[10px] font-bold uppercase text-red-300 hover:bg-red-950/40 disabled:cursor-wait disabled:opacity-60"
+                          aria-label={`Stop index job for ${selectedProject}`}
+                        >
+                          <Square className="h-3 w-3 fill-current" />
+                          {liveStatus === "cancelling" ? "Stopping Index" : "Stop Index"}
+                        </button>
+                      )}
                       <div className="w-full bg-[var(--cp-bg-3)] h-1.5 rounded overflow-hidden">
                         <div
                           className="bg-amber-500 h-full transition-all duration-300"
@@ -1194,6 +1222,18 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         </span>
                         <span className="text-indigo-300">{Math.round(structuralJob?.progress || 0)}%</span>
                       </div>
+                      {isStructuralJobActive && structuralJob?.id && (
+                        <button
+                          type="button"
+                          onClick={() => handleCancelJob(structuralJob.id, "Graph")}
+                          disabled={structuralJobStatus === "cancelling"}
+                          className="inline-flex items-center gap-1 rounded border border-red-700/70 px-2 py-1 text-[10px] font-bold uppercase text-red-300 hover:bg-red-950/40 disabled:cursor-wait disabled:opacity-60"
+                          aria-label={`Stop graph job for ${selectedProject}`}
+                        >
+                          <Square className="h-3 w-3 fill-current" />
+                          {structuralJobStatus === "cancelling" ? "Stopping Graph" : "Stop Graph"}
+                        </button>
+                      )}
                       <div className="w-full bg-[var(--cp-bg-3)] h-1.5 rounded overflow-hidden">
                         <div className="bg-indigo-400 h-full transition-all duration-300" style={{ width: `${structuralJob?.progress || 0}%` }} />
                       </div>
