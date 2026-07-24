@@ -382,11 +382,18 @@ describe('ContextView - FileBrowserModal Integration', () => {
           })
         } as Response)
       }
+      if (u.includes('/api/context/ast/list')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ nodes: [] }) } as Response)
+      }
+      if (u.includes('/health')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ provider: 'legacy', freshness: 'unavailable' }) } as Response)
+      }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
     })
 
-    render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject={null} isAdmin={true} />)
-    const refreshButton = await screen.findByRole('button', { name: /refetch code for repo-with-git/i })
+    const { container } = render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject="repo-with-git" isAdmin={true} />)
+    const refreshButtons = await screen.findAllByRole('button', { name: /refetch code for repo-with-git/i })
+    const refreshButton = refreshButtons[0]
     fireEvent.click(refreshButton)
 
     await waitFor(() => {
@@ -400,10 +407,15 @@ describe('ContextView - FileBrowserModal Integration', () => {
     const descriptionElement = callArgs[1].description;
     
     render(descriptionElement);
-    expect(screen.getByText(/feature-cool/i)).toBeInTheDocument();
-    expect(screen.getByText(/1111111/i)).toBeInTheDocument();
-    expect(screen.getByText(/2222222/i)).toBeInTheDocument();
-    expect(screen.getByText(/5/i)).toBeInTheDocument();
+    
+    // Check that we have multiple copies of the metadata (toast + inline card + tree list card)
+    expect(screen.getAllByText(/feature-cool/i).length).toBeGreaterThan(1);
+    expect(screen.getAllByText(/1111111/i).length).toBeGreaterThan(1);
+    expect(screen.getAllByText(/2222222/i).length).toBeGreaterThan(1);
+    expect(screen.getAllByText(/5/i).length).toBeGreaterThan(1);
+
+    // Now check that the inline Git Pull Results Visualizer is displayed inside the main ContextView container
+    expect(screen.getByText(/Latest Pull Action Info/i)).toBeInTheDocument();
   })
 
   it('shows refetch controls only for GitHub and GitLab projects', async () => {

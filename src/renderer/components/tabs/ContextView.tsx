@@ -79,6 +79,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const [searchQuery, setSearchQuery] = useState("");
   const [isRepoPaneOpen, setIsRepoPaneOpen] = useState(true);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const [lastFetchDetails, setLastFetchDetails] = useState<Record<string, any>>({});
 
   const toggleFilter = useCallback((filter: string) => {
     setActiveFilters((prev) => {
@@ -604,6 +605,17 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       const prevCommitShort = typeof prevCommit === "string" ? prevCommit.slice(0, 7) : prevCommit || "N/A";
       const newCommitShort = typeof newCommit === "string" ? newCommit.slice(0, 7) : newCommit || "N/A";
 
+      // Save fetch details to state for visualization
+      setLastFetchDetails((prev) => ({
+        ...prev,
+        [repoName]: {
+          branch: branchName,
+          previous_commit: prevCommit,
+          new_commit: newCommit,
+          files_changed: filesChanged
+        }
+      }));
+
       toast.success(`Latest code pulled for "${repoName}"`, {
         description: hasGitInfo ? (
           <div className="mt-1 font-mono text-[10px] space-y-0.5 text-muted-foreground border-t border-[rgba(255,255,255,0.05)] pt-1.5">
@@ -933,11 +945,14 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     <div className="flex items-center justify-between text-[9px] text-muted-foreground font-mono mt-2 pt-1.5 border-t border-[rgba(255,255,255,0.03)]">
                       <div className="flex items-center gap-2">
                         {/* Git or Local */}
-                        <span className="flex items-center" title={isGit ? "Git Repository" : "Local Directory"}>
+                        <span className="flex items-center gap-0.5" title={isGit ? "Git Repository" : "Local Directory"}>
                           {isGit ? (
                             <GitBranch size={10} className="text-[var(--cp-cyan)]" />
                           ) : (
                             <Folder size={10} className="text-[var(--cp-yellow)]" />
+                          )}
+                          {isGit && lastFetchDetails[repo.name] && (
+                            <span className="text-[8px] text-[var(--cp-cyan)] font-bold ml-0.5">({lastFetchDetails[repo.name].branch})</span>
                           )}
                         </span>
 
@@ -1099,6 +1114,33 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     </> : <span className="text-[10px] text-muted-foreground font-mono border border-[var(--cp-border)] px-2 py-1">READ-ONLY MEMBER ACCESS</span>}
                   </div>
 
+                  {/* Git Pull Results Visualizer */}
+                  {lastFetchDetails[selectedRepo.name] && (
+                    <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-cyan)]/25 p-3 rounded font-mono text-xs space-y-2">
+                      <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.05)] pb-1.5">
+                        <span className="text-[var(--cp-cyan)] uppercase tracking-wider font-bold">Latest Pull Action Info</span>
+                        <span className="text-[10px] text-muted-foreground">SUCCESSFULLY UPDATED</span>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs pt-1">
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase">Branch</div>
+                          <div className="text-[var(--cp-cyan)] font-bold mt-0.5">{lastFetchDetails[selectedRepo.name].branch || "unknown"}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase">Previous Commit</div>
+                          <div className="text-foreground mt-0.5">{lastFetchDetails[selectedRepo.name].previous_commit?.slice(0, 7) || "N/A"}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase">New Commit</div>
+                          <div className="text-[var(--cp-green)] font-bold mt-0.5">{lastFetchDetails[selectedRepo.name].new_commit?.slice(0, 7) || "N/A"}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase">Files Changed</div>
+                          <div className="text-[var(--cp-yellow)] font-bold mt-0.5">{lastFetchDetails[selectedRepo.name].files_changed ?? 0}</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded font-mono text-xs" data-testid="structural-health">
                     <div className="flex flex-wrap items-center justify-between gap-2">
