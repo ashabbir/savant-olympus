@@ -1,6 +1,16 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ContextView, formatSyncLogDateTime, sortSyncLogsNewestFirst } from '../components/tabs/ContextView'
+import { toast } from 'sonner'
+
+vi.mock('sonner', () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+  }
+}))
+
 
 describe('ContextView - Sync Audit Trail', () => {
   it('sorts sync logs newest first with IDs as a stable timestamp tie-breaker', () => {
@@ -271,6 +281,60 @@ describe('ContextView - FileBrowserModal Integration', () => {
     expect(screen.queryByText('beta-service')).toBeNull()
   })
 
+  it('filters the project tree with multiple status filters (AND logic)', async () => {
+    vi.mocked(window.fetch).mockImplementation((url) => {
+      const u = url.toString()
+      if (u.endsWith('/api/context/repos')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            repos: [
+              { name: 'alpha-dashboard', path: '/base-code/alpha-dashboard', source: 'github', indexed_at: '2026-07-20T00:00:00Z', freshness: 'fresh', status: 'ready' },
+              { name: 'beta-service', path: '/base-code/beta-service', source: 'directory', status: 'ready' },
+              { name: 'gamma-service', path: '/base-code/gamma-service', source: 'github', indexed_at: '2026-07-20T00:00:00Z', freshness: 'unavailable', status: 'ready' },
+            ],
+          }),
+        } as Response)
+      }
+      if (u.includes('/api/context/repos/indexing-status')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+    })
+
+    render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject={null} isAdmin={true} />)
+
+    // Wait for the projects to load
+    expect(await screen.findByText('alpha-dashboard')).toBeInTheDocument()
+    expect(screen.getByText('beta-service')).toBeInTheDocument()
+    expect(screen.getByText('gamma-service')).toBeInTheDocument()
+
+    // 1. Filter by INDEXED (should show alpha and gamma)
+    fireEvent.click(screen.getByRole('button', { name: /^indexed$/i }))
+    expect(screen.getByText('alpha-dashboard')).toBeInTheDocument()
+    expect(screen.getByText('gamma-service')).toBeInTheDocument()
+    expect(screen.queryByText('beta-service')).toBeNull()
+
+    // 2. Add ANALYZED filter (should show only alpha-dashboard)
+    fireEvent.click(screen.getByRole('button', { name: /^analyzed$/i }))
+    expect(screen.getByText('alpha-dashboard')).toBeInTheDocument()
+    expect(screen.queryByText('gamma-service')).toBeNull()
+    expect(screen.queryByText('beta-service')).toBeNull()
+
+    // 3. Clear filters (click ALL)
+    fireEvent.click(screen.getByRole('button', { name: /^all$/i }))
+    expect(screen.getByText('alpha-dashboard')).toBeInTheDocument()
+    expect(screen.getByText('beta-service')).toBeInTheDocument()
+    expect(screen.getByText('gamma-service')).toBeInTheDocument()
+
+    // 4. Click ADDED filter (should show beta-service only)
+    fireEvent.click(screen.getByRole('button', { name: /^added$/i }))
+    expect(screen.getByText('beta-service')).toBeInTheDocument()
+    expect(screen.queryByText('alpha-dashboard')).toBeNull()
+    expect(screen.queryByText('gamma-service')).toBeNull()
+  })
+
+
   it('refreshes the checked-out code for a registered repository', async () => {
     const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = []
     vi.mocked(window.fetch).mockImplementation((url, options) => {
@@ -296,6 +360,50 @@ describe('ContextView - FileBrowserModal Integration', () => {
       const refreshCall = calls.find(([url, options]) => url.toString().endsWith('/api/context/repos/repo/refresh') && options?.method === 'POST')
       expect(refreshCall).toBeDefined()
     })
+  })
+
+  it('displays git metadata (branch, commits, files changed) on successful repository refresh', async () => {
+    vi.mocked(window.fetch).mockImplementation((url, options) => {
+      const u = url.toString()
+      if (u.endsWith('/api/context/repos')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ repos: [{ name: 'repo-with-git', path: '/base-code/repo-with-git', source: 'github', source_label: 'GitHub', status: 'ready' }] }) } as Response)
+      }
+      if (u.includes('/api/context/repos/indexing-status')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: {} }) } as Response)
+      }
+      if (u.endsWith('/api/context/repos/repo-with-git/refresh')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            branch: 'feature-cool',
+            previous_commit: '1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            new_commit: '2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            files_changed: 5
+          })
+        } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+    })
+
+    render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject={null} isAdmin={true} />)
+    const refreshButton = await screen.findByRole('button', { name: /refetch code for repo-with-git/i })
+    fireEvent.click(refreshButton)
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith(
+        'Latest code pulled for "repo-with-git"',
+        expect.any(Object)
+      )
+    })
+
+    const callArgs = vi.mocked(toast.success).mock.calls[vi.mocked(toast.success).mock.calls.length - 1];
+    const descriptionElement = callArgs[1].description;
+    
+    render(descriptionElement);
+    expect(screen.getByText(/feature-cool/i)).toBeInTheDocument();
+    expect(screen.getByText(/1111111/i)).toBeInTheDocument();
+    expect(screen.getByText(/2222222/i)).toBeInTheDocument();
+    expect(screen.getByText(/5/i)).toBeInTheDocument();
   })
 
   it('shows refetch controls only for GitHub and GitLab projects', async () => {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Search, Folder, RefreshCw, Download, Trash2, Cpu, FileCode, CheckCircle, Database, AlertTriangle, Layers, Play, Square, Trash, Zap, Clock, Upload, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Folder, RefreshCw, Download, Trash2, Cpu, FileCode, CheckCircle, Database, AlertTriangle, Layers, Play, Square, Trash, Zap, Clock, Upload, ChevronDown, ChevronLeft, ChevronRight, GitBranch } from "lucide-react";
 import { ContextVisualizations, analyzeProjectSource } from "./ContextVisualizations";
 import { GraphifyVisualizer } from "./GraphifyVisualizer";
 import { FileBrowserModal } from "../FileBrowserModal";
@@ -78,6 +78,49 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const previousIndexingStatusRef = useRef<Record<string, any>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [isRepoPaneOpen, setIsRepoPaneOpen] = useState(true);
+  const [activeFilters, setActiveFilters] = useState<string[]>([]);
+
+  const toggleFilter = useCallback((filter: string) => {
+    setActiveFilters((prev) => {
+      let next = [...prev];
+      if (next.includes(filter)) {
+        next = next.filter((f) => f !== filter);
+      } else {
+        if (filter === "indexed") {
+          next = next.filter((f) => f !== "not_indexed");
+        } else if (filter === "not_indexed") {
+          next = next.filter((f) => f !== "indexed");
+        }
+        next.push(filter);
+      }
+      return next;
+    });
+  }, []);
+
+  const matchesFilter = useCallback((repo: Repo, filter: string) => {
+    const status = indexingStatus[repo.name] || {};
+    const activeStatus = (status.status || repo.status || "ready").toLowerCase();
+    const isIndexed = !!repo.indexed_at || ["indexed", "done"].includes(activeStatus);
+    const isAnalyzed = !!(
+      repo.code_intelligence?.indexed ||
+      repo.graph_version ||
+      (repo.freshness && repo.freshness !== "unavailable") ||
+      (repo.code_intelligence?.freshness && repo.code_intelligence?.freshness !== "unavailable")
+    );
+
+    switch (filter) {
+      case "indexed":
+        return isIndexed;
+      case "not_indexed":
+        return !isIndexed;
+      case "analyzed":
+        return isAnalyzed;
+      case "added":
+        return (!isIndexed && !isAnalyzed) || activeStatus === "added";
+      default:
+        return true;
+    }
+  }, [indexingStatus]);
   const [structuralHealth, setStructuralHealth] = useState<StructuralHealth | null>(null);
   const [isLoadingStructuralHealth, setIsLoadingStructuralHealth] = useState(false);
   const [periodicStatus, setPeriodicStatus] = useState<any>(null);
@@ -549,10 +592,29 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const handleRefreshRepo = async (repoName: string) => {
     setRefreshingRepo(repoName);
     try {
-      await contextService.refreshRepository(repoName);
+      const res = await contextService.refreshRepository(repoName);
+      
+      const branchName = res?.branch || res?.current_branch || res?.ref;
+      const prevCommit = res?.previous_commit || res?.prev_commit || res?.before || res?.old_commit;
+      const newCommit = res?.new_commit || res?.current_commit || res?.after || res?.commit;
+      const filesChanged = res?.files_changed !== undefined ? res?.files_changed : (res?.changed_files !== undefined ? res?.changed_files : (res?.stats?.files_changed || res?.stats?.changed_files));
+
+      const hasGitInfo = branchName || prevCommit || newCommit || filesChanged !== undefined;
+
+      const prevCommitShort = typeof prevCommit === "string" ? prevCommit.slice(0, 7) : prevCommit || "N/A";
+      const newCommitShort = typeof newCommit === "string" ? newCommit.slice(0, 7) : newCommit || "N/A";
+
       toast.success(`Latest code pulled for "${repoName}"`, {
-        description: "The checkout is now up to date. Queue indexing when you want to refresh Context data.",
-        duration: 5000,
+        description: hasGitInfo ? (
+          <div className="mt-1 font-mono text-[10px] space-y-0.5 text-muted-foreground border-t border-[rgba(255,255,255,0.05)] pt-1.5">
+            <div>BRANCH: <span className="text-[var(--cp-cyan)] font-bold">{branchName || "unknown"}</span></div>
+            <div>COMMITS: <span className="text-foreground">{prevCommitShort}</span> → <span className="text-[var(--cp-green)] font-bold">{newCommitShort}</span></div>
+            <div>CHANGED FILES: <span className="text-[var(--cp-yellow)] font-bold">{filesChanged !== undefined ? filesChanged : 0}</span></div>
+          </div>
+        ) : (
+          "The checkout is now up to date. Queue indexing when you want to refresh Context data."
+        ),
+        duration: 8000,
       });
       fetchRepos();
     } catch (e: any) {
@@ -649,9 +711,18 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       ? "done"
       : structuralFreshness;
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
-  const filteredRepos = normalizedSearchQuery
-    ? repos.filter((repo) => JSON.stringify({ ...repo, live_status: indexingStatus[repo.name] || {} }).toLowerCase().includes(normalizedSearchQuery))
-    : repos;
+  const filteredRepos = repos.filter((repo) => {
+    if (normalizedSearchQuery) {
+      const matchText = JSON.stringify({ ...repo, live_status: indexingStatus[repo.name] || {} }).toLowerCase().includes(normalizedSearchQuery);
+      if (!matchText) return false;
+    }
+    for (const filter of activeFilters) {
+      if (!matchesFilter(repo, filter)) {
+        return false;
+      }
+    }
+    return true;
+  });
 
   return (
     <div className="flex flex-col h-full overflow-hidden p-4 space-y-4" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
@@ -700,9 +771,66 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                 </>
               )}
 
-              <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider pt-2" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+              <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider pt-2 pb-1" style={{ fontFamily: "'Orbitron', sans-serif" }}>
                 Registered Projects
               </h3>
+              <div className="flex flex-wrap gap-1 font-mono text-[9px] pb-2 border-b border-[rgba(255,255,255,0.03)] mb-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveFilters([])}
+                  className={`px-2 py-0.5 border transition-all cursor-pointer ${
+                    activeFilters.length === 0
+                      ? "border-[var(--cp-cyan)] text-[var(--cp-cyan)] bg-[rgba(0,229,255,0.06)] font-bold"
+                      : "border-[var(--cp-border)] text-muted-foreground hover:text-foreground bg-[var(--cp-bg-2)] hover:border-[rgba(255,255,255,0.15)]"
+                  }`}
+                >
+                  ALL
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleFilter("indexed")}
+                  className={`px-2 py-0.5 border transition-all cursor-pointer ${
+                    activeFilters.includes("indexed")
+                      ? "border-[var(--cp-green)] text-[var(--cp-green)] bg-[rgba(0,255,136,0.06)] font-bold"
+                      : "border-[var(--cp-border)] text-muted-foreground hover:text-foreground bg-[var(--cp-bg-2)] hover:border-[rgba(255,255,255,0.15)]"
+                  }`}
+                >
+                  INDEXED
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleFilter("not_indexed")}
+                  className={`px-2 py-0.5 border transition-all cursor-pointer ${
+                    activeFilters.includes("not_indexed")
+                      ? "border-[var(--cp-magenta)] text-[var(--cp-magenta)] bg-[rgba(255,0,229,0.06)] font-bold"
+                      : "border-[var(--cp-border)] text-muted-foreground hover:text-foreground bg-[var(--cp-bg-2)] hover:border-[rgba(255,255,255,0.15)]"
+                  }`}
+                >
+                  NOT INDEXED
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleFilter("analyzed")}
+                  className={`px-2 py-0.5 border transition-all cursor-pointer ${
+                    activeFilters.includes("analyzed")
+                      ? "border-[var(--cp-green)] text-[var(--cp-green)] bg-[rgba(0,255,136,0.06)] font-bold"
+                      : "border-[var(--cp-border)] text-muted-foreground hover:text-foreground bg-[var(--cp-bg-2)] hover:border-[rgba(255,255,255,0.15)]"
+                  }`}
+                >
+                  ANALYZED
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleFilter("added")}
+                  className={`px-2 py-0.5 border transition-all cursor-pointer ${
+                    activeFilters.includes("added")
+                      ? "border-[var(--cp-cyan)] text-[var(--cp-cyan)] bg-[rgba(0,229,255,0.06)] font-bold"
+                      : "border-[var(--cp-border)] text-muted-foreground hover:text-foreground bg-[var(--cp-bg-2)] hover:border-[rgba(255,255,255,0.15)]"
+                  }`}
+                >
+                  ADDED
+                </button>
+              </div>
               <div className="relative">
                 <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <input
@@ -732,6 +860,15 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                 const activeStatus = graphIsBusy ? `graph ${graphJobStatus}` : (status.status || repo.status || "ready").toLowerCase();
                 const isFailed = activeStatus === "error" || activeStatus === "failed" || activeStatus === "stalled";
                 const isBusy = graphIsBusy || activeStatus === "indexing" || activeStatus === "running" || activeStatus === "queued" || activeStatus === "processing";
+
+                const isGit = repo.source === "github" || repo.source === "gitlab" || repo.source === "git";
+                const isIndexed = !!repo.indexed_at || ["indexed", "done"].includes(activeStatus);
+                const isAnalyzed = !!(
+                  repo.code_intelligence?.indexed ||
+                  repo.graph_version ||
+                  (repo.freshness && repo.freshness !== "unavailable") ||
+                  (repo.code_intelligence?.freshness && repo.code_intelligence?.freshness !== "unavailable")
+                );
 
                 let tone = "border-[var(--cp-border)]";
                 if (isSelected) {
@@ -793,14 +930,45 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                       </div>}
                     </div>
                     <p className="text-[10px] text-muted-foreground font-mono truncate">{repo.path}</p>
-                    <div className="flex items-center justify-between text-[9px] text-muted-foreground font-mono mt-1.5">
-                      <span className="flex items-center gap-1">
-                        <span className={`w-1.5 h-1.5 rounded-full ${
-                          isFailed ? "bg-red-500" : isBusy ? "bg-amber-500" : "bg-green-500"
-                        }`} />
-                        STATUS: {activeStatus.toUpperCase()}
-                      </span>
-                      {(graphIsBusy ? status.structural_job?.progress : status.progress) != null && <span>{Math.round(graphIsBusy ? status.structural_job.progress : status.progress)}%</span>}
+                    <div className="flex items-center justify-between text-[9px] text-muted-foreground font-mono mt-2 pt-1.5 border-t border-[rgba(255,255,255,0.03)]">
+                      <div className="flex items-center gap-2">
+                        {/* Git or Local */}
+                        <span className="flex items-center" title={isGit ? "Git Repository" : "Local Directory"}>
+                          {isGit ? (
+                            <GitBranch size={10} className="text-[var(--cp-cyan)]" />
+                          ) : (
+                            <Folder size={10} className="text-[var(--cp-yellow)]" />
+                          )}
+                        </span>
+
+                        {/* Indexed Status */}
+                        <span className="flex items-center gap-0.5" title={isIndexed ? "Indexed" : "Not Indexed"}>
+                          <Database size={10} className={isIndexed ? "text-[var(--cp-green)]" : "text-[var(--cp-magenta)]"} />
+                          <span className={`text-[8px] font-bold ${isIndexed ? "text-[var(--cp-green)]" : "text-[var(--cp-magenta)]"}`}>IDX</span>
+                        </span>
+
+                        {/* Analyzed Status */}
+                        <span className="flex items-center gap-0.5" title={isAnalyzed ? "Analyzed" : "Not Analyzed"}>
+                          <Cpu size={10} className={isAnalyzed ? "text-[var(--cp-green)]" : "text-[var(--cp-magenta)]"} />
+                          <span className={`text-[8px] font-bold ${isAnalyzed ? "text-[var(--cp-green)]" : "text-[var(--cp-magenta)]"}`}>ANA</span>
+                        </span>
+                      </div>
+
+                      <div className="text-[9px] text-muted-foreground font-mono">
+                        {isBusy ? (
+                          <span className="text-amber-500 animate-pulse flex items-center gap-0.5">
+                            <span className="w-1 h-1 rounded-full bg-amber-500 animate-ping" />
+                            {activeStatus.toUpperCase().replace("INDEXING", "IDX").replace("PROCESSING", "PROC")}
+                            {(graphIsBusy ? status.structural_job?.progress : status.progress) != null && (
+                              <span>({Math.round(graphIsBusy ? status.structural_job.progress : status.progress)}%)</span>
+                            )}
+                          </span>
+                        ) : isFailed ? (
+                          <span className="text-red-500 font-bold">FAIL</span>
+                        ) : (
+                          <span className="opacity-40">READY</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
