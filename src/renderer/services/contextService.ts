@@ -222,6 +222,13 @@ export class ContextService {
   triggerPeriodicSyncAll(): Promise<any> {
     return this.client.request("/api/context/repos/periodic-sync/run", { method: "POST" });
   }
+
+  triggerPeriodicSyncProject(repoName: string): Promise<any> {
+    return this.client.request("/api/context/repos/periodic-sync/run", {
+      method: "POST",
+      body: { name: repoName, repo_name: repoName, trigger: "manual", mode: "manual", manual: true }
+    });
+  }
 }
 
 export const createContextService = (baseUrl?: string, apiKey?: string) => new ContextService(baseUrl, apiKey);

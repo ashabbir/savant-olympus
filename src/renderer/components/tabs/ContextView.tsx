@@ -55,6 +55,21 @@ export const sortSyncLogsNewestFirst = (logs: any[]) =>
     return timeDifference || Number(b.id || 0) - Number(a.id || 0);
   });
 
+export const parseFileStats = (details: string) => {
+  if (!details) return null;
+  const match = details.match(/indexed=(\d+),\s*skipped=(\d+),\s*removed=(\d+)/);
+  if (!match) return null;
+  const indexed = parseInt(match[1], 10);
+  const skipped = parseInt(match[2], 10);
+  const removed = parseInt(match[3], 10);
+  return {
+    indexed,
+    skipped,
+    removed,
+    total: indexed + skipped,
+  };
+};
+
 export const formatSyncLogDateTime = (timestamp: string) =>
   new Date(timestamp).toLocaleString([], {
     year: "numeric",
@@ -64,8 +79,6 @@ export const formatSyncLogDateTime = (timestamp: string) =>
     minute: "2-digit",
     second: "2-digit",
   });
-
-
 
 export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProject, activeModel, isAdmin = false }: ContextViewProps) {
   const [repos, setRepos] = useState<Repo[]>([]);
@@ -156,11 +169,12 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   }, [fetchPeriodicSyncData]);
 
   const handleManualPeriodicSyncRun = async () => {
+    if (!selectedRepo) return;
     setIsTriggeringPeriodicSync(true);
-    toast.info("Triggering 6-hour periodic sync pass for all projects...");
+    toast.info(`Triggering background sync pass for "${selectedRepo.name}"...`);
     try {
-      const res = await contextService.triggerPeriodicSyncAll();
-      toast.success(`Periodic sync completed for ${res.count || 0} projects!`);
+      const res = await contextService.triggerPeriodicSyncProject(selectedRepo.name);
+      toast.success(`Periodic sync completed for "${selectedRepo.name}"!`);
       await fetchPeriodicSyncData();
       await fetchRepos();
     } catch (e: any) {
@@ -217,7 +231,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
   const [astNodes, setAstNodes] = useState<any[]>([]);
   const [analysisResults, setAnalysisResults] = useState<any | null>(null);
-  const [detailsTab, setDetailsTab] = useState<"overview" | "visuals" | "graphify">("overview");
+  const [detailsTab, setDetailsTab] = useState<"overview" | "visuals" | "graphify" | "activity">("overview");
 
   const [graphifyJson, setGraphifyJson] = useState<any | null>(null);
   const [graphifyStats, setGraphifyStats] = useState<any | null>(null);
@@ -433,12 +447,19 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     }
   }, [contextService, repos]);
 
+  const lastSelectedRepoNameRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (selectedRepo) {
-      setAstNodes([]);
-      setAnalysisResults(null);
-      setDetailsTab("overview");
-      fetchAstAndAnalyze(selectedRepo.name, selectedRepo);
+      if (lastSelectedRepoNameRef.current !== selectedRepo.name) {
+        setAstNodes([]);
+        setAnalysisResults(null);
+        setDetailsTab("overview");
+        lastSelectedRepoNameRef.current = selectedRepo.name;
+        fetchAstAndAnalyze(selectedRepo.name, selectedRepo);
+      }
+    } else {
+      lastSelectedRepoNameRef.current = null;
     }
   }, [selectedRepo, fetchAstAndAnalyze]);
 
@@ -629,6 +650,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         duration: 8000,
       });
       fetchRepos();
+      fetchPeriodicSyncData();
     } catch (e: any) {
       toast.error(`Failed to refresh "${repoName}"`, { description: e.message });
     } finally {
@@ -920,20 +942,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         {repo.name}
                       </span>
                       {isAdmin && <div className="flex items-center gap-1.5">
-                        {(repo.source === "github" || repo.source === "gitlab") && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRefreshRepo(repo.name);
-                            }}
-                            title={`Refetch latest code from ${repo.source_label || repo.source}`}
-                            aria-label={`Refetch code for ${repo.name}`}
-                            className="p-1 hover:text-[var(--cp-cyan)]"
-                            disabled={refreshingRepo === repo.name || isBusy}
-                          >
-                            <Download size={10} className={refreshingRepo === repo.name ? "animate-bounce text-[var(--cp-cyan)]" : ""} />
-                          </button>
-                        )}
+
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -1019,7 +1028,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         {/* Project details */}
         <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-4 flex flex-col overflow-hidden">
           {selectedRepo ? (
-            <div className={`flex flex-col h-full space-y-4 pr-1 ${detailsTab === "overview" ? "overflow-y-auto" : "overflow-hidden"}`}>
+            <div className={`flex flex-col h-full space-y-4 pr-1 ${detailsTab === "overview" || detailsTab === "activity" ? "overflow-y-auto" : "overflow-hidden"}`}>
               {/* Header */}
               <div className="border-b border-[var(--cp-border)] pb-3 flex justify-between items-start">
                 <div>
@@ -1068,6 +1077,17 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                 >
                   Visualizations & Heuristics
                 </button>
+                <button
+                  onClick={() => setDetailsTab("activity")}
+                  className={`px-3 py-1 text-xs uppercase border ${
+                    detailsTab === "activity"
+                      ? "border-[var(--cp-cyan)] text-[var(--cp-cyan)] bg-[rgba(0,229,255,0.06)]"
+                      : "border-[var(--cp-border)] text-muted-foreground hover:text-foreground"
+                  } cursor-pointer`}
+                  data-testid="activity-tab-button"
+                >
+                  Activity & History
+                </button>
                 {((graphifyStats && graphifyStats.total > 0) || structuralProvider === "codegraph") && (
                   <button
                     onClick={() => setDetailsTab("graphify")}
@@ -1095,18 +1115,6 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         <Square size={12} /> STOP JOB
                       </button>
                     ) : null}
-                    {(selectedRepo.source === "github" || selectedRepo.source === "gitlab") && (
-                      <button
-                        onClick={() => handleRefreshRepo(selectedRepo.name)}
-                        className="flex items-center gap-1 px-2 py-1 text-[10px] bg-cyan-950 text-[var(--cp-cyan)] border border-cyan-900 hover:bg-cyan-900 cursor-pointer font-mono font-bold"
-                        disabled={refreshingRepo === selectedRepo.name || isCurrentlyIndexing}
-                        title={`Refetch latest code from ${selectedRepo.source_label || selectedRepo.source}`}
-                        aria-label={`Refetch code for ${selectedRepo.name}`}
-                      >
-                        <Download size={11} className={refreshingRepo === selectedRepo.name ? "animate-bounce" : ""} />
-                        {refreshingRepo === selectedRepo.name ? "FETCHING..." : "REFETCH"}
-                      </button>
-                    )}
                     <button
                       onClick={() => handleStartIndexing(selectedRepo.name)}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-teal-950 text-[var(--cp-cyan)] border border-teal-900 hover:bg-teal-900 cursor-pointer font-mono font-bold"
@@ -1129,34 +1137,6 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     </button>
                     </> : <span className="text-[10px] text-muted-foreground font-mono border border-[var(--cp-border)] px-2 py-1">READ-ONLY MEMBER ACCESS</span>}
                   </div>
-
-                  {/* Git Pull Results Visualizer */}
-                  {lastFetchDetails[selectedRepo.name] && (
-                    <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-cyan)]/25 p-3 rounded font-mono text-xs space-y-2">
-                      <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.05)] pb-1.5">
-                        <span className="text-[var(--cp-cyan)] uppercase tracking-wider font-bold">Latest Pull Action Info</span>
-                        <span className="text-[10px] text-muted-foreground">SUCCESSFULLY UPDATED</span>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs pt-1">
-                        <div>
-                          <div className="text-[10px] text-muted-foreground uppercase">Branch</div>
-                          <div className="text-[var(--cp-cyan)] font-bold mt-0.5">{lastFetchDetails[selectedRepo.name].branch || "unknown"}</div>
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-muted-foreground uppercase">Previous Commit</div>
-                          <div className="text-foreground mt-0.5">{lastFetchDetails[selectedRepo.name].previous_commit?.slice(0, 7) || "N/A"}</div>
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-muted-foreground uppercase">New Commit</div>
-                          <div className="text-[var(--cp-green)] font-bold mt-0.5">{lastFetchDetails[selectedRepo.name].new_commit?.slice(0, 7) || "N/A"}</div>
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-muted-foreground uppercase">Files Changed</div>
-                          <div className="text-[var(--cp-yellow)] font-bold mt-0.5">{lastFetchDetails[selectedRepo.name].files_changed ?? 0}</div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
                   <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded font-mono text-xs" data-testid="structural-health">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1244,149 +1224,6 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     </div>
                   )}
 
-                  {/* 6-Hour Background Sync Runner & Audit Logs Section */}
-                  <div className="order-last bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-4 rounded-lg space-y-3 font-mono text-xs" data-testid="periodic-sync-history-panel">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--cp-border)] pb-2">
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-[var(--cp-cyan)] animate-pulse" />
-                        <span className="font-bold text-foreground uppercase tracking-wider text-xs">6-Hour Background Sync & Execution History</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-green-950/80 text-green-400 border border-green-700/50">
-                          RUNNER ACTIVE
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setIsSyncHistoryCollapsed(value => !value)}
-                          className="p-1 hover:bg-[var(--cp-bg-3)] rounded text-muted-foreground transition"
-                          aria-expanded={!isSyncHistoryCollapsed}
-                          title={isSyncHistoryCollapsed ? "Expand last sync" : "Collapse last sync"}
-                        >
-                          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isSyncHistoryCollapsed ? "-rotate-90" : ""}`} />
-                        </button>
-                        <button
-                          onClick={handleManualPeriodicSyncRun}
-                          disabled={isTriggeringPeriodicSync}
-                          className="flex items-center gap-1.5 px-3 py-1 bg-[var(--cp-cyan)]/10 text-[var(--cp-cyan)] hover:bg-[var(--cp-cyan)]/20 border border-[var(--cp-cyan)]/30 rounded text-[11px] font-bold transition disabled:opacity-50"
-                        >
-                          <RefreshCw className={`w-3 h-3 ${isTriggeringPeriodicSync ? "animate-spin" : ""}`} />
-                          {isTriggeringPeriodicSync ? "SYNCING ALL..." : "RUN ALL NOW"}
-                        </button>
-                        <button
-                          onClick={fetchPeriodicSyncData}
-                          disabled={isLoadingSyncLogs}
-                          className="p-1 hover:bg-[var(--cp-bg-3)] rounded text-muted-foreground transition"
-                          title="Refresh Logs"
-                        >
-                          <RefreshCw className={`w-3.5 h-3.5 ${isLoadingSyncLogs ? "animate-spin" : ""}`} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {!isSyncHistoryCollapsed && <>
-                    {/* Status info bar */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] bg-[var(--cp-bg-3)]/60 p-2.5 rounded border border-[var(--cp-border)]/50">
-                      <div>
-                        <span className="text-muted-foreground block text-[10px] uppercase">Last Sync Run</span>
-                        <span className="text-foreground font-medium">
-                          {periodicStatus?.last_run_at ? new Date(periodicStatus.last_run_at).toLocaleString() : "Recently on startup"}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground block text-[10px] uppercase">Next Scheduled Sync</span>
-                        <span className="text-[var(--cp-cyan)] font-medium">
-                          {periodicStatus?.next_run_at ? new Date(periodicStatus.next_run_at).toLocaleString() : "Every 6 Hours"}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground block text-[10px] uppercase">Projects Processed</span>
-                        <span className="text-foreground font-medium">
-                          {periodicStatus?.last_run_summary?.count ?? repos.length} Projects Checked
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground block text-[10px] uppercase">Last Indexed</span>
-                        <span className="text-foreground font-medium">
-                          {selectedRepo.indexed_at ? new Date(selectedRepo.indexed_at).toLocaleString() : "Never"}
-                        </span>
-                      </div>
-                      {(selectedRepo.source === "github" || selectedRepo.source === "gitlab") && (
-                        <div>
-                          <span className="text-muted-foreground block text-[10px] uppercase">Last Fetched</span>
-                          <span className="text-foreground font-medium">
-                            {selectedRepo.last_fetched_at ? new Date(selectedRepo.last_fetched_at).toLocaleString() : "Never"}
-                          </span>
-                        </div>
-                      )}
-                      <div>
-                        <span className="text-muted-foreground block text-[10px] uppercase">Last Graph Generated</span>
-                        <span className="text-foreground font-medium">
-                          {graphifyStats?.generated_at ? new Date(graphifyStats.generated_at).toLocaleString() : "Never"}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground block text-[10px] uppercase">Registered</span>
-                        <span className="text-foreground font-medium">
-                          {selectedRepo.created_at ? new Date(selectedRepo.created_at).toLocaleString() : "Unknown"}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Execution Logs Table */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-center text-[10px] uppercase text-muted-foreground font-bold tracking-wider">
-                        <span>Execution Audit Trail</span>
-                        <span>{periodicLogs.length} Entries</span>
-                      </div>
-
-                      <div className="max-h-60 overflow-y-auto border border-[var(--cp-border)]/60 rounded bg-[var(--cp-bg-1)]">
-                        {periodicLogs.length === 0 ? (
-                          <div className="p-4 text-center text-muted-foreground text-[11px]">No sync logs recorded yet.</div>
-                        ) : (
-                          <table className="w-full text-left border-collapse text-[10px]">
-                            <thead className="bg-[var(--cp-bg-3)] sticky top-0 text-muted-foreground border-b border-[var(--cp-border)] uppercase tracking-wider text-[9px]">
-                              <tr>
-                                <th className="py-1.5 px-2">Time</th>
-                                <th className="py-1.5 px-2">Project</th>
-                                <th className="py-1.5 px-2">Status</th>
-                                <th className="py-1.5 px-2">Actions</th>
-                                <th className="py-1.5 px-2">Details</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-[var(--cp-border)]/40 font-mono">
-                              {periodicLogs.slice(0, 10).map((log: any) => (
-                                <tr key={log.id} className="hover:bg-[var(--cp-bg-2)]/80 transition">
-                                  <td className="py-1.5 px-2 text-muted-foreground whitespace-nowrap">
-                                    {formatSyncLogDateTime(log.created_at)}
-                                  </td>
-                                  <td className="py-1.5 px-2 font-bold text-foreground">{log.repo_name}</td>
-                                  <td className="py-1.5 px-2">
-                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                                      log.status === "success" ? "bg-green-950 text-green-400" : log.status === "skipped" ? "bg-zinc-800 text-zinc-400" : "bg-red-950 text-red-400"
-                                    }`}>
-                                      {log.status.toUpperCase()}
-                                    </span>
-                                  </td>
-                                  <td className="py-1.5 px-2 whitespace-nowrap">
-                                    <div className="flex gap-1 text-[9px]">
-                                      {log.fetched && <span className="text-blue-400 bg-blue-950/60 px-1 rounded">FETCH</span>}
-                                      {log.code_changed && <span className="text-amber-400 bg-amber-950/60 px-1 rounded">CHANGED</span>}
-                                      {log.indexed && <span className="text-green-400 bg-green-950/60 px-1 rounded">INDEX</span>}
-                                      {log.graphed && <span className="text-purple-400 bg-purple-950/60 px-1 rounded">GRAPH</span>}
-                                    </div>
-                                  </td>
-                                  <td className="py-1.5 px-2 text-muted-foreground max-w-xs truncate" title={log.details}>
-                                    {log.details || "No details"}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
-                      </div>
-                    </div>
-                    </>}
-                  </div>
 
                   {/* Stats Grid */}
                   <div className="space-y-2">
@@ -1461,6 +1298,158 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     </div>
                   )}
                 </>
+              ) : detailsTab === "activity" ? (
+                <div className="space-y-4 font-mono text-xs" data-testid="periodic-sync-history-panel">
+                  {/* Git / Sync Checkout details */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded flex flex-col justify-between">
+                      <span className="text-[10px] text-muted-foreground uppercase">Git Branch</span>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <GitBranch size={14} className="text-[var(--cp-cyan)]" />
+                        <span className="text-xs font-bold text-foreground truncate">
+                          {lastFetchDetails[selectedRepo.name]?.branch || selectedRepo.branch || "main"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded flex flex-col justify-between">
+                      <span className="text-[10px] text-muted-foreground uppercase">Last Sync Commit</span>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <Clock size={14} className="text-[var(--cp-green)]" />
+                        <span className="text-xs font-bold text-foreground">
+                          {(lastFetchDetails[selectedRepo.name]?.new_commit || selectedRepo.last_job?.after_commit || (periodicLogs.length > 0 ? periodicLogs[0].after_commit : null))?.slice(0, 7) || "N/A"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded flex flex-col justify-between">
+                      <span className="text-[10px] text-muted-foreground uppercase">Remote Origin / Host</span>
+                      <div className="flex items-center gap-1 mt-1">
+                        <Database size={14} className="text-[var(--cp-yellow)]" />
+                        <span className="text-xs font-bold text-foreground truncate" title={selectedRepo.path}>
+                          {selectedRepo.source === "directory" ? "Local Directory" : selectedRepo.source === "github" ? "GitHub" : selectedRepo.source === "gitlab" ? "GitLab" : "Unknown"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Status info bar */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-[11px] bg-[var(--cp-bg-2)] p-3 border border-[var(--cp-border)] rounded">
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase">Last Sync Run</span>
+                      <span className="text-foreground font-medium">
+                        {periodicStatus?.last_run_at ? new Date(periodicStatus.last_run_at).toLocaleString() : "Recently on startup"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase">Next Scheduled Sync</span>
+                      <span className="text-[var(--cp-cyan)] font-medium">
+                        {periodicStatus?.next_run_at ? new Date(periodicStatus.next_run_at).toLocaleString() : "Every 6 Hours"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase">Last Fetched</span>
+                      <span className="text-foreground font-medium">
+                        {selectedRepo.last_fetched_at ? new Date(selectedRepo.last_fetched_at).toLocaleString() : "Never"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground block text-[10px] uppercase">Last Graph Generated</span>
+                      <span className="text-foreground font-medium">
+                        {graphifyStats?.generated_at ? new Date(graphifyStats.generated_at).toLocaleString() : "Never"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Toolbar */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--cp-border)]/40 pb-3">
+                    <span className="font-bold text-[var(--section-label)] uppercase tracking-wider text-[11px]">Sync Controls & Execution Logs</span>
+                    <div className="flex items-center gap-2">
+
+                      <button
+                        onClick={handleManualPeriodicSyncRun}
+                        disabled={isTriggeringPeriodicSync}
+                        className="flex items-center gap-1.5 px-3 py-1 bg-[var(--cp-cyan)]/10 text-[var(--cp-cyan)] hover:bg-[var(--cp-cyan)]/20 border border-[var(--cp-cyan)]/30 rounded text-[11px] font-bold transition disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isTriggeringPeriodicSync ? "animate-spin" : ""}`} />
+                        {isTriggeringPeriodicSync ? "SYNCING..." : "RUN SYNC PASS"}
+                      </button>
+                      <button
+                        onClick={fetchPeriodicSyncData}
+                        disabled={isLoadingSyncLogs}
+                        className="p-1 hover:bg-[var(--cp-bg-3)] rounded text-muted-foreground transition border border-[var(--cp-border)]"
+                        title="Refresh Logs"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isLoadingSyncLogs ? "animate-spin" : ""}`} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Interactive Timeline */}
+                  <div className="space-y-3">
+                    {periodicLogs.length === 0 ? (
+                      <div className="p-8 text-center text-muted-foreground border border-[var(--cp-border)] rounded bg-[var(--cp-bg-2)]">
+                        No activity logs recorded yet for this project.
+                      </div>
+                    ) : (
+                      <div className="relative pl-6 border-l border-[var(--cp-border)] ml-3 space-y-4 pt-1">
+                        {periodicLogs.map((log: any) => {
+                          const stats = parseFileStats(log.details);
+                          const isSuccess = log.status === "success";
+                          const isSkipped = log.status === "skipped";
+                          const statusColor = isSuccess ? "bg-emerald-500" : isSkipped ? "bg-zinc-500" : "bg-red-500";
+                          const timeStr = formatSyncLogDateTime(log.created_at);
+
+                          return (
+                            <div key={log.id} className="relative group">
+                              {/* Circle node on timeline */}
+                              <div className={`absolute -left-[31px] top-1.5 w-2 h-2 rounded-full border border-[var(--cp-bg-1)] ${statusColor} group-hover:scale-125 transition-transform`} />
+
+                              <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded hover:border-[var(--cp-cyan)]/40 transition">
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--cp-border)]/30 pb-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${
+                                      isSuccess ? "bg-green-950 text-green-400" : isSkipped ? "bg-zinc-800 text-zinc-400" : "bg-red-950 text-red-400"
+                                    }`}>
+                                      {log.status.toUpperCase()}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground">{timeStr}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    {log.fetched && <span className="text-[8px] px-1 rounded text-blue-400 bg-blue-950/60 border border-blue-900/40">FETCH</span>}
+                                    {log.code_changed && <span className="text-[8px] px-1 rounded text-amber-400 bg-amber-950/60 border border-amber-900/40">CHANGED</span>}
+                                    {log.indexed && <span className="text-[8px] px-1 rounded text-green-400 bg-green-950/60 border border-green-900/40">INDEX</span>}
+                                    {log.graphed && <span className="text-[8px] px-1 rounded text-purple-400 bg-purple-950/60 border border-purple-900/40">GRAPH</span>}
+                                  </div>
+                                </div>
+
+                                <div className="mt-2 text-xs flex flex-col md:flex-row md:items-center justify-between gap-2">
+                                  <div className="text-foreground text-[11px] leading-relaxed">
+                                    {log.details || "No details provided"}
+                                    {log.error && <p className="text-red-400 text-[10px] mt-1 bg-red-950/20 border border-red-900/40 p-1.5 rounded">{log.error}</p>}
+                                  </div>
+
+                                  {/* Render file stats if available */}
+                                  {stats && (
+                                    <div className="flex items-center gap-2 text-[10px] font-mono shrink-0" title={`${stats.indexed} files indexed, ${stats.skipped} skipped, ${stats.removed} removed`}>
+                                      <span className="text-muted-foreground">Files:</span>
+                                      <span className="px-1.5 py-0.5 rounded bg-[var(--cp-bg-3)] border border-[var(--cp-border)] font-bold text-foreground">
+                                        {stats.indexed} idx / {stats.total} total
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                                
+                                <div className="mt-2 text-[9px] text-muted-foreground/60 flex items-center justify-between pt-1 border-t border-[var(--cp-border)]/20">
+                                  <span>ID: #{log.id} • Trigger: {log.trigger || "system"}</span>
+                                  {log.duration_ms && <span>Duration: {log.duration_ms}ms</span>}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
               ) : detailsTab === "visuals" ? (
                 <ContextVisualizations nodes={astNodes} repoName={selectedRepo.name} analysis={analysisResults} activeModel={activeModel} serverUrl={serverUrl} apiKey={apiKey} />
               ) : (

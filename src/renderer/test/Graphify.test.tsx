@@ -136,8 +136,15 @@ describe('ContextView - Code Graph Integration', () => {
     expect(await screen.findByText('4217')).toBeInTheDocument()
     expect(screen.getByText('SEMANTIC: DONE')).toBeInTheDocument()
     expect(screen.getByText('STRUCTURAL: STALE')).toBeInTheDocument()
+    // Switch to Activity tab to verify sync logs
+    const activityTabBtn = await screen.findByTestId('activity-tab-button')
+    fireEvent.click(activityTabBtn)
     expect(screen.getByText('Last Graph Generated')).toBeInTheDocument()
     expect(screen.getByText('Last Fetched')).toBeInTheDocument()
+
+    // Switch back to Overview
+    const overviewTabBtn = screen.getByText('Overview')
+    fireEvent.click(overviewTabBtn)
     expect(screen.queryByText('SELECT GRAPHIFY DIR')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByText('GENERATE GRAPH'))
