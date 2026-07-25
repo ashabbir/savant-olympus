@@ -28,6 +28,8 @@ interface Repo {
   freshness?: string;
   graph_version?: string;
   code_intelligence?: StructuralHealth;
+  branch?: string;
+  last_job?: any;
 }
 
 interface StructuralHealth {
