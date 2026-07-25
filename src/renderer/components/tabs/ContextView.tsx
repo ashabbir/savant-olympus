@@ -1387,14 +1387,23 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
                   {/* Interactive Timeline */}
                   <div className="space-y-3">
-                    {periodicLogs.length === 0 ? (
-                      <div className="p-8 text-center text-muted-foreground border border-[var(--cp-border)] rounded bg-[var(--cp-bg-2)]">
-                        No activity logs recorded yet for this project.
-                      </div>
-                    ) : (
-                      <div className="relative pl-6 border-l border-[var(--cp-border)] ml-3 space-y-4 pt-1">
-                        {periodicLogs.map((log: any) => {
-                          const stats = parseFileStats(log.details);
+                    {(() => {
+                      const filteredLogs = selectedRepo
+                        ? periodicLogs.filter((log: any) => log.repo_name === selectedRepo.name)
+                        : periodicLogs;
+                      
+                      if (filteredLogs.length === 0) {
+                        return (
+                          <div className="p-8 text-center text-muted-foreground border border-[var(--cp-border)] rounded bg-[var(--cp-bg-2)]">
+                            No activity logs recorded yet for this project.
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="relative pl-6 border-l border-[var(--cp-border)] ml-3 space-y-4 pt-1">
+                          {filteredLogs.map((log: any) => {
+                            const stats = parseFileStats(log.details);
                           const isSuccess = log.status === "success";
                           const isSkipped = log.status === "skipped";
                           const statusColor = isSuccess ? "bg-emerald-500" : isSkipped ? "bg-zinc-500" : "bg-red-500";
@@ -1449,7 +1458,8 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                           );
                         })}
                       </div>
-                    )}
+                    );
+                  })()}
                   </div>
                 </div>
               ) : detailsTab === "visuals" ? (
