@@ -142,7 +142,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const [periodicStatus, setPeriodicStatus] = useState<any>(null);
   const [periodicLogs, setPeriodicLogs] = useState<any[]>([]);
   const [isLoadingSyncLogs, setIsLoadingSyncLogs] = useState(false);
-  const [isTriggeringPeriodicSync, setIsTriggeringPeriodicSync] = useState(false);
+  const [syncingProjects, setSyncingProjects] = useState<Record<string, boolean>>({});
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
   const [isSyncHistoryCollapsed, setIsSyncHistoryCollapsed] = useState(false);
 
@@ -172,17 +172,18 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
   const handleManualPeriodicSyncRun = async () => {
     if (!selectedRepo) return;
-    setIsTriggeringPeriodicSync(true);
-    toast.info(`Triggering background sync pass for "${selectedRepo.name}"...`);
+    const repoName = selectedRepo.name;
+    setSyncingProjects((prev) => ({ ...prev, [repoName]: true }));
+    toast.info(`Triggering background sync pass for "${repoName}"...`);
     try {
-      const res = await contextService.triggerPeriodicSyncProject(selectedRepo.name);
-      toast.success(`Periodic sync completed for "${selectedRepo.name}"!`);
+      const res = await contextService.triggerPeriodicSyncProject(repoName);
+      toast.success(`Periodic sync completed for "${repoName}"!`);
       await fetchPeriodicSyncData();
       await fetchRepos();
     } catch (e: any) {
       toast.error(`Periodic sync failed: ${e.message}`);
     } finally {
-      setIsTriggeringPeriodicSync(false);
+      setSyncingProjects((prev) => ({ ...prev, [repoName]: false }));
     }
   };
 
@@ -1368,11 +1369,11 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
                       <button
                         onClick={handleManualPeriodicSyncRun}
-                        disabled={isTriggeringPeriodicSync}
+                        disabled={!!syncingProjects[selectedRepo.name]}
                         className="flex items-center gap-1.5 px-3 py-1 bg-[var(--cp-cyan)]/10 text-[var(--cp-cyan)] hover:bg-[var(--cp-cyan)]/20 border border-[var(--cp-cyan)]/30 rounded text-[11px] font-bold transition disabled:opacity-50"
                       >
-                        <RefreshCw className={`w-3 h-3 ${isTriggeringPeriodicSync ? "animate-spin" : ""}`} />
-                        {isTriggeringPeriodicSync ? "SYNCING..." : "RUN SYNC PASS"}
+                        <RefreshCw className={`w-3 h-3 ${syncingProjects[selectedRepo.name] ? "animate-spin" : ""}`} />
+                        {syncingProjects[selectedRepo.name] ? "SYNCING..." : "RUN SYNC PASS"}
                       </button>
                       <button
                         onClick={fetchPeriodicSyncData}
