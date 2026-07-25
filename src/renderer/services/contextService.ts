@@ -47,6 +47,12 @@ export class ContextService {
     return this.client.request("/api/jobs/cancel", { method: "POST", body: { job_id: jobId } });
   }
 
+  listJobs(status?: string): Promise<any> {
+    const url = status ? `/api/jobs/list?status=${encodeURIComponent(status)}` : "/api/jobs/list";
+    return this.client.request(url);
+  }
+
+
   purgeRepository(name: string): Promise<any> {
     return this.client.request("/api/context/repos/purge", { method: "POST", body: { name } });
   }

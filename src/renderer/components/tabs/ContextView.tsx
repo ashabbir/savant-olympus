@@ -148,6 +148,19 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
   const contextService = React.useMemo(() => createContextService(serverUrl, apiKey), [serverUrl, apiKey]);
 
+  const [jobsSummary, setJobsSummary] = useState<any>(null);
+
+  const fetchJobsSummary = useCallback(async () => {
+    try {
+      const data = await contextService.listJobs();
+      if (data && data.summary) {
+        setJobsSummary(data.summary);
+      }
+    } catch (e) {
+      console.error("Failed to fetch jobs summary:", e);
+    }
+  }, [contextService]);
+
   const fetchPeriodicSyncData = useCallback(async () => {
     setIsLoadingSyncLogs(true);
     try {
@@ -228,9 +241,13 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   useEffect(() => {
     fetchRepos();
     fetchIndexingStatus();
-    const interval = setInterval(fetchIndexingStatus, 5000);
+    fetchJobsSummary();
+    const interval = setInterval(() => {
+      fetchIndexingStatus();
+      fetchJobsSummary();
+    }, 5000);
     return () => clearInterval(interval);
-  }, [fetchRepos, fetchIndexingStatus]);
+  }, [fetchRepos, fetchIndexingStatus, fetchJobsSummary]);
 
   const [astNodes, setAstNodes] = useState<any[]>([]);
   const [analysisResults, setAnalysisResults] = useState<any | null>(null);
@@ -786,6 +803,34 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
           </h2>
           <p className="text-xs text-muted-foreground opacity-60">Manage indexed code repositories & projects</p>
         </div>
+
+        {jobsSummary && (jobsSummary.queued_total > 0 || jobsSummary.indexing_total > 0 || jobsSummary.analysis_total > 0) && (
+          <div className="flex items-center gap-3 bg-[var(--cp-bg-1)] border border-[var(--cp-border)] px-3 py-1.5 rounded font-mono text-[11px]">
+            <div className="text-[var(--section-label)] uppercase text-[9px] tracking-wider border-r border-[var(--cp-border)] pr-2.5 mr-0.5" style={{ fontFamily: "'Orbitron', sans-serif" }}>
+              Job Queue
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[var(--cp-cyan)] font-bold">{jobsSummary.queued_total}</span>
+              <span className="text-muted-foreground text-[10px]">queued</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-amber-500 font-bold">{jobsSummary.indexing_running}</span>
+              <span className="text-muted-foreground text-[10px]">indexing</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-purple-400 font-bold">{jobsSummary.analysis_running}</span>
+              <span className="text-muted-foreground text-[10px]">analyzing</span>
+            </div>
+            {jobsSummary.active_jobs && jobsSummary.active_jobs.length > 0 && (
+              <div className="flex items-center gap-1.5 border-l border-[var(--cp-border)] pl-2.5 ml-0.5 text-muted-foreground">
+                <span className="animate-pulse inline-block h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+                <span className="text-[10px] truncate max-w-[150px]" title={jobsSummary.active_jobs[0].message || jobsSummary.active_jobs[0].phase}>
+                  Processing: {jobsSummary.active_jobs[0].target} ({jobsSummary.active_jobs[0].progress}%)
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 flex gap-4 overflow-hidden">
