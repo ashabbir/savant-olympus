@@ -160,12 +160,46 @@ export function ActivityLogsView({ serverUrl, apiKey, isAdmin }: {
 function ActivityInfoDrawer({ log, onClose }: { log: any; onClose: () => void }) {
   const files = jsonValue(log.files_changed, { added: [], modified: [], deleted: [] });
   const stats = jsonValue(log.change_stats, {});
+  const graphResult = jsonValue(stats.codegraph_result, {});
   return <div role="dialog" aria-label="Activity information" className="fixed top-0 bottom-0 left-10 right-10 z-[1000] flex justify-end bg-black/65 backdrop-blur-sm">
     <aside className="h-full w-full max-w-5xl overflow-auto border-l border-[var(--cp-cyan)] bg-[var(--cp-bg-1)] p-6 shadow-2xl animate-in slide-in-from-right">
       <header className="flex justify-between items-start border-b border-[var(--cp-border)] pb-4">
         <div><div className="text-[10px] uppercase tracking-[0.25em] text-[var(--cp-cyan)]">Run information</div><h2 className="text-xl font-bold mt-1">{log.repo_name} · {String(log.operation).replaceAll("_", " ")}</h2></div>
         <button aria-label="Close activity information" onClick={onClose}><X size={20} /></button>
       </header>
+      <section className="my-5">
+        <h3 className="uppercase text-[10px] tracking-[0.2em] text-[var(--cp-cyan)] mb-3">Execution details</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <ExecutionCard title="Git fetch" status={log.fetched ? "Completed" : "Not run"} tone={log.fetched ? "success" : "muted"}
+            rows={[
+              ["Hash changed", didGitHashChange(log) ? "Yes" : "No"],
+              ["Before", log.before_commit ? String(log.before_commit).slice(0, 10) : "—"],
+              ["After", log.after_commit ? String(log.after_commit).slice(0, 10) : "—"],
+              ["Changed files", String(stats.files_total ?? files.added.length + files.modified.length + files.deleted.length)],
+            ]} />
+          <ExecutionCard title="Semantic index" status={log.indexed ? "Completed" : "Not run"} tone={(stats.index_errors ?? 0) > 0 ? "error" : log.indexed ? "success" : "muted"}
+            rows={[
+              ["Files indexed", valueOrDash(stats.files_indexed)],
+              ["Files skipped", valueOrDash(stats.files_skipped)],
+              ["Files removed", valueOrDash(stats.files_removed_from_index ?? stats.files_removed)],
+              ["Chunks created", valueOrDash(stats.chunks_indexed)],
+              ["Errors", valueOrDash(stats.index_errors ?? stats.errors)],
+            ]} />
+          <ExecutionCard title="CodeGraph" status={log.graphed ? "Completed" : "Not run"} tone={stats.codegraph_accepted === false ? "error" : log.graphed ? "success" : "muted"}
+            rows={[
+              ["Accepted", stats.codegraph_accepted == null ? "—" : stats.codegraph_accepted ? "Yes" : "No"],
+              ["Changed files covered", valueOrDash(stats.codegraph_changed_files?.length)],
+              ...Object.entries(graphResult).slice(0, 3).map(([key, value]) => [
+                key.replaceAll("_", " "),
+                typeof value === "object" ? JSON.stringify(value) : String(value),
+              ]),
+            ]} />
+          {log.error && <div className="border border-red-500/40 bg-red-500/10 p-4 text-red-300">
+            <div className="text-[9px] uppercase tracking-wider opacity-60">Error</div>
+            <div className="mt-2 text-sm whitespace-pre-wrap">{log.error}</div>
+          </div>}
+        </div>
+      </section>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 my-5 text-xs">
         {[
           ["Date & time", formatDateTime(log.created_at)], ["Status", log.status], ["Trigger", log.trigger],
@@ -178,6 +212,26 @@ function ActivityInfoDrawer({ log, onClose }: { log: any; onClose: () => void })
         <div className="font-mono text-xs mt-3 break-all">Before: {log.before_commit || "—"}<br />After: {log.after_commit || "—"}</div>
         {log.commit_subject && <div className="mt-2 text-sm">{log.commit_subject}</div>}
         <div className="flex gap-4 mt-3 text-xs"><span className="text-green-400">+{stats.insertions || 0}</span><span className="text-red-400">-{stats.deletions || 0}</span><span>{stats.files_total || 0} files</span></div>
+      </section>
+      <section className="border border-[var(--cp-border)] p-4 mb-4">
+        <h3 className="font-bold mb-3">CodeGraph details</h3>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+          <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3">
+            <div className="opacity-45 uppercase text-[9px]">Sync accepted</div>
+            <div className="text-lg font-bold mt-1 text-[var(--cp-cyan)]">{stats.codegraph_accepted == null ? "—" : stats.codegraph_accepted ? "Yes" : "No"}</div>
+          </div>
+          <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3">
+            <div className="opacity-45 uppercase text-[9px]">Changed files sent to graph sync</div>
+            <div className="text-lg font-bold mt-1 text-[var(--cp-cyan)]">{stats.codegraph_changed_files?.length ?? "—"}</div>
+          </div>
+          {Object.entries(graphResult).map(([label, value]) => <div key={label} className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3">
+            <div className="opacity-45 uppercase text-[9px]">{label.replaceAll("_", " ")}</div>
+            <div className="text-lg font-bold mt-1 text-[var(--cp-cyan)] break-all">{typeof value === "object" ? JSON.stringify(value) : String(value)}</div>
+          </div>)}
+        </div>
+        {stats.codegraph_changed_files?.length > 0 && <div className="mt-3 border border-[var(--cp-border)] font-mono text-xs">
+          {stats.codegraph_changed_files.map((file: string) => <div key={file} className="px-3 py-2 border-b border-[var(--cp-border)] last:border-0">{file}</div>)}
+        </div>}
       </section>
       <section className="border border-[var(--cp-border)] p-4 mb-4">
         <h3 className="font-bold mb-3">Indexing details</h3>
@@ -199,7 +253,34 @@ function ActivityInfoDrawer({ log, onClose }: { log: any; onClose: () => void })
         <h3 className="uppercase text-[10px] tracking-wider opacity-60">{kind} files ({files[kind]?.length || 0})</h3>
         <div className="mt-2 border border-[var(--cp-border)] font-mono text-xs">{(files[kind] || []).map((file: string) => <div key={file} className="px-3 py-2 border-b border-[var(--cp-border)] last:border-0">{file}</div>)}{!files[kind]?.length && <div className="p-3 opacity-40">None</div>}</div>
       </section>)}
-      <section className="border border-[var(--cp-border)] p-4 text-xs"><h3 className="uppercase tracking-wider mb-2">Execution details</h3><pre className="whitespace-pre-wrap break-words">{log.details || "No additional details."}</pre>{log.error && <pre className="mt-3 text-red-300 whitespace-pre-wrap">{log.error}</pre>}</section>
+      <section className={`border p-4 text-xs ${log.error ? "border-red-500/40 bg-red-500/10" : "border-[var(--cp-border)]"}`}>
+        <h3 className="uppercase tracking-wider mb-2">Diagnostics</h3>
+        <pre className="whitespace-pre-wrap break-words">{log.details || "No additional execution details."}</pre>
+        {log.error && <><h4 className="uppercase tracking-wider mt-4 mb-2 text-red-300">Error</h4><pre className="text-red-300 whitespace-pre-wrap break-words">{log.error}</pre></>}
+      </section>
     </aside>
+  </div>;
+}
+
+const valueOrDash = (value: unknown) => value == null ? "—" : String(value);
+
+function ExecutionCard({ title, status, tone, rows }: {
+  title: string;
+  status: string;
+  tone: "success" | "error" | "muted";
+  rows: string[][];
+}) {
+  const color = tone === "success" ? "#27f2a4" : tone === "error" ? "#ff4d78" : "#9ca3af";
+  return <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] p-4">
+    <div className="flex items-center justify-between gap-3 border-b border-[var(--cp-border)] pb-3">
+      <div className="font-bold">{title}</div>
+      <div className="text-[10px] uppercase tracking-wider" style={{ color }}>{status}</div>
+    </div>
+    <dl className="mt-3 space-y-2 text-xs">
+      {rows.map(([label, value]) => <div key={label} className="flex justify-between gap-4">
+        <dt className="opacity-50 capitalize">{label}</dt>
+        <dd className="font-mono text-right break-all">{value}</dd>
+      </div>)}
+    </dl>
   </div>;
 }

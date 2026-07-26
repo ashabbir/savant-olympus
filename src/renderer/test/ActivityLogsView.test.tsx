@@ -13,7 +13,9 @@ const logs = [
     change_stats: {
       files_total: 1, insertions: 5, deletions: 0, files_indexed: 12,
       files_skipped: 4, files_removed_from_index: 2, chunks_indexed: 30, index_errors: 1,
-    }, details: "Indexed",
+      codegraph_accepted: true, codegraph_changed_files: ["new.ts"],
+      codegraph_result: { files_updated: 1 },
+    }, details: "Fetched origin (code_changed=True); Indexed",
   },
   {
     id: 2, repo_name: "repo-y", operation: "analysis", trigger: "user",
@@ -62,9 +64,11 @@ describe("ActivityLogsView", () => {
 
     fireEvent.click(screen.getAllByText("repo-x").at(-1)!);
     expect(screen.getByRole("dialog", { name: "Activity information" })).toBeInTheDocument();
-    expect(screen.getByText("new.ts")).toBeInTheDocument();
-    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getAllByText("new.ts").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("12").length).toBeGreaterThan(0);
     expect(screen.getByText("Files removed from index")).toBeInTheDocument();
+    expect(screen.getByText(/Fetched origin \(code_changed=True\)/)).toBeInTheDocument();
+    expect(screen.getByText("Changed files sent to graph sync")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
