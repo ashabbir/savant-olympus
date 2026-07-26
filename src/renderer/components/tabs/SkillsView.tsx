@@ -282,7 +282,7 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
     () => createScopedLocalAthenaThreadStore<ChatMessage>(ATHENA_CHAT_HISTORY_KEY, ATHENA_SKILLS_SCOPE),
     [],
   );
-  const { messages: chatMessages, setMessages: setChatMessages, removeMessage: removeChatMessage } = useAthenaThread<ChatMessage>({
+  const { messages: chatMessages, setMessages: setChatMessages, removeMessage: removeChatMessage, clearMessages: clearChatMessages } = useAthenaThread<ChatMessage>({
     threadId: ATHENA_SKILLS_SCOPE,
     store: historyStore,
   });
@@ -1132,7 +1132,21 @@ STEERING RULES:
                 <span className="flex items-center gap-1.5 font-bold">
                   <Bot size={14} /> AI_SKILL_CREATOR_CHAT
                 </span>
-                <span className="text-[10px] text-muted-foreground">Explain the skill, AI does the rest</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-muted-foreground">Explain the skill, AI does the rest</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm("Are you sure you want to reset this chat?")) {
+                        clearChatMessages();
+                        setSkillProposal(null);
+                      }
+                    }}
+                    className="px-1.5 py-0.5 border border-red-500/30 text-[9px] text-[var(--cp-magenta)] hover:bg-red-950/20 font-bold cursor-pointer"
+                  >
+                    RESET CHAT
+                  </button>
+                </div>
               </div>
 
               {/* Chat Messages */}

@@ -1,10 +1,16 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Cpu, Save, Plus, Trash2, Shield, RefreshCcw, Sparkles, Folder, FileText, Check, ChevronLeft, ChevronRight, Download, Upload, PackageOpen } from "lucide-react";
+import { Cpu, Save, Plus, Trash2, Shield, RefreshCcw, Sparkles, Folder, FileText, Check, ChevronLeft, ChevronRight, Download, Upload, PackageOpen, Bot, Send } from "lucide-react";
 import { createAbilitiesService } from "../../services/abilitiesService";
 import { SearchBar } from "../shared/SearchBar";
 import { ViewHeader } from "../shared/ViewHeader";
 import { StatusBadge } from "../shared/StatusBadge";
 import { ModalBackdrop } from "../shared/ModalBackdrop";
+import { buildAthenaConversationPrompt } from "../../lib/athenaContext";
+import { AthenaMessage } from "../shared/AthenaMessage";
+import { AthenaConversationExport, AthenaMessageExportActions } from "../shared/AthenaExportActions";
+import { createScopedLocalAthenaThreadStore, readLocalAthenaHistory, useAthenaThread } from "../../hooks/useAthenaThread";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 interface AbilityAsset {
   id: string;
@@ -17,13 +23,46 @@ interface AbilityAsset {
   path?: string;
 }
 
+interface ChatMessage {
+  id: string;
+  sender: "user" | "assistant";
+  text: string;
+  timestamp: string;
+  suggestedAsset?: Partial<AbilityAsset>;
+  proposedActions?: Array<{
+    type: "create" | "update" | "delete";
+    id: string;
+    assetType?: string;
+    name?: string;
+    priority?: number;
+    tags?: string[];
+    includes?: string[];
+    body?: string;
+  }>;
+}
+
+interface AbilityAssetProposal {
+  id: string;
+  type: string;
+  name: string;
+  priority: number;
+  tags: string[];
+  includes: string[];
+  body: string;
+  rationale?: string;
+}
+
+const ATHENA_CHAT_HISTORY_KEY = "savant_athena_chat_history";
+const ATHENA_ABILITIES_SCOPE = "abilities";
+
 interface AbilitiesViewProps {
   serverUrl: string;
   apiKey: string;
   isAdmin: boolean;
+  activeModel?: { provider: string; model: string };
 }
 
-export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps) {
+export function AbilitiesView({ serverUrl, apiKey, isAdmin, activeModel }: AbilitiesViewProps) {
   const [assets, setAssets] = useState<Record<string, AbilityAsset[]>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<AbilityAsset | null>(null);
@@ -40,7 +79,320 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
   const [archiveError, setArchiveError] = useState("");
   const [importReceipt, setImportReceipt] = useState<{ imported_count: number; skipped_count: number } | null>(null);
 
+  // AI Generation Chat states
+  const [isAiMode, setIsAiMode] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const [isAiChatLoading, setIsAiChatLoading] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [assetProposal, setAssetProposal] = useState<AbilityAssetProposal | null>(null);
+  const [isCreatingAsset, setIsCreatingAsset] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const baseUrl = serverUrl.replace(/\/+$/, "");
   const abilitiesService = createAbilitiesService(serverUrl, apiKey);
+
+  const historyStore = React.useMemo(
+    () => createScopedLocalAthenaThreadStore<ChatMessage>(ATHENA_CHAT_HISTORY_KEY, ATHENA_ABILITIES_SCOPE),
+    [],
+  );
+  const { messages: chatMessages, setMessages: setChatMessages, removeMessage: removeChatMessage, clearMessages: clearChatMessages } = useAthenaThread<ChatMessage>({
+    threadId: ATHENA_ABILITIES_SCOPE,
+    store: historyStore,
+  });
+
+  const readSharedAthenaHistory = () => readLocalAthenaHistory<ChatMessage>(ATHENA_CHAT_HISTORY_KEY);
+  const formatAthenaHistory = (messages: any[]) =>
+    messages.length > 0
+      ? messages.map(msg => `[${msg.scope || "general"}] ${msg.sender.toUpperCase()}: ${msg.text}`).join("\n")
+      : "No previous messages in this conversation.";
+  const handleCopyMessage = (text: string) => navigator.clipboard.writeText(text);
+  const handleDeleteMessage = (id: string) => {
+    removeChatMessage(id);
+  };
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages, isAiChatLoading]);
+
+  const handleCreateProposal = async () => {
+    if (!assetProposal || isCreatingAsset) return;
+    setIsCreatingAsset(true);
+    setCreateError("");
+    try {
+      await abilitiesService.createAsset({
+        id: assetProposal.id,
+        type: assetProposal.type,
+        name: assetProposal.name,
+        priority: assetProposal.priority,
+        tags: assetProposal.tags,
+        includes: assetProposal.includes,
+        body: assetProposal.body,
+      });
+
+      await fetchAssets();
+      setSelectedId(assetProposal.id);
+      setIsAiMode(false);
+      setAssetProposal(null);
+
+      const newAsset: AbilityAsset = {
+        id: assetProposal.id,
+        type: assetProposal.type,
+        name: assetProposal.name,
+        priority: assetProposal.priority,
+        tags: assetProposal.tags,
+        includes: assetProposal.includes,
+        body: assetProposal.body,
+      };
+      setSelectedAsset(newAsset);
+      setEditBody(newAsset.body || "");
+      setEditPriority(newAsset.priority);
+      setEditTags(newAsset.tags || []);
+      setEditIncludes(newAsset.includes || []);
+      setIsDirty(false);
+
+      setChatMessages(current => [...current, {
+        id: Math.random().toString(),
+        sender: "assistant",
+        text: `Created asset **${assetProposal.id}** on the Savant Server.`,
+        timestamp: new Date().toISOString(),
+      }]);
+    } catch (error: any) {
+      setCreateError(error?.message || "The server could not create this asset.");
+    } finally {
+      setIsCreatingAsset(false);
+    }
+  };
+
+  const handleApplyProposedActions = async (actions: ChatMessage["proposedActions"], messageId: string) => {
+    if (!actions || actions.length === 0) return;
+    try {
+      for (const action of actions) {
+        if (action.type === "create") {
+          await abilitiesService.createAsset({
+            id: action.id,
+            type: action.assetType || action.id.split(".")[0],
+            name: action.name || action.id.split(".").pop(),
+            priority: action.priority || 900,
+            tags: action.tags || [],
+            includes: action.includes || [],
+            body: action.body || ""
+          });
+        } else if (action.type === "update") {
+          await abilitiesService.updateAsset(action.id, {
+            priority: action.priority,
+            tags: action.tags,
+            includes: action.includes,
+            body: action.body
+          });
+        } else if (action.type === "delete") {
+          await abilitiesService.deleteAsset(action.id);
+        }
+      }
+      await fetchAssets();
+
+      setChatMessages(prev => prev.map(m => m.id === messageId ? { ...m, proposedActions: undefined } : m));
+
+      setChatMessages(current => [...current, {
+        id: Math.random().toString(),
+        sender: "assistant",
+        text: `Successfully applied ${actions.length} proposed system changes.`,
+        timestamp: new Date().toISOString(),
+      }]);
+    } catch (e: any) {
+      alert(`Error applying actions: ${e.message}`);
+    }
+  };
+
+  const handleSendAiChatMessage = async (finalize = false) => {
+    if (isAiChatLoading || (!finalize && !chatInput.trim())) return;
+    if (finalize && chatMessages.every(message => message.sender !== "user") && !chatInput.trim()) return;
+
+    const pendingText = chatInput.trim();
+    const userMsg: ChatMessage | null = pendingText ? {
+      id: Math.random().toString(),
+      sender: "user",
+      text: pendingText,
+      timestamp: new Date().toISOString()
+    } : null;
+
+    const nextMessages = userMsg ? [...chatMessages, userMsg] : chatMessages;
+    setChatMessages(nextMessages);
+    setChatInput("");
+    setIsAiChatLoading(true);
+    setIsFinalizing(finalize);
+
+    try {
+      const chatHistory = nextMessages
+        .map(msg => `${msg.sender.toUpperCase()}: ${msg.text}`)
+        .join("\n");
+
+      const existingAssetsMeta = Object.values(assets).flat().map(a => ({
+        id: a.id,
+        type: a.type,
+        name: a.name || a.id.split(".").pop(),
+        tags: a.tags || [],
+        includes: a.includes || []
+      }));
+
+      const promptPayload = `You are a collaborative AI Ability Asset Architect designing a system prompt/ability asset for Savant through conversation.
+
+Here is the list of existing assets already in the system:
+${JSON.stringify(existingAssetsMeta, null, 2)}
+
+Here is the conversation history so far:
+${formatAthenaHistory(readSharedAthenaHistory())}
+${chatHistory}
+
+You MUST respond with a valid JSON object. Do not include any markdown wrap, extra explanation, or conversational text outside of the JSON.
+
+DIRECTIONS:
+- This request is in ${finalize ? "FINALIZE" : "CONVERSATION"} mode.
+- In CONVERSATION mode, you can discuss new designs, answer questions, analyze existing assets for duplicates/redundancies, identify wordy assets that need condensing, and suggest cleanup plans.
+- If the user asks you to find duplicates, analyze wordiness, or fix issues, or if you notice duplication/redundancies:
+  1. Explain clearly in "response" what issues exist and what should be done.
+  2. If the user explicitly asks to "fix it", "do it", or when proposing a specific concrete change, include a list of proposed "actions" in the JSON.
+  3. Actions can be of type:
+     - "create": { "type": "create", "assetType": "persona|rule|policy|style|repo", "id": "...", "name": "...", "priority": 900, "tags": [...], "includes": [...], "body": "..." }
+     - "update": { "type": "update", "id": "...", "priority": 900, "tags": [...], "includes": [...], "body": "..." }
+     - "delete": { "type": "delete", "id": "..." }
+  4. Explain the plan and ask the user to confirm/say okay before executing.
+
+- In FINALIZE mode, stop asking questions. Resolve remaining ambiguity with the recommendations and assumptions already discussed, then return status "ready" with the finalized asset definition.
+
+In CONVERSATION mode return:
+{
+  "status": "conversational",
+  "response": "A concise explanation of duplicates, wordiness issues, or answers to the user's questions.",
+  "question": "Optional question asking for permission to apply changes, or clarifying details.",
+  "suggestion": "Recommended cleanup direction.",
+  "assumptions": ["Any working assumptions"],
+  "actions": [
+    { "type": "create|update|delete", "assetType": "persona|rule|policy|style|repo", "id": "asset.id", "name": "optional name", "priority": 900, "tags": [], "includes": [], "body": "markdown body text" }
+  ]
+}
+
+In FINALIZE mode return:
+{
+  "status": "ready",
+  "id": "type.snake_case_name",
+  "type": "persona|rule|policy|style|repo",
+  "name": "Human-friendly asset name",
+  "priority": 900,
+  "tags": ["tag1", "tag2"],
+  "includes": ["other.asset.id1", "other.asset.id2"],
+  "body": "The complete prompt content in Markdown format, with headers, explanations, rules, etc.",
+  "rationale": "Why this type, tag list, and include hierarchy is sufficient and avoids duplication."
+}
+
+STEERING RULES:
+- Asset ID must match the format: \`type.snake_case_name\` (e.g. \`rule.naming_conventions\` or \`persona.backend_lead\`).
+- If proposing updates to condense, ensure the "body" contains the actual condensed markdown.
+- Recommend specific tags and includes based on existing assets to reduce replication of guidelines.
+- Always provide a solid default value for the body prompt in FINALIZE mode.`;
+
+      const res = await window.system.runAgentViaGateway({
+        provider: activeModel?.provider || "gemini",
+        model: activeModel?.model || "3.5",
+        prompt: await buildAthenaConversationPrompt({
+          context: {
+            area: "Abilities > Create with Athena",
+            repository: "savant-olympus",
+            selected: { type: "new-ability-design", proposal: assetProposal },
+            screen: { mode: finalize ? "finalize" : "conversation" },
+          },
+          history: chatMessages,
+          userMessage: pendingText || "Finalize the asset design using the pinned context and complete conversation.",
+          instructions: promptPayload,
+          query: `${pendingText || "finalize asset design"} ${chatHistory}`,
+          baseUrl,
+          apiKey,
+          repo: "savant-olympus",
+        })
+      });
+
+      let cleanRes = res || "";
+
+      const parseJsonSafely = (text: string) => {
+        try {
+          return JSON.parse(text.trim());
+        } catch (e) {}
+
+        const codeBlockRegex = /```(?:json)?([\s\S]*?)```/;
+        const match = text.match(codeBlockRegex);
+        if (match && match[1]) {
+          try {
+            return JSON.parse(match[1].trim());
+          } catch (e) {}
+        }
+
+        const startIdx = text.indexOf('{');
+        const endIdx = text.lastIndexOf('}');
+        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+          const candidate = text.substring(startIdx, endIdx + 1);
+          try {
+            return JSON.parse(candidate.trim());
+          } catch (e) {}
+        }
+        throw new Error("Invalid JSON structure");
+      };
+
+      try {
+        const parsed = parseJsonSafely(cleanRes);
+        if (parsed.status === "conversational") {
+          const assistantMsg = {
+            id: Math.random().toString(),
+            sender: "assistant" as const,
+            text: `${parsed.response}${parsed.question ? `\n\n**Question:** ${parsed.question}` : ""}${parsed.suggestion ? `\n\n**Athena suggests:** ${parsed.suggestion}` : ""}${Array.isArray(parsed.assumptions) && parsed.assumptions.length ? `\n\n**Working assumptions:** ${parsed.assumptions.join("; ")}` : ""}`,
+            timestamp: new Date().toISOString(),
+            proposedActions: parsed.actions
+          };
+          setChatMessages(prev => [...prev, assistantMsg]);
+        } else if (parsed.status === "ready" && parsed.id && parsed.type && parsed.body) {
+          const proposal: AbilityAssetProposal = {
+            id: parsed.id,
+            type: parsed.type,
+            name: parsed.name || parsed.id.split(".").pop() || "",
+            priority: parsed.priority || 900,
+            tags: parsed.tags || [],
+            includes: parsed.includes || [],
+            body: parsed.body,
+            rationale: parsed.rationale
+          };
+          setAssetProposal(proposal);
+          setCreateError("");
+
+          const assistantMsg = {
+            id: Math.random().toString(),
+            sender: "assistant" as const,
+            text: `I recommend the **${proposal.id}** structure below. Review the details, then create it on the server or tell me what to change.`,
+            timestamp: new Date().toISOString(),
+          };
+          setChatMessages(prev => [...prev, assistantMsg]);
+        } else {
+          throw new Error("Missing status properties.");
+        }
+      } catch (parseErr) {
+        const assistantMsg = {
+          id: Math.random().toString(),
+          sender: "assistant" as const,
+          text: cleanRes,
+          timestamp: new Date().toISOString()
+        };
+        setChatMessages(prev => [...prev, assistantMsg]);
+      }
+    } catch (e: any) {
+      console.error(e);
+      const assistantMsg = {
+        id: Math.random().toString(),
+        sender: "assistant" as const,
+        text: `Error contacting the AI model: ${e.message || "Unknown error"}. Make sure your Savant Gateway is running.`,
+        timestamp: new Date().toISOString()
+      };
+      setChatMessages(prev => [...prev, assistantMsg]);
+    } finally {
+      setIsAiChatLoading(false);
+    }
+  };
 
 
   // Edit fields
@@ -383,13 +735,39 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
             {isAssetPaneOpen && <h3 className="text-xs uppercase text-[var(--section-label)] tracking-wider font-mono">Asset Trees</h3>}
             <div className="flex items-center gap-1">
               {isAssetPaneOpen && isAdmin && (
-                <button
-                  onClick={() => setShowNewModal(true)}
-                  className="px-2 py-0.5 border text-[10px] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] flex items-center gap-1 font-mono cursor-pointer"
-                  style={{ borderColor: "rgba(0, 229, 255, 0.3)" }}
-                >
-                  <Plus size={10} /> NEW_ASSET
-                </button>
+                <>
+                  <button
+                    onClick={() => {
+                      setIsAiMode(!isAiMode);
+                      if (!isAiMode && chatMessages.length === 0) {
+                        setChatMessages([
+                          {
+                            id: "welcome",
+                            sender: "assistant",
+                            text: "Hi! I am the Savant AI Ability Assistant. Tell me what system ability, persona, rule, policy, style, or repository prompt you'd like to build, and I will generate the complete configuration and prompt body for you!",
+                            timestamp: new Date().toISOString()
+                          }
+                        ]);
+                      }
+                    }}
+                    style={{ borderColor: isAiMode ? "var(--cp-magenta)" : "rgba(0, 229, 255, 0.3)" }}
+                    className={`px-1.5 py-0.5 border text-[10px] flex items-center gap-1 font-mono cursor-pointer transition-all ${
+                      isAiMode
+                        ? "text-[var(--cp-magenta)] hover:bg-[rgba(255,0,229,0.1)]"
+                        : "text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)]"
+                    }`}
+                  >
+                    <Sparkles size={10} />
+                    {isAiMode ? "VIEW EDITOR" : "CREATE WITH ATHENA"}
+                  </button>
+                  <button
+                    onClick={() => setShowNewModal(true)}
+                    className="px-2 py-0.5 border text-[10px] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] flex items-center gap-1 font-mono cursor-pointer"
+                    style={{ borderColor: "rgba(0, 229, 255, 0.3)" }}
+                  >
+                    <Plus size={10} /> NEW_ASSET
+                  </button>
+                </>
               )}
               <button
                 type="button"
@@ -485,7 +863,209 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin }: AbilitiesViewProps
         </div>
 
         {/* Right Side: Workspace Resolution or Editor */}
-        {showBuilder ? (
+        {isAiMode ? (
+          /* AI Ability Generation Chat Panel */
+          <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex flex-col overflow-hidden relative">
+            <div className="flex flex-col h-full bg-[var(--cp-bg-0)]">
+              {/* Chat Title bar */}
+              <div className="flex items-center justify-between border-b border-[var(--cp-border)] px-4 py-2.5 bg-[var(--cp-bg-1)] font-mono text-xs text-[var(--cp-cyan)]">
+                <span className="flex items-center gap-1.5 font-bold">
+                  <Bot size={14} /> AI_ABILITY_CREATOR_CHAT
+                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-muted-foreground">Explain the prompt/ability, AI does the rest</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm("Are you sure you want to reset this chat?")) {
+                        clearChatMessages();
+                        setAssetProposal(null);
+                      }
+                    }}
+                    className="px-1.5 py-0.5 border border-red-500/30 text-[9px] text-[var(--cp-magenta)] hover:bg-red-950/20 font-bold cursor-pointer"
+                  >
+                    RESET CHAT
+                  </button>
+                </div>
+              </div>
+
+              {/* Chat Messages */}
+              <AthenaConversationExport messages={chatMessages} title="Athena ability creator" scope="abilities-athena" />
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {chatMessages.map((msg, index) => (
+                  <div key={msg.id} className="space-y-2">
+                    <AthenaMessage
+                      message={msg}
+                      messageIndex={index}
+                      exportScope="abilities-athena"
+                      variant="skill"
+                      onCopy={handleCopyMessage}
+                      onDelete={() => handleDeleteMessage(msg.id)}
+                      actions={<AthenaMessageExportActions message={msg} index={index} title="Athena ability creator" scope="abilities-athena" />}
+                    />
+                    {msg.proposedActions && msg.proposedActions.length > 0 && (
+                      <div className="ml-10 max-w-2xl border border-[var(--cp-cyan)]/30 bg-[var(--cp-bg-1)] p-3 space-y-3 font-mono text-xs">
+                        <div className="text-xs font-bold text-[var(--cp-cyan)] uppercase tracking-wider">
+                          Proposed Changes
+                        </div>
+                        <div className="space-y-2 divide-y divide-[var(--cp-border)]/50">
+                          {msg.proposedActions.map((action, actionIdx) => (
+                            <div key={actionIdx} className="pt-2 first:pt-0">
+                              <div className="flex items-center gap-2">
+                                <span className={`px-1 text-[9px] font-bold uppercase ${
+                                  action.type === "delete" ? "bg-red-950/40 text-red-400 border border-red-500/20" :
+                                  action.type === "create" ? "bg-emerald-950/40 text-emerald-400 border border-emerald-500/20" :
+                                  "bg-blue-950/40 text-blue-400 border border-blue-500/20"
+                                }`}>
+                                  {action.type}
+                                </span>
+                                <span className="font-bold">{action.id}</span>
+                              </div>
+                              {action.body && (
+                                <div className="mt-2 border border-[var(--cp-border)] max-h-40 overflow-auto bg-[#1e1e1e]">
+                                  <SyntaxHighlighter
+                                    language="markdown"
+                                    style={vscDarkPlus}
+                                    customStyle={{ margin: 0, padding: "8px", background: "transparent", fontSize: "9px" }}
+                                    wrapLongLines
+                                  >
+                                    {action.body}
+                                  </SyntaxHighlighter>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex justify-end gap-2 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setChatMessages(prev => prev.map(m => m.id === msg.id ? { ...m, proposedActions: undefined } : m));
+                            }}
+                            className="px-2.5 py-1 border border-[var(--cp-border)] text-[10px] text-muted-foreground hover:text-foreground"
+                          >
+                            DISCARD
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleApplyProposedActions(msg.proposedActions!, msg.id)}
+                            className="px-3 py-1 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] text-[10px] font-bold"
+                          >
+                            APPLY CHANGES
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {isAiChatLoading && (
+                  <div className="flex items-center gap-2.5 mr-auto max-w-[85%]">
+                    <div className="p-1 border border-pink-500/30 bg-pink-950/10 text-pink-400 rounded animate-spin">
+                      <RefreshCcw size={14} />
+                    </div>
+                    <div className="p-3 border border-dashed border-pink-500/25 bg-[var(--cp-bg-1)] text-xs font-mono text-pink-400/80 animate-pulse">
+                      {isFinalizing ? "Finalizing the ability asset structure..." : "Athena is reviewing your message and shaping the ability asset..."}
+                    </div>
+                  </div>
+                )}
+
+                {assetProposal && (
+                  <div className="ml-auto w-full max-w-2xl border border-[var(--cp-cyan)]/40 bg-[var(--cp-bg-1)] p-3 space-y-3 font-mono text-xs">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-bold text-[var(--cp-cyan)]">PROPOSED_ASSET / {assetProposal.id}</div>
+                        <div className="text-[10px] text-muted-foreground mt-1">Type: {assetProposal.type.toUpperCase()} · Name: {assetProposal.name}</div>
+                      </div>
+                      <span className="text-[9px] text-[var(--cp-green)] border border-[var(--cp-green)]/30 px-1.5 py-0.5">REVIEW</span>
+                    </div>
+                    {assetProposal.rationale && <p className="text-[10px] text-muted-foreground">{assetProposal.rationale}</p>}
+
+                    <div className="space-y-2 border border-[var(--cp-border)] p-2 bg-[var(--cp-bg-2)] text-[10px]">
+                      <div><span className="text-muted-foreground uppercase">Priority:</span> {assetProposal.priority}</div>
+                      <div><span className="text-muted-foreground uppercase">Tags:</span> {assetProposal.tags.join(", ") || "(none)"}</div>
+                      <div><span className="text-muted-foreground uppercase">Includes:</span> {assetProposal.includes?.join(", ") || "(none)"}</div>
+                    </div>
+
+                    <div className="border border-[var(--cp-border)] max-h-80 overflow-auto bg-[#1e1e1e]">
+                      <div className="sticky top-0 z-10 flex justify-between px-3 py-1.5 bg-[#181818] border-b border-white/10 text-[9px] text-muted-foreground">
+                        <span>body.md</span>
+                        <span>MARKDOWN</span>
+                      </div>
+                      <SyntaxHighlighter
+                        language="markdown"
+                        style={vscDarkPlus}
+                        customStyle={{ margin: 0, padding: "12px", background: "transparent", fontSize: "10px", lineHeight: 1.55 }}
+                        wrapLongLines
+                      >
+                        {assetProposal.body || ""}
+                      </SyntaxHighlighter>
+                    </div>
+
+                    {createError && <div className="text-[10px] text-red-400">{createError}</div>}
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={() => setAssetProposal(null)} className="px-2.5 py-1 border border-[var(--cp-border)] text-[10px] text-muted-foreground hover:text-foreground">DISCARD</button>
+                      <button type="button" onClick={handleCreateProposal} disabled={isCreatingAsset} className="px-3 py-1 bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] text-[10px] font-bold disabled:opacity-50">
+                        {isCreatingAsset ? "CREATING..." : "CREATE ON SERVER"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* Chat Input */}
+              <div className="p-4 border-t border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex flex-col gap-3 shadow-[0_-12px_28px_rgba(0,0,0,0.18)]">
+                <div className="flex items-center justify-between font-mono">
+                  <span className="text-[10px] uppercase tracking-widest text-[var(--cp-cyan)]">Continue the design conversation</span>
+                  <span className="text-[9px] text-muted-foreground">Enter sends · Shift+Enter adds a line</span>
+                </div>
+                <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-0)] focus-within:border-[var(--cp-cyan)] transition-colors">
+                  <textarea
+                    placeholder="Describe the prompt/ability context, answer Athena, or redirect her recommendation..."
+                    value={chatInput}
+                    onChange={e => setChatInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        if (chatInput.trim() && !isAiChatLoading) {
+                          handleSendAiChatMessage();
+                        }
+                      }
+                    }}
+                    disabled={isAiChatLoading}
+                    rows={4}
+                    className="w-full bg-transparent px-3 py-3 text-xs font-mono text-foreground focus:outline-none resize-y min-h-[112px] max-h-[240px] overflow-y-auto leading-relaxed"
+                  />
+                </div>
+                {isAdmin && (
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[9px] text-muted-foreground font-mono">Finalize uses the complete conversation and Athena's recommended defaults.</p>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleSendAiChatMessage(false)}
+                        disabled={isAiChatLoading || !chatInput.trim()}
+                        className="px-4 py-2 border border-[var(--cp-cyan)] text-[var(--cp-cyan)] font-bold text-[10px] uppercase hover:bg-[rgba(0,229,255,0.08)] disabled:opacity-40 font-mono flex items-center gap-1.5"
+                      >
+                        <Send size={11} /> SEND MESSAGE
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSendAiChatMessage(true)}
+                        disabled={isAiChatLoading || (chatMessages.every(message => message.sender !== "user") && !chatInput.trim())}
+                        className="px-4 py-2 bg-[var(--cp-magenta)] text-white font-bold text-[10px] uppercase hover:opacity-90 disabled:opacity-40 font-mono flex items-center gap-1.5"
+                      >
+                        <Sparkles size={11} /> FINALIZE &amp; GENERATE
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : showBuilder ? (
           <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-4 flex flex-col space-y-4 overflow-y-auto">
             <div className="border-b border-[var(--cp-border)] pb-2 flex justify-between items-center">
               <div>

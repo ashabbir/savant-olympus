@@ -53,7 +53,8 @@ export class AbilitiesService {
   }
 
   async listPersonas(): Promise<any[]> {
-    return this.client.request<any[]>("/api/abilities/personas");
+    const assets = await this.listAssets();
+    return assets.persona || assets.personas || [];
   }
 
   listAssets(): Promise<Record<string, any[]>> {

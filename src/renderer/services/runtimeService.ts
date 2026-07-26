@@ -2,6 +2,10 @@ import { buildAuthHeaders, normalizeBaseUrl } from "./httpClient";
 
 const APP_HEADERS = { "X-App-Name": "savant-olympus" };
 
+export function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 async function timedFetch(url: string, init: RequestInit = {}, timeoutMs = 1_500): Promise<Response> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
