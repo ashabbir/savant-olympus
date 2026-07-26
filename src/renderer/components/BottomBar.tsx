@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Circle, Activity, X, Terminal, StopCircle, RefreshCcw, AlertTriangle, CheckCircle } from "lucide-react";
-import { runtimeService } from "@/services/runtimeService";
+import { isAbortError, runtimeService } from "@/services/runtimeService";
 
 interface StatusDot {
   label: string;
@@ -82,11 +82,13 @@ export function BottomBar() {
 
         // Fetch recent runs
         try {
-          const validData = await runtimeService.listGatewayRuns(gUrl);
+          const validData = await runtimeService.listGatewayRuns(gUrl, 4_000);
           setRuns(validData);
           setActiveRunsCount(validData.filter((r: any) => r.status === "running").length);
         } catch (e) {
-          console.error("Failed to fetch runs in BottomBar:", e);
+          if (!isAbortError(e)) {
+            console.error("Failed to fetch runs in BottomBar:", e);
+          }
           setRuns([]);
           setActiveRunsCount(0);
         }

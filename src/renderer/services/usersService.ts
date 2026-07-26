@@ -82,7 +82,7 @@ export class UsersService {
     const res = await fetch(`${this.baseUrl}/api/users/${userId}/domains`, { headers: this.headers });
     if (!res.ok) throw new Error(`Failed to list user domains: ${res.statusText}`);
     const data = await res.json();
-    return data.domains || [];
+    return Array.isArray(data) ? data : (data.domains || []);
   }
 
   async listAvailableDomains(): Promise<any[]> {

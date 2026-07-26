@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RuntimeService } from "../services/runtimeService";
+import { isAbortError, RuntimeService } from "../services/runtimeService";
 
 describe("RuntimeService", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -45,5 +45,10 @@ describe("RuntimeService", () => {
       "http://localhost:3100/runs/run%2F1",
     ]);
     expect(fetchMock.mock.calls[2][1]).toEqual(expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it("identifies expected request timeout aborts", () => {
+    expect(isAbortError(new DOMException("signal is aborted without reason", "AbortError"))).toBe(true);
+    expect(isAbortError(new Error("gateway unavailable"))).toBe(false);
   });
 });
