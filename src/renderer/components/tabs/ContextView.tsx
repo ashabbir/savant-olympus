@@ -1468,6 +1468,9 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                                     }`}>
                                       {log.status.toUpperCase()}
                                     </span>
+                                    <span className="px-1.5 py-0.5 rounded bg-indigo-950/60 text-indigo-300 font-mono text-[9px] font-bold border border-indigo-900/40">
+                                      {log.repo_name}
+                                    </span>
                                     <span className="text-[10px] text-muted-foreground">{timeStr}</span>
                                   </div>
                                   <div className="flex items-center gap-1.5">

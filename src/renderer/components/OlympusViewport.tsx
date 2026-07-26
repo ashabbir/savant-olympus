@@ -38,7 +38,7 @@ export function OlympusViewport(props: OlympusViewportProps) {
       view = <SkillsView serverUrl={serverUrl} apiKey={apiKey} activeModel={activeModel} isAdmin={isAdmin} />;
       break;
     case "Abilities":
-      view = <AbilitiesView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} />;
+      view = <AbilitiesView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} activeModel={activeModel} />;
       break;
     case "Users":
       view = isAdmin
