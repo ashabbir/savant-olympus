@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ActivityLogsView, sortActivitiesNewestFirst } from "../components/tabs/ActivityLogsView";
+import {
+  ActivityLogsView, didGitHashChange, formatDuration, sortActivitiesNewestFirst,
+} from "../components/tabs/ActivityLogsView";
 
 const logs = [
   {
@@ -8,7 +10,10 @@ const logs = [
     actor_id: "system", source_app: "savant-server", status: "success",
     before_commit: "aaaa", after_commit: "bbbb", created_at: "2026-07-26T12:00:00Z",
     duration_ms: 200, files_changed: { added: ["new.ts"], modified: [], deleted: [] },
-    change_stats: { files_total: 1, insertions: 5, deletions: 0 }, details: "Indexed",
+    change_stats: {
+      files_total: 1, insertions: 5, deletions: 0, files_indexed: 12,
+      files_skipped: 4, files_removed_from_index: 2, chunks_indexed: 30, index_errors: 1,
+    }, details: "Indexed",
   },
   {
     id: 2, repo_name: "repo-y", operation: "analysis", trigger: "user",
@@ -33,6 +38,14 @@ describe("ActivityLogsView", () => {
     expect(source.map((item) => item.id)).toEqual([1, 2]);
   });
 
+  it("detects Git hash changes and formats activity duration", () => {
+    expect(didGitHashChange(logs[0])).toBe(true);
+    expect(didGitHashChange(logs[1])).toBe(false);
+    expect(formatDuration(850)).toBe("850 ms");
+    expect(formatDuration(2500)).toBe("2.5 s");
+    expect(formatDuration(125000)).toBe("2m 5s");
+  });
+
   it("shows all activities, applies filters, and opens a dismissible detail drawer", async () => {
     render(<ActivityLogsView serverUrl="http://server.test" apiKey="key" isAdmin />);
     await waitFor(() => expect(screen.getAllByText("repo-x").length).toBeGreaterThan(0));
@@ -43,10 +56,15 @@ describe("ActivityLogsView", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining("repo_name=repo-x"), expect.anything()
     ));
+    fireEvent.change(screen.getByLabelText("Git hash change"), { target: { value: "changed" } });
+    expect(screen.queryAllByText("repo-y")).toHaveLength(1);
+    expect(screen.getByText("200 ms")).toBeInTheDocument();
 
     fireEvent.click(screen.getAllByText("repo-x").at(-1)!);
     expect(screen.getByRole("dialog", { name: "Activity information" })).toBeInTheDocument();
     expect(screen.getByText("new.ts")).toBeInTheDocument();
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByText("Files removed from index")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

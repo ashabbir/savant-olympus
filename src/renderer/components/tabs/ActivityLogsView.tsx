@@ -3,6 +3,7 @@ import { Activity, ChevronRight, Clock3, GitCommit, RefreshCw, X } from "lucide-
 import { createContextService } from "../../services/contextService";
 
 type WindowId = "6h" | "12h" | "1d" | "1w" | "1m";
+type HashFilter = "all" | "changed" | "unchanged";
 const WINDOWS: Array<{ id: WindowId; label: string; hours: number }> = [
   { id: "6h", label: "Last 6 hours", hours: 6 },
   { id: "12h", label: "Last 12 hours", hours: 12 },
@@ -16,6 +17,18 @@ export const sortActivitiesNewestFirst = (items: any[]) =>
     const time = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     return time || Number(b.id || 0) - Number(a.id || 0);
   });
+
+export const didGitHashChange = (log: any) =>
+  Boolean(log.before_commit && log.after_commit && log.before_commit !== log.after_commit);
+
+export const formatDuration = (durationMs: number | null | undefined) => {
+  if (durationMs == null) return "—";
+  if (durationMs < 1000) return `${durationMs} ms`;
+  if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 1 : 0)} s`;
+  const minutes = Math.floor(durationMs / 60_000);
+  const seconds = Math.round((durationMs % 60_000) / 1000);
+  return `${minutes}m ${seconds}s`;
+};
 
 const jsonValue = (value: any, fallback: any) => {
   if (value && typeof value === "object") return value;
@@ -36,6 +49,7 @@ export function ActivityLogsView({ serverUrl, apiKey, isAdmin }: {
   const service = useMemo(() => createContextService(serverUrl, apiKey), [serverUrl, apiKey]);
   const [windowId, setWindowId] = useState<WindowId>("1d");
   const [repo, setRepo] = useState("");
+  const [hashFilter, setHashFilter] = useState<HashFilter>("all");
   const [repos, setRepos] = useState<string[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
   const [selected, setSelected] = useState<any | null>(null);
@@ -68,6 +82,13 @@ export function ActivityLogsView({ serverUrl, apiKey, isAdmin }: {
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, []);
+  const visibleLogs = useMemo(
+    () => logs.filter((log) =>
+      hashFilter === "all" ||
+      (hashFilter === "changed" ? didGitHashChange(log) : !didGitHashChange(log))
+    ),
+    [hashFilter, logs],
+  );
 
   if (!isAdmin) return <main className="h-full grid place-items-center text-sm opacity-60">Administrator access required.</main>;
 
@@ -95,17 +116,23 @@ export function ActivityLogsView({ serverUrl, apiKey, isAdmin }: {
           <option value="">All repositories</option>
           {repos.map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
-        <span className="ml-auto opacity-55">{logs.length} runs</span>
+        <select aria-label="Git hash change" value={hashFilter} onChange={(e) => setHashFilter(e.target.value as HashFilter)}
+          className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] px-3 py-2 min-w-44">
+          <option value="all">All Git hashes</option>
+          <option value="changed">Git hash changed</option>
+          <option value="unchanged">Git hash unchanged</option>
+        </select>
+        <span className="ml-auto opacity-55">{visibleLogs.length} runs</span>
       </div>
 
       {error && <div role="alert" className="border border-red-500/40 bg-red-500/10 text-red-300 p-3 text-xs">{error}</div>}
       <div className="flex-1 overflow-auto border border-[var(--cp-border)]">
         <table className="w-full text-xs border-collapse">
           <thead className="sticky top-0 bg-[var(--cp-bg-2)] text-left text-[10px] uppercase tracking-wider">
-            <tr>{["Date & time", "Repository", "Activity", "Trigger", "Status", "Commit", "Changes", ""].map((x) => <th key={x} className="p-3 border-b border-[var(--cp-border)]">{x}</th>)}</tr>
+            <tr>{["Date & time", "Repository", "Activity", "Trigger", "Status", "Duration", "Commit", "Changes", ""].map((x) => <th key={x} className="p-3 border-b border-[var(--cp-border)]">{x}</th>)}</tr>
           </thead>
           <tbody>
-            {logs.map((log) => {
+            {visibleLogs.map((log) => {
               const files = jsonValue(log.files_changed, { added: [], modified: [], deleted: [] });
               const total = files.added.length + files.modified.length + files.deleted.length;
               return <tr key={log.id} onClick={() => setSelected(log)} className="border-b border-[var(--cp-border)] hover:bg-cyan-400/5 cursor-pointer">
@@ -114,12 +141,13 @@ export function ActivityLogsView({ serverUrl, apiKey, isAdmin }: {
                 <td className="p-3">{String(log.operation || "").replaceAll("_", " ")}</td>
                 <td className="p-3">{log.trigger || "unknown"}{log.actor_id ? ` · ${log.actor_id}` : ""}</td>
                 <td className="p-3"><span style={{ color: statusColor(log.status) }}>● {log.status}</span></td>
+                <td className="p-3 whitespace-nowrap">{formatDuration(log.duration_ms)}</td>
                 <td className="p-3 font-mono">{(log.after_commit || log.before_commit || "—").slice(0, 10)}</td>
                 <td className="p-3">{total} files</td>
                 <td className="p-3"><ChevronRight size={14} /></td>
               </tr>;
             })}
-            {!loading && !logs.length && <tr><td colSpan={8} className="p-12 text-center opacity-50">No activity in this time range.</td></tr>}
+            {!loading && !visibleLogs.length && <tr><td colSpan={9} className="p-12 text-center opacity-50">No activity matches these filters.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -141,7 +169,7 @@ function ActivityInfoDrawer({ log, onClose }: { log: any; onClose: () => void })
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 my-5 text-xs">
         {[
           ["Date & time", formatDateTime(log.created_at)], ["Status", log.status], ["Trigger", log.trigger],
-          ["Actor", log.actor_id || "system"], ["Source app", log.source_app || "—"], ["Duration", `${log.duration_ms || 0} ms`],
+          ["Actor", log.actor_id || "system"], ["Source app", log.source_app || "—"], ["Duration", formatDuration(log.duration_ms)],
           ["Provider", log.provider || "—"], ["Branch", log.branch || "—"],
         ].map(([label, value]) => <div key={label} className="border border-[var(--cp-border)] p-3"><div className="opacity-45 uppercase text-[9px]">{label}</div><div className="mt-1 break-all">{value}</div></div>)}
       </div>
@@ -150,6 +178,22 @@ function ActivityInfoDrawer({ log, onClose }: { log: any; onClose: () => void })
         <div className="font-mono text-xs mt-3 break-all">Before: {log.before_commit || "—"}<br />After: {log.after_commit || "—"}</div>
         {log.commit_subject && <div className="mt-2 text-sm">{log.commit_subject}</div>}
         <div className="flex gap-4 mt-3 text-xs"><span className="text-green-400">+{stats.insertions || 0}</span><span className="text-red-400">-{stats.deletions || 0}</span><span>{stats.files_total || 0} files</span></div>
+      </section>
+      <section className="border border-[var(--cp-border)] p-4 mb-4">
+        <h3 className="font-bold mb-3">Indexing details</h3>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+          {[
+            ["Files indexed again", stats.files_indexed],
+            ["Files skipped", stats.files_skipped],
+            ["Files removed from index", stats.files_removed_from_index ?? stats.files_removed],
+            ["Chunks indexed", stats.chunks_indexed],
+            ["Index errors", stats.index_errors ?? stats.errors],
+            ["AST files processed", stats.files_processed],
+          ].map(([label, value]) => <div key={String(label)} className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3">
+            <div className="opacity-45 uppercase text-[9px]">{label}</div>
+            <div className="text-lg font-bold mt-1 text-[var(--cp-cyan)]">{value ?? "—"}</div>
+          </div>)}
+        </div>
       </section>
       {(["added", "modified", "deleted"] as const).map((kind) => <section key={kind} className="mb-4">
         <h3 className="uppercase text-[10px] tracking-wider opacity-60">{kind} files ({files[kind]?.length || 0})</h3>
