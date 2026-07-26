@@ -6,6 +6,7 @@ import { SkillsView } from "./tabs/SkillsView";
 import { ToolsView } from "./tabs/ToolsView";
 import { UsersView } from "./tabs/UsersView";
 import { WorkspaceView } from "./tabs/WorkspaceView";
+import { ActivityLogsView } from "./tabs/ActivityLogsView";
 import type { OlympusModel } from "@/services/olympusRuntime";
 
 interface OlympusViewportProps {
@@ -47,6 +48,11 @@ export function OlympusViewport(props: OlympusViewportProps) {
       break;
     case "Reminders":
       view = <RemindersView serverUrl={serverUrl} apiKey={apiKey} />;
+      break;
+    case "Activity":
+      view = isAdmin
+        ? <ActivityLogsView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} />
+        : <WorkspaceView serverUrl={serverUrl} apiKey={apiKey} sessionId={null} />;
       break;
     default:
       view = <WorkspaceView serverUrl={serverUrl} apiKey={apiKey} sessionId={null} />;

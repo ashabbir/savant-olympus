@@ -225,6 +225,13 @@ export class ContextService {
     return this.client.request(`/api/context/repos/periodic-sync/logs${q}`);
   }
 
+  getActivityLogs(repoName?: string, since?: string, limit = 500): Promise<any> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (repoName) params.set("repo_name", repoName);
+    if (since) params.set("since", since);
+    return this.client.request(`/api/context/repos/sync-logs?${params.toString()}`);
+  }
+
   triggerPeriodicSyncAll(): Promise<any> {
     return this.client.request("/api/context/repos/periodic-sync/run", { method: "POST" });
   }
