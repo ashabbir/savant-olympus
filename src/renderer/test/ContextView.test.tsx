@@ -228,6 +228,37 @@ describe('ContextView - FileBrowserModal Integration', () => {
     })
   })
 
+  it('closes registration immediately and shows the queued repository in the tree', async () => {
+    vi.mocked(window.fetch).mockImplementation((url, options) => {
+      const u = url.toString()
+      if (u.includes('/api/context/repos/sources')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sources: { github: { enabled: true } } }) } as Response)
+      }
+      if (u.endsWith('/api/context/repos') && options?.method === 'POST') {
+        return Promise.resolve({ ok: true, status: 202, json: () => Promise.resolve({
+          id: 42, name: 'large-repo', path: '/base-code/large-repo', registration_accepted: true,
+          job_id: 'job-large-repo', job_type: 'initial_repo_sync', processing_status: 'queued',
+        }) } as Response)
+      }
+      if (u.endsWith('/api/context/repos')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ repos: [{
+          id: 42, name: 'large-repo', path: '/base-code/large-repo', status: 'added', source: 'unknown',
+        }] }) } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: {} }) } as Response)
+    })
+
+    render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject={null} isAdmin={true} />)
+    fireEvent.click(screen.getByText(/REGISTER REPOSITORY/i))
+    fireEvent.change(await screen.findByPlaceholderText('git@github.com:owner/repo.git'), {
+      target: { value: 'https://github.com/acme/large-repo.git' },
+    })
+    fireEvent.click(screen.getByText('REGISTER PROJECT'))
+
+    await waitFor(() => expect(screen.getByText('large-repo')).toBeInTheDocument())
+    expect(screen.queryByPlaceholderText('git@github.com:owner/repo.git')).toBeNull()
+  })
+
   it('shows repository registration progress while the server downloads the project', async () => {
     vi.mocked(window.fetch).mockImplementation((url, options) => {
       const u = url.toString()
@@ -478,4 +509,3 @@ describe('parseFileStats helper', () => {
     expect(parseFileStats('')).toBeNull()
   })
 })
-
