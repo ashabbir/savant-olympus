@@ -568,8 +568,21 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     }
 
     try {
-      await contextService.addRepository(payload);
+      const registered = await contextService.addRepository(payload);
       setIsAddModalOpen(false);
+      if (registered?.name) {
+        setRepos((current) => current.some((repo) => repo.name === registered.name)
+          ? current
+          : [...current, registered]);
+        setIndexingStatus((current) => ({
+          ...current,
+          [registered.name]: {
+            status: "queued", job_id: registered.job_id,
+            job_type: registered.job_type, phase: "Downloading repository",
+            progress: 0, current_file: "Waiting for background worker",
+          },
+        }));
+      }
       fetchRepos();
     } catch (e: any) {
       setAddError(e.message);
@@ -1207,7 +1220,9 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     <div className="bg-[var(--cp-bg-2)] border border-amber-900/50 p-3 space-y-2 rounded">
                       <div className="flex justify-between items-center text-xs font-mono">
                         <span className="text-amber-500 font-bold uppercase">
-                          {statusInfo.job_type === "ast" ? "AST Generation In Progress" : "Indexing In Progress"}
+                          {statusInfo.job_type === "initial_repo_sync"
+                            ? "Repository Setup In Progress"
+                            : statusInfo.job_type === "ast" ? "AST Generation In Progress" : "Indexing In Progress"}
                         </span>
                         <span className="text-amber-400">{Math.round(statusInfo.progress || 0)}%</span>
                       </div>
