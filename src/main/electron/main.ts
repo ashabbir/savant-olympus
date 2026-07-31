@@ -489,14 +489,89 @@ ipcMain.handle('pick-directory', async (_event, defaultPath) => {
 })
 
 const SKILL_EXPORT_PROFILES = {
-  codex: { label: 'Codex', directory: path.join(os.homedir(), '.codex', 'skills'), format: 'Agent Skills / SKILL.md' },
-  claude: { label: 'Claude', directory: path.join(os.homedir(), '.claude', 'skills'), format: 'Claude Code Skill' },
-  copilot: { label: 'Copilot', directory: path.join(os.homedir(), '.copilot', 'skills'), format: 'GitHub Copilot Agent Skill' },
-  agy: { label: 'AGY', directory: path.join(os.homedir(), '.agents', 'skills'), format: 'AGY Workspace Skill' },
-  hermes: { label: 'Hermes', directory: path.join(os.homedir(), '.hermes', 'skills', 'custom'), format: 'Hermes Agent Skill' },
+  codex: { label: 'Codex', presencePath: path.join(os.homedir(), '.codex'), directory: path.join(os.homedir(), '.codex', 'skills'), format: 'Agent Skills / SKILL.md' },
+  claude: { label: 'Claude', presencePath: path.join(os.homedir(), '.claude'), directory: path.join(os.homedir(), '.claude', 'skills'), format: 'Claude Code Skill' },
+  copilot: { label: 'Copilot', presencePath: path.join(os.homedir(), '.copilot'), directory: path.join(os.homedir(), '.copilot', 'skills'), format: 'GitHub Copilot Agent Skill' },
+  agy: { label: 'AGY', presencePath: path.join(os.homedir(), '.agents'), directory: path.join(os.homedir(), '.agents', 'skills'), format: 'AGY Workspace Skill' },
+  hermes: { label: 'Hermes', presencePath: path.join(os.homedir(), '.hermes'), directory: path.join(os.homedir(), '.hermes', 'skills', 'custom'), format: 'Hermes Agent Skill' },
 } as const
 
+const SAVANT_DEFAULT_SKILL_IDS = new Set([
+  'savant-session-workspace',
+  'savant-knowledge-commit',
+  'savant-code-analysis',
+])
+
+type SkillFile = { path: string; content: string }
+type DefaultSkillPackage = { id: string; files: SkillFile[] }
+
+async function installDefaultSkillsForPresentProviders(payload: unknown) {
+  const packages = Array.isArray((payload as any)?.skills) ? (payload as any).skills : []
+  const skills: DefaultSkillPackage[] = packages.filter((skill: any) => (
+    skill
+    && SAVANT_DEFAULT_SKILL_IDS.has(String(skill.id || ''))
+    && Array.isArray(skill.files)
+    && skill.files.some((file: any) => file?.path === 'SKILL.md' && typeof file.content === 'string')
+  )).map((skill: any) => ({
+    id: String(skill.id),
+    files: skill.files.map((file: any) => ({ path: String(file.path || ''), content: file.content })),
+  }))
+
+  const providers: Record<string, { present: boolean; installed: string[]; existing: string[]; error?: string }> = {}
+  for (const [provider, profile] of Object.entries(SKILL_EXPORT_PROFILES)) {
+    try {
+      await fs.access(profile.presencePath)
+    } catch {
+      providers[provider] = { present: false, installed: [], existing: [] }
+      continue
+    }
+
+    const installed: string[] = []
+    const existing: string[] = []
+    try {
+      await fs.mkdir(profile.directory, { recursive: true })
+      for (const skill of skills) {
+        const targetDir = path.join(profile.directory, skill.id)
+        try {
+          await fs.access(path.join(targetDir, 'SKILL.md'))
+          existing.push(skill.id)
+          continue
+        } catch {
+          // A missing skill is installed below. Existing files are never overwritten.
+        }
+
+        const temporaryDir = path.join(profile.directory, `.installing-${skill.id}-${Date.now()}`)
+        await fs.mkdir(temporaryDir, { recursive: false })
+        try {
+          for (const file of skill.files) {
+            const relativePath = file.path.replace(/\\/g, '/')
+            const destination = path.resolve(temporaryDir, relativePath)
+            if (!relativePath || path.isAbsolute(relativePath) || relativePath.split('/').includes('..') || !destination.startsWith(`${temporaryDir}${path.sep}`)) {
+              throw new Error(`Unsafe skill path: ${relativePath || '<empty>'}`)
+            }
+            if (typeof file.content !== 'string') throw new Error(`Skill file must be text: ${relativePath}`)
+            await fs.mkdir(path.dirname(destination), { recursive: true })
+            await fs.writeFile(destination, file.content, 'utf8')
+          }
+          await fs.access(path.join(temporaryDir, 'SKILL.md'))
+          await fs.rename(temporaryDir, targetDir)
+          installed.push(skill.id)
+        } catch (error) {
+          await fs.rm(temporaryDir, { recursive: true, force: true })
+          throw error
+        }
+      }
+      providers[provider] = { present: true, installed, existing }
+    } catch (error: any) {
+      providers[provider] = { present: true, installed, existing, error: error?.message || String(error) }
+    }
+  }
+  return { providers }
+}
+
 ipcMain.handle('get-skill-export-profiles', () => SKILL_EXPORT_PROFILES)
+
+ipcMain.handle('install-default-skills', async (_event, payload) => installDefaultSkillsForPresentProviders(payload))
 
 ipcMain.handle('export-skill-package', async (_event, payload) => {
   const provider = String(payload?.provider || '') as keyof typeof SKILL_EXPORT_PROFILES

@@ -49,6 +49,9 @@ interface Window {
       destinationRoot: string
       files: Array<{ path: string; content: string }>
     }) => Promise<{ provider: string; path: string; format: string }>
+    installDefaultSkills: (args: {
+      skills: Array<{ id: string; files: Array<{ path: string; content: string }> }>
+    }) => Promise<{ providers: Record<string, { present: boolean; installed: string[]; existing: string[]; error?: string }> }>
   }
   electronAPI?: {
     pickDirectory: (defaultPath?: string) => Promise<string | null>;

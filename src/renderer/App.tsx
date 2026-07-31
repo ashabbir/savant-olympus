@@ -9,6 +9,7 @@ import StartupScreen from "./components/StartupScreen";
 import { TopBar } from "./components/TopBar";
 import { useOlympusSession } from "./hooks/useOlympusSession";
 import { getStoredApiKey } from "./services/auth";
+import { createSkillsService } from "./services/skillsService";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("Workspace");
@@ -23,6 +24,14 @@ export default function App() {
     window.addEventListener("switch-tab", switchTab);
     return () => window.removeEventListener("switch-tab", switchTab);
   }, []);
+
+  useEffect(() => {
+    if (session.isInitializing || !session.isAuthenticated || !getStoredApiKey()) return;
+    const { apiKey, serverUrl } = session.runtime;
+    createSkillsService(serverUrl, apiKey).installDefaultSkillsForPresentProviders().catch((error) => {
+      console.warn("Unable to install default Savant skills for local providers:", error);
+    });
+  }, [session.isInitializing, session.isAuthenticated, session.runtime.apiKey, session.runtime.serverUrl]);
 
   if (session.isInitializing) {
     return <StartupScreen progress={session.startupProgress} subtext={session.startupSubtext} />;

@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld('system', {
   getSkillExportProfiles: () => ipcRenderer.invoke('get-skill-export-profiles'),
   exportSkillPackage: (args: { provider: string; name: string; destinationRoot: string; files: Array<{ path: string; content: string }> }) =>
     ipcRenderer.invoke('export-skill-package', args),
+  installDefaultSkills: (args: { skills: Array<{ id: string; files: Array<{ path: string; content: string }> }> }) =>
+    ipcRenderer.invoke('install-default-skills', args),
 })
 
 contextBridge.exposeInMainWorld('electronAPI', {

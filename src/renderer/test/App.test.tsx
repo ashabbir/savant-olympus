@@ -43,6 +43,36 @@ describe('App Component', () => {
     })
   })
 
+  it('installs missing Savant defaults for every detected local provider on startup', async () => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = String(input)
+      if (url.includes('/api/skills?')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ skills: [
+            { id: 'savant-session-workspace' },
+            { id: 'savant-knowledge-commit' },
+            { id: 'savant-code-analysis' },
+          ] }),
+        } as Response)
+      }
+      if (url.includes('/api/skills/') && url.endsWith('/files')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(['SKILL.md']) } as Response)
+      }
+      if (url.includes('/api/skills/') && url.includes('/file?path=SKILL.md')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ content: '# Savant default' }) } as Response)
+      }
+      return originalFetch(input, init)
+    })
+
+    await waitForAppReady()
+    await waitFor(() => {
+      expect(window.system.installDefaultSkills).toHaveBeenCalled()
+    })
+    expect(vi.mocked(window.system.installDefaultSkills).mock.calls[0][0].skills).toHaveLength(3)
+  })
+
   it('navigates to the Reminders view when the Reminders sidebar tab is clicked', async () => {
     await waitForAppReady()
     const remindersTabBtn = screen.getByTitle('Reminders')

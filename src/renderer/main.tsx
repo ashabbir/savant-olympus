@@ -42,6 +42,7 @@ if (!window.system) {
     exportDocument: async () => null,
     getSkillExportProfiles: async () => ({}),
     exportSkillPackage: async () => ({ provider: '', path: '', format: '' }),
+    installDefaultSkills: async () => ({ providers: {} }),
   }
 }
 

@@ -6,6 +6,12 @@ export interface SkillPayload {
   files: Array<{ path: string; content: string }>;
 }
 
+const DEFAULT_SAVANT_SKILLS = new Set([
+  "savant-session-workspace",
+  "savant-knowledge-commit",
+  "savant-code-analysis",
+]);
+
 export class SkillsService {
   private baseUrl: string;
   private apiKey: string;
@@ -82,6 +88,22 @@ export class SkillsService {
       body: JSON.stringify({ content }),
     });
     if (!res.ok) throw new Error(`Failed to update skill file: ${res.statusText}`);
+  }
+
+  async installDefaultSkillsForPresentProviders(): Promise<void> {
+    const listed = await this.listSkills();
+    const defaults = listed.filter((skill) => DEFAULT_SAVANT_SKILLS.has(String(skill.id)));
+    if (defaults.length === 0) return;
+
+    const skills = await Promise.all(defaults.map(async (skill) => {
+      const paths = await this.listSkillFiles(String(skill.id));
+      const files = await Promise.all(paths.map(async (filePath) => ({
+        path: filePath,
+        content: await this.getSkillFile(String(skill.id), filePath),
+      })));
+      return { id: String(skill.id), files };
+    }));
+    await window.system.installDefaultSkills({ skills });
   }
 }
 

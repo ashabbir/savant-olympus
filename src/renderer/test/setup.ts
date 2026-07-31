@@ -41,6 +41,7 @@ const mockSystem: any = {
     hermes: { label: 'Hermes', directory: '/tmp/.hermes/skills/custom', format: 'Hermes Agent Skill' },
   }),
   exportSkillPackage: vi.fn().mockResolvedValue({ provider: 'codex', path: '/tmp/.codex/skills/example', format: 'Agent Skills / SKILL.md' }),
+  installDefaultSkills: vi.fn().mockResolvedValue({ providers: {} }),
 }
 
 mockSystem.getChatHistory = vi.fn().mockResolvedValue([])
