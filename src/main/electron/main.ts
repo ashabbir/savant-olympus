@@ -254,13 +254,30 @@ async function runGatewayAgent(provider: string, model: string, prompt: string) 
     }
     
     const { id } = await runRes.json();
-    
-    while (true) {
-      await new Promise(r => setTimeout(r, 500));
+
+    // Bound the poll loop. Without a deadline a run that never reaches a
+    // terminal status (or a gateway that stops responding) leaves the
+    // renderer's awaited `runAgentViaGateway` promise pending forever while
+    // this loop issues a fetch every 500ms indefinitely.
+    const POLL_INTERVAL_MS = 500;
+    const POLL_TIMEOUT_MS = 10 * 60 * 1000;
+    const MAX_CONSECUTIVE_POLL_FAILURES = 20;
+    const deadline = Date.now() + POLL_TIMEOUT_MS;
+    let consecutiveFailures = 0;
+
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
       const pollRes = await fetch(`${baseUrl}/runs/${id}`, {
         headers: { 'X-App-Name': 'savant-olympus', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}) }
       });
-      if (!pollRes.ok) continue;
+      if (!pollRes.ok) {
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
+          return `Error: Gateway stopped responding while polling run ${id} (last status ${pollRes.status}).`;
+        }
+        continue;
+      }
+      consecutiveFailures = 0;
       const run = await pollRes.json();
       
       if (run.status === 'complete') {
@@ -280,6 +297,8 @@ async function runGatewayAgent(provider: string, model: string, prompt: string) 
        return `Error: Gateway run failed with status ${run.status} - ${run.error || 'Unknown error'}`;
       }
     }
+
+    return `Error: Gateway run ${id} did not complete within ${Math.round(POLL_TIMEOUT_MS / 1000)}s.`;
   } catch (error: any) {
     return `Error: ${error.message}`;
   }

@@ -428,7 +428,7 @@ describe('KnowledgeView', () => {
     const insightNode = container.querySelector('g.node[data-node-id="i1"]')
     expect(insightNode).toHaveAttribute('opacity', '0')
     const depthControls = screen.getByText('DEPTH').parentElement!
-    expect(within(depthControls).getByRole('button', { name: 'Show insights' })).toBeInTheDocument()
+    expect(await within(depthControls).findByRole('button', { name: 'Show insights' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /ask athena/i }))
     fireEvent.change(screen.getByPlaceholderText('Ask ATHENA about this node...'), {
