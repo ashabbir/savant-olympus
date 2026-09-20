@@ -1,6 +1,6 @@
 import {
   Settings, User, LogOut, UserCog,
-  Briefcase, Network, Search, Wrench, Award, Cpu, Users, Bell, ScrollText
+  Briefcase, Network, Search, Wrench, Award, Cpu, Users, Bell, ScrollText, Bot
 } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -67,6 +67,7 @@ const TAB_ITEMS = [
   { id: "Tools", label: "Tools", icon: <Wrench size={16} /> },
   { id: "Skills", label: "Skills", icon: <Award size={16} /> },
   { id: "Abilities", label: "Abilities", icon: <Cpu size={16} /> },
+  { id: "Agents", label: "Agent Setup", icon: <Bot size={16} /> },
   { id: "Users", label: "Users", icon: <Users size={16} /> },
   { id: "Reminders", label: "Reminders", icon: <Bell size={16} /> },
   { id: "Activity", label: "Activity Log", icon: <ScrollText size={16} /> },

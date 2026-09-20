@@ -47,6 +47,7 @@ const TABS = [
   { id: "system", label: "system" },
   { id: "gateway", label: "gateway" },
   { id: "server", label: "server" },
+  { id: "agents", label: "agents" },
 ] as const;
 
 type TabId = typeof TABS[number]["id"];
@@ -640,6 +641,35 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
                 apiKey={userApiKey}
                 includeApiKey
               />
+            )}
+
+            {/* ── AGENTS ── */}
+            {activeTab === "agents" && (
+              <div className="space-y-4">
+                <p style={{ color: "var(--foreground)", fontFamily: "'Rajdhani', sans-serif" }} className="text-sm opacity-60">
+                  Configure MCP Bridge, Learning Instructions, and Knowledge Commit for external AI coding assistants.
+                </p>
+                <div className="p-3 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] rounded text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[var(--cp-cyan)] uppercase">Supported Coding Agents</span>
+                    <span className="text-muted-foreground">Copilot • Claude • Hermes • Codex</span>
+                  </div>
+                  <p className="text-muted-foreground font-sans text-[11px]">
+                    Every agent can be configured to automatically persist learnings, bug root causes, and architectural patterns into the Savant Knowledge Graph.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      window.dispatchEvent(new CustomEvent("switch-tab", { detail: "Agents" }));
+                    }}
+                    style={{ background: "var(--cp-cyan)", color: "var(--cp-bg-0)", fontFamily: "'Share Tech Mono', monospace" }}
+                    className="w-full py-2 px-3 text-xs font-bold uppercase tracking-wider rounded hover:opacity-90 transition-opacity mt-2 cursor-pointer text-center block"
+                  >
+                    Open Full Agent Setup View
+                  </button>
+                </div>
+              </div>
             )}
           </div>
 

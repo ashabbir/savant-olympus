@@ -102,6 +102,11 @@ describe('App Component', () => {
       expect(screen.getByText(/knowledge network/i)).toBeInTheDocument()
     })
 
+    fireEvent.click(screen.getByTitle('Agent Setup'))
+    await waitFor(() => {
+      expect(screen.getByText(/AGENT SETUP/i)).toBeInTheDocument()
+    })
+
     fireEvent.click(screen.getByTitle('Workspace'))
     await waitFor(() => {
       expect(screen.getByText(/SAVANT-WORKSPACE/i)).toBeInTheDocument()

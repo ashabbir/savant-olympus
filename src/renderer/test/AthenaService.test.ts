@@ -91,5 +91,158 @@ describe("Athena MCP orchestration", () => {
     expect(prompt).toContain("external-tool-29");
     expect(prompt).toContain(ATHENA_WORKSPACE.id);
     expect(prompt).toContain("Never ask permission before using an available Savant MCP tool");
+    expect(prompt).toContain("REQUIRED MCP EXECUTION AUDIT");
+    expect(prompt).toContain("savant-abilities");
+    expect(prompt).toContain("savant-knowledge");
+    expect(prompt).toContain("savant-context");
+    expect(prompt).toContain("savant-workspace");
+    expect(prompt).toContain("savant-reminders");
+  });
+
+  it("discovers tools from server-nested MCP tool endpoints and parses servers correctly", async () => {
+    const { fetchAthenaMcpTools } = await import("../services/athenaService");
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        servers: [
+          { name: "workspace", tools: [{ name: "list_workspaces", description: "List all workspaces" }] },
+          { name: "reminders", tools: [{ name: "list_reminders", description: "List all reminders" }] },
+        ],
+      }),
+    } as Response);
+
+    const tools = await fetchAthenaMcpTools("http://127.0.0.1:8090", "test-key");
+    expect(tools.length).toBe(2);
+    expect(tools.some((t) => t.name.includes("list_workspaces"))).toBe(true);
+    expect(tools.some((t) => t.name.includes("list_reminders"))).toBe(true);
+    expect(tools[0].server).toBe("workspace");
+    expect(tools[1].server).toBe("reminders");
+  });
+
+  it("retrieves workspace tasks and reminders context", async () => {
+    const { fetchAthenaWorkspaceContext, fetchAthenaRemindersContext } = await import("../services/athenaService");
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url.includes("/api/tasks")) {
+        return {
+          ok: true,
+          json: async () => [
+            { task_id: "tid-1", title: "Implement MCP Audit", status: "open", priority: "high" },
+          ],
+        } as Response;
+      }
+      if (url.includes("/api/reminders")) {
+        return {
+          ok: true,
+          json: async () => [
+            { reminder_id: "rem-1", title: "Review MCP Health", status: "active", due_date: "2026-09-21" },
+          ],
+        } as Response;
+      }
+      return { ok: false, json: async () => ({}) } as Response;
+    });
+
+    const ws = await fetchAthenaWorkspaceContext("http://127.0.0.1:8090", "test-key");
+    expect(ws.tasks.length).toBe(1);
+    expect(ws.tasks[0].title).toBe("Implement MCP Audit");
+
+    const reminders = await fetchAthenaRemindersContext("http://127.0.0.1:8090", "test-key");
+    expect(reminders.length).toBe(1);
+    expect(reminders[0].title).toBe("Review MCP Health");
+  });
+
+  it("generates a comprehensive MCP execution audit detailing when, which MCP, why, how, and result", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url.includes("/api/mcp/tools")) {
+        return {
+          ok: true,
+          json: async () => ({
+            servers: [
+              { name: "workspace", tools: [{ name: "list_tasks", description: "Tasks" }] },
+              { name: "context", tools: [{ name: "research", description: "Research" }] },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes("/api/knowledge/graph")) {
+        return {
+          ok: true,
+          json: async () => ({
+            nodes: [
+              { node_id: "n1", title: "AuthManager", content: "Manages session auth", node_type: "service" },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes("/api/context/search")) {
+        return {
+          ok: true,
+          json: async () => ({
+            results: [
+              { path: "src/auth/authManager.ts", content: "class AuthManager {}", title: "authManager.ts" },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes("/api/tasks")) {
+        return {
+          ok: true,
+          json: async () => [
+            { task_id: "tid-100", title: "Audit Authentication Service", status: "open" },
+          ],
+        } as Response;
+      }
+      if (url.includes("/api/reminders")) {
+        return {
+          ok: true,
+          json: async () => [
+            { reminder_id: "rem-10", title: "Security review due", status: "active" },
+          ],
+        } as Response;
+      }
+      return { ok: false, json: async () => ({}) } as Response;
+    });
+
+    const prompt = await buildAthenaConversationPrompt({
+      context: {
+        area: "Context > Detail Drawer",
+        repository: "savant-olympus",
+        selected: { id: "auth-module", name: "AuthModule" },
+      },
+      history: [],
+      userMessage: "How does the authentication module connect to external providers?",
+      instructions: "Inspect the authentication code.",
+      baseUrl: "http://127.0.0.1:8090",
+      apiKey: "test-key",
+      repo: "savant-olympus",
+    });
+
+    // Check that multiple MCPs were utilized and included in prompt
+    expect(prompt).toContain("SAVANT WORKSPACE MCP STATE & TASKS");
+    expect(prompt).toContain("SAVANT REMINDERS MCP STATE");
+    expect(prompt).toContain("PRIMARY SAVANT KNOWLEDGE MCP RESULTS");
+    expect(prompt).toContain("SECONDARY SAVANT CONTEXT AND RESEARCH MCP RESULTS");
+    expect(prompt).toContain("REQUIRED MCP EXECUTION AUDIT");
+
+    // Check that audit table columns exist
+    expect(prompt).toContain("| MCP Server | Tool | When (UTC) | Why (Rationale) | How (Query / Params) | Result (Evidence) |");
+    expect(prompt).toContain("savant-abilities");
+    expect(prompt).toContain("savant-knowledge");
+    expect(prompt).toContain("savant-context");
+    expect(prompt).toContain("savant-workspace");
+    expect(prompt).toContain("savant-reminders");
+
+    // Verify ensureAthenaMcpSummary appends the complete audit section
+    const responseWithAudit = ensureAthenaMcpSummary("Here is the architectural answer.", prompt);
+    expect(responseWithAudit).toContain("### Savant MCP Execution & Audit");
+    expect(responseWithAudit).toContain("### Savant MCP Summary");
+    expect(responseWithAudit).toContain("When (UTC)");
+    expect(responseWithAudit).toContain("Why (Rationale)");
+    expect(responseWithAudit).toContain("How (Query / Params)");
+    expect(responseWithAudit).toContain("Result (Evidence)");
+    expect(responseWithAudit).toContain("savant-workspace");
+    expect(responseWithAudit).toContain("savant-reminders");
   });
 });
+

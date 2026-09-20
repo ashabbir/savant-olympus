@@ -666,3 +666,336 @@ ipcMain.handle('read-graphify-json', async (_event, repoPath) => {
     return null
   }
 })
+
+// ── Agent Setup Integration ──────────────────────────────────────────────────
+const AGENT_INTEGRATION_PROFILES = {
+  copilot: {
+    label: 'GitHub Copilot',
+    description: 'GitHub Copilot Chat, CLI, and Agent Mode integration',
+    presencePath: path.join(os.homedir(), '.copilot'),
+    mcpPath: path.join(os.homedir(), '.copilot', 'mcp.json'),
+    instructionsPath: path.join(os.homedir(), '.copilot', 'copilot-instructions.md'),
+    skillsDir: path.join(os.homedir(), '.copilot', 'skills'),
+    hookPath: path.join(os.homedir(), '.copilot', 'record-learning.sh'),
+  },
+  claude: {
+    label: 'Claude Code / Desktop',
+    description: 'Anthropic Claude Code CLI & Desktop Agent integration',
+    presencePath: path.join(os.homedir(), '.claude'),
+    mcpPath: path.join(os.homedir(), '.claude', 'claude_desktop_config.json'),
+    instructionsPath: path.join(os.homedir(), '.claude', 'CLAUDE.md'),
+    skillsDir: path.join(os.homedir(), '.claude', 'skills'),
+    hookPath: path.join(os.homedir(), '.claude', 'record-learning.sh'),
+  },
+  hermes: {
+    label: 'Hermes Agent',
+    description: 'Hermes autonomous agent execution runtime',
+    presencePath: path.join(os.homedir(), '.hermes'),
+    mcpPath: path.join(os.homedir(), '.hermes', 'mcp.json'),
+    instructionsPath: path.join(os.homedir(), '.hermes', 'instructions.md'),
+    skillsDir: path.join(os.homedir(), '.hermes', 'skills', 'custom'),
+    hookPath: path.join(os.homedir(), '.hermes', 'record-learning.sh'),
+  },
+  codex: {
+    label: 'Codex Agent',
+    description: 'Codex CLI & OpenAI developer environment',
+    presencePath: path.join(os.homedir(), '.codex'),
+    mcpPath: path.join(os.homedir(), '.codex', 'mcp.json'),
+    instructionsPath: path.join(os.homedir(), '.codex', 'instructions.md'),
+    skillsDir: path.join(os.homedir(), '.codex', 'skills'),
+    hookPath: path.join(os.homedir(), '.codex', 'record-learning.sh'),
+  },
+} as const
+
+const LEARNING_PROTOCOL_TEXT = `
+<!-- SAVANT KNOWLEDGE PROTOCOL START -->
+## Savant Knowledge & Memory Persistence Protocol
+You are integrated with Savant Knowledge Graph and Code Intelligence.
+Whenever you:
+1. Fix a bug, identify a non-trivial root cause, or resolve an edge case
+2. Establish an architectural pattern, convention, or design decision
+3. Complete an assigned task or major feature
+
+**You MUST record the durable outcome into Savant Knowledge:**
+- **Via MCP**: Call \`savant-knowledge.store\` with:
+  - \`node_type\`: \`"insight"\` (for design/patterns) or \`"issue"\` (for bug root causes)
+  - \`name\`: Clear, concise title
+  - \`content\`: Problem statement, root cause or architectural decision, and rationale
+  - \`workspace_id\`: Active Savant workspace ID
+  - \`repo\` / \`files\`: Touched files
+  Follow with \`savant-knowledge.commit_workspace(workspace_id)\` when finalizing.
+- **Via Shell Fallback**: If MCP is unavailable in the current context, execute:
+  \`./record-learning.sh --type insight --title "..." --content "..."\`
+<!-- SAVANT KNOWLEDGE PROTOCOL END -->
+`
+
+const HOOK_SCRIPT_CONTENT = `#!/usr/bin/env bash
+# Savant Knowledge Auto-Recorder Hook
+set -e
+
+SAVANT_SERVER_URL="\${SAVANT_SERVER_URL:-http://127.0.0.1:8090}"
+API_KEY="\${SAVANT_API_KEY:-sk-ahmed-savant-001}"
+APP_NAME="savant-client"
+
+TYPE="insight"
+TITLE=""
+CONTENT=""
+WORKSPACE_ID=""
+
+while [[ "$#" -gt 0 ]]; do
+  case $1 in
+    --type) TYPE="$2"; shift ;;
+    --title) TITLE="$2"; shift ;;
+    --content) CONTENT="$2"; shift ;;
+    --workspace) WORKSPACE_ID="$2"; shift ;;
+    *) echo "Unknown parameter: $1"; exit 1 ;;
+  esac
+  shift
+done
+
+if [[ -z "$TITLE" ]]; then
+  echo "Error: --title is required"
+  exit 1
+fi
+
+PAYLOAD=$(cat <<EOF
+{
+  "title": "$TITLE",
+  "content": "$CONTENT",
+  "node_type": "$TYPE",
+  "workspace_id": "$WORKSPACE_ID"
+}
+EOF
+)
+
+RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$SAVANT_SERVER_URL/api/knowledge/nodes" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -H "X-App-Name: $APP_NAME" \
+  -d "$PAYLOAD")
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+if [[ "$HTTP_CODE" -ge 400 ]]; then
+  curl -s -X POST "$SAVANT_SERVER_URL/api/experiences" \
+    -H "Content-Type: application/json" \
+    -H "X-API-Key: $API_KEY" \
+    -H "X-App-Name: $APP_NAME" \
+    -d "$PAYLOAD"
+fi
+
+echo "Posted learning to Savant Knowledge: $TITLE"
+`
+
+async function checkAgentSetupInternal() {
+  const result: Record<string, any> = {}
+
+  for (const [key, profile] of Object.entries(AGENT_INTEGRATION_PROFILES)) {
+    let present = false
+    try {
+      await fs.access(profile.presencePath)
+      present = true
+    } catch {}
+
+    // 1. Check MCP
+    let mcpConfigured = false
+    try {
+      const content = await fs.readFile(profile.mcpPath, 'utf8')
+      if (content.includes('8094') || content.includes('savant-knowledge')) {
+        mcpConfigured = true
+      }
+    } catch {}
+
+    // 2. Check Instructions
+    let instructionsConfigured = false
+    try {
+      const content = await fs.readFile(profile.instructionsPath, 'utf8')
+      if (content.includes('savant-knowledge') || content.includes('Savant Knowledge') || content.includes('SAVANT KNOWLEDGE PROTOCOL')) {
+        instructionsConfigured = true
+      }
+    } catch {}
+
+    // 3. Check Skills
+    let skillsConfigured = false
+    try {
+      await fs.access(path.join(profile.skillsDir, 'savant-knowledge-commit'))
+      skillsConfigured = true
+    } catch {}
+
+    // 4. Check Hook Script
+    let hookConfigured = false
+    try {
+      await fs.access(profile.hookPath)
+      hookConfigured = true
+    } catch {}
+
+    const parts = [
+      {
+        id: 'mcp',
+        label: 'MCP Knowledge Bridge',
+        configured: mcpConfigured,
+        path: profile.mcpPath,
+        details: 'SSE connection to Savant Knowledge (port 8094) & Context (port 8093)',
+      },
+      {
+        id: 'instructions',
+        label: 'Learning Protocol Instructions',
+        configured: instructionsConfigured,
+        path: profile.instructionsPath,
+        details: 'Mandates posting durable insights & bug root causes to Savant Knowledge',
+      },
+      {
+        id: 'skills',
+        label: 'Savant Default Skills',
+        configured: skillsConfigured,
+        path: profile.skillsDir,
+        details: 'savant-knowledge-commit, savant-code-analysis, savant-session-workspace',
+      },
+      {
+        id: 'hook',
+        label: 'Fallback Learning Hook',
+        configured: hookConfigured,
+        path: profile.hookPath,
+        details: 'CLI curl wrapper for posting learnings directly to Savant Knowledge API',
+      },
+    ]
+
+    const allConfigured = parts.every(p => p.configured)
+    const noneConfigured = parts.every(p => !p.configured)
+    const status = allConfigured ? 'configured' : noneConfigured ? 'not_configured' : 'partial'
+
+    result[key] = {
+      provider: key,
+      label: profile.label,
+      description: profile.description,
+      presencePath: profile.presencePath,
+      present,
+      status,
+      parts,
+      lastChecked: new Date().toISOString(),
+    }
+  }
+
+  const list = Object.values(result)
+  return {
+    timestamp: new Date().toISOString(),
+    serverUrl: 'http://127.0.0.1:8090',
+    agents: result,
+    summary: {
+      total: list.length,
+      configured: list.filter(a => a.status === 'configured').length,
+      partial: list.filter(a => a.status === 'partial').length,
+      notConfigured: list.filter(a => a.status === 'not_configured').length,
+    },
+  }
+}
+
+async function triggerAgentSetupInternal(providerName: string) {
+  const targets = providerName === 'all'
+    ? Object.keys(AGENT_INTEGRATION_PROFILES)
+    : [providerName]
+
+  const configuredParts: string[] = []
+
+  for (const p of targets) {
+    const profile = (AGENT_INTEGRATION_PROFILES as any)[p]
+    if (!profile) continue
+
+    await fs.mkdir(profile.presencePath, { recursive: true })
+
+    // 1. Setup MCP
+    try {
+      await fs.mkdir(path.dirname(profile.mcpPath), { recursive: true })
+      let currentMcp: any = { mcpServers: {} }
+      try {
+        const raw = await fs.readFile(profile.mcpPath, 'utf8')
+        currentMcp = JSON.parse(raw)
+        if (!currentMcp.mcpServers) currentMcp.mcpServers = {}
+      } catch {}
+
+      currentMcp.mcpServers['savant-knowledge'] = {
+        type: 'sse',
+        url: 'http://127.0.0.1:8094/sse?api_key=sk-ahmed-savant-001&app_name=savant-mcp',
+      }
+      currentMcp.mcpServers['savant-context'] = {
+        type: 'sse',
+        url: 'http://127.0.0.1:8093/sse?api_key=sk-ahmed-savant-001&app_name=savant-mcp',
+      }
+      currentMcp.mcpServers['savant-workspace'] = {
+        type: 'sse',
+        url: 'http://127.0.0.1:8091/sse?api_key=sk-ahmed-savant-001&app_name=savant-mcp',
+      }
+      await fs.writeFile(profile.mcpPath, JSON.stringify(currentMcp, null, 2), 'utf8')
+      configuredParts.push(`${p}:mcp`)
+    } catch (e) {
+      console.error(`Failed to setup MCP for ${p}:`, e)
+    }
+
+    // 2. Setup Instructions
+    try {
+      await fs.mkdir(path.dirname(profile.instructionsPath), { recursive: true })
+      let existingInstructions = ''
+      try {
+        existingInstructions = await fs.readFile(profile.instructionsPath, 'utf8')
+      } catch {}
+
+      if (!existingInstructions.includes('SAVANT KNOWLEDGE PROTOCOL')) {
+        const updated = existingInstructions
+          ? `${existingInstructions.trim()}\n\n${LEARNING_PROTOCOL_TEXT.trim()}\n`
+          : `${LEARNING_PROTOCOL_TEXT.trim()}\n`
+        await fs.writeFile(profile.instructionsPath, updated, 'utf8')
+      }
+      configuredParts.push(`${p}:instructions`)
+    } catch (e) {
+      console.error(`Failed to setup instructions for ${p}:`, e)
+    }
+
+    // 3. Setup Default Skills
+    try {
+      await fs.mkdir(profile.skillsDir, { recursive: true })
+      const skillDir = path.join(profile.skillsDir, 'savant-knowledge-commit')
+      await fs.mkdir(skillDir, { recursive: true })
+      const skillContent = `---
+name: savant-knowledge-commit
+description: Record workspace-scoped outcomes in the Savant knowledge graph through MCP.
+---
+
+# Savant Knowledge Commit
+Capture durable outcomes in Savant Knowledge using only savant-knowledge MCP tools.
+Whenever an architectural decision or bug root cause is identified:
+1. Search existing nodes with savant-knowledge.search
+2. Store outcome with savant-knowledge.store (node_type: insight or issue)
+3. Commit with savant-knowledge.commit_workspace
+`
+      await fs.writeFile(path.join(skillDir, 'SKILL.md'), skillContent, 'utf8')
+      configuredParts.push(`${p}:skills`)
+    } catch (e) {
+      console.error(`Failed to setup skills for ${p}:`, e)
+    }
+
+    // 4. Setup Hook Script
+    try {
+      await fs.mkdir(path.dirname(profile.hookPath), { recursive: true })
+      await fs.writeFile(profile.hookPath, HOOK_SCRIPT_CONTENT, 'utf8')
+      await fs.chmod(profile.hookPath, 0o755)
+      configuredParts.push(`${p}:hook`)
+    } catch (e) {
+      console.error(`Failed to setup hook script for ${p}:`, e)
+    }
+  }
+
+  const report = await checkAgentSetupInternal()
+  return {
+    success: true,
+    provider: providerName,
+    configuredParts,
+    report,
+  }
+}
+
+ipcMain.handle('get-agent-setup-status', async () => checkAgentSetupInternal())
+
+ipcMain.handle('trigger-agent-setup', async (_event, payload) => {
+  const provider = String(payload?.provider || 'all')
+  return triggerAgentSetupInternal(provider)
+})
+

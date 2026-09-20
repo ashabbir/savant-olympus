@@ -191,6 +191,8 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
     persona: string;
     knowledgeReferences: number;
     researchReferences: number;
+    workspaceTasks?: number;
+    remindersChecked?: number;
   } | null>(null);
   const [isThreadBrowserOpen, setIsThreadBrowserOpen] = useState(false);
   const [chatThreads, setChatThreads] = useState<AthenaThread[]>([]);
@@ -2521,6 +2523,8 @@ const confirmImport = async () => {
         persona: summary.match(/Persona: ([^\n]+)/)?.[1] || "engineer",
         knowledgeReferences: Number(summary.match(/Knowledge MCP: (\d+)/)?.[1] || 0),
         researchReferences: Number(summary.match(/Context\/Research MCP: (\d+)/)?.[1] || 0),
+        workspaceTasks: Number(summary.match(/Workspace Tasks: (\d+)/)?.[1] || 0),
+        remindersChecked: Number(summary.match(/Reminders: (\d+)/)?.[1] || 0),
       });
       const rawResponseText = await window.system.runAgentViaGateway({
         provider,
@@ -3241,7 +3245,13 @@ return (
                       <>
                         <span className="text-violet-300">Persona: {lastAthenaRun.persona}</span>
                         <span>Knowledge MCP: {lastAthenaRun.knowledgeReferences} refs</span>
-                        <span>Research MCP: {lastAthenaRun.researchReferences} refs</span>
+                        <span>Context MCP: {lastAthenaRun.researchReferences} refs</span>
+                        {typeof lastAthenaRun.workspaceTasks === "number" && (
+                          <span className="text-amber-400">Workspace: {lastAthenaRun.workspaceTasks} tasks</span>
+                        )}
+                        {typeof lastAthenaRun.remindersChecked === "number" && (
+                          <span className="text-blue-400">Reminders: {lastAthenaRun.remindersChecked}</span>
+                        )}
                       </>
                     )}
                   </div>

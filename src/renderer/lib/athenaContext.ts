@@ -1,14 +1,33 @@
 export {
   ATHENA_SYSTEM_DIRECTIVE,
+  ATHENA_WORKSPACE,
   buildAthenaAugmentedPrompt,
   buildAthenaConversationPrompt,
   buildAthenaResearchQuery,
   buildAthenaPromptSections,
   fetchAthenaCodeContext,
   fetchAthenaKnowledgeContext,
+  fetchAthenaWorkspaceContext,
+  fetchAthenaRemindersContext,
   fetchAthenaMcpTools,
   formatAthenaContextHits,
+  formatAthenaMcpAuditMarkdown,
+  formatAthenaWorkspaceTasks,
+  formatAthenaReminders,
   ensureAthenaMcpSummary,
   requiresAthenaImpactAnalysis,
   resolveAthenaAbility,
 } from "@/services/athenaService"
+export type {
+  AthenaMcpExecutionEvent,
+  AthenaWorkspaceContext,
+  AthenaReminderItem,
+  AthenaDiscoveredTool,
+  AthenaContextHit,
+  AthenaThreadMessage,
+  AthenaThreadRecord,
+  AthenaConversationContext,
+  AthenaConversationMessage,
+  AthenaConversationPromptOptions,
+} from "@/services/athenaService"
+

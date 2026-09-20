@@ -45,6 +45,9 @@ contextBridge.exposeInMainWorld('system', {
     ipcRenderer.invoke('export-skill-package', args),
   installDefaultSkills: (args: { skills: Array<{ id: string; files: Array<{ path: string; content: string }> }> }) =>
     ipcRenderer.invoke('install-default-skills', args),
+  getAgentSetupStatus: () => ipcRenderer.invoke('get-agent-setup-status'),
+  triggerAgentSetup: (args: { provider: string; parts?: string[]; workspaceRoot?: string }) =>
+    ipcRenderer.invoke('trigger-agent-setup', args),
 })
 
 contextBridge.exposeInMainWorld('electronAPI', {
