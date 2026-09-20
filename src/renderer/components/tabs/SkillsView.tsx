@@ -5,12 +5,14 @@ import {
   Download, Code, FileText, Check, Sparkles, AlertTriangle, 
   Play, RefreshCcw, Save, HelpCircle, ChevronLeft, ChevronRight, X, Copy
 } from "lucide-react";
-import { buildAthenaConversationPrompt } from "@/lib/athenaContext";
+import { buildAthenaConversationPrompt, ensureAthenaMcpSummary } from "@/lib/athenaContext";
 import { createSkillsService } from "@/services/skillsService";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
+import { AthenaMcpContextBar, type AthenaMcpContextBarProps } from "@/components/shared/AthenaMcpContextBar";
 import { AthenaConversationExport, AthenaMessageExportActions } from "@/components/shared/AthenaExportActions";
 import { ModalBackdrop } from "@/components/shared/ModalBackdrop";
 import { createScopedLocalAthenaThreadStore, readLocalAthenaHistory, useAthenaThread } from "@/hooks/useAthenaThread";
+
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
@@ -31,7 +33,12 @@ interface SkillProposal {
 }
 
 type SkillExportProvider = "codex" | "claude" | "copilot" | "agy" | "hermes";
-type SkillExportProfile = { label: string; directory: string; format: string };
+type SkillExportProfile = {
+  label: string;
+  directory: string;
+  format: string;
+  profiles?: Array<{ id: string; label: string; directory: string }>;
+};
 
 interface SkillsViewProps {
   serverUrl: string;
@@ -270,11 +277,14 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
   const [createError, setCreateError] = useState("");
   const [downloadSkill, setDownloadSkill] = useState<Skill | null>(null);
   const [exportProvider, setExportProvider] = useState<SkillExportProvider>("codex");
+  const [hermesProfile, setHermesProfile] = useState("default");
   const [exportProfiles, setExportProfiles] = useState<Record<string, SkillExportProfile>>({});
   const [exportDestination, setExportDestination] = useState("");
   const [isExporting, setIsExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
+  const [lastAthenaMcpState, setLastAthenaMcpState] = useState<Omit<AthenaMcpContextBarProps, "className"> | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
   const skillsService = createSkillsService(serverUrl, apiKey);
@@ -484,6 +494,7 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
     const profiles = await window.system.getSkillExportProfiles();
     setExportProfiles(profiles);
     setExportProvider("codex");
+    setHermesProfile("default");
     setExportDestination(profiles.codex?.directory || "");
     setExportStatus("");
     setDownloadSkill(skill);
@@ -505,7 +516,19 @@ export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsVi
 
   const handleExportProviderChange = (provider: SkillExportProvider) => {
     setExportProvider(provider);
-    setExportDestination(exportProfiles[provider]?.directory || "");
+    const profile = exportProfiles[provider];
+    const defaultDirectory = provider === "hermes"
+      ? profile?.profiles?.find(item => item.id === "default")?.directory || profile?.directory
+      : profile?.directory;
+    setHermesProfile("default");
+    setExportDestination(defaultDirectory || "");
+    setExportStatus("");
+  };
+
+  const handleHermesProfileChange = (profileId: string) => {
+    setHermesProfile(profileId);
+    const profile = exportProfiles.hermes?.profiles?.find(item => item.id === profileId);
+    if (profile) setExportDestination(profile.directory);
     setExportStatus("");
   };
 
@@ -721,10 +744,7 @@ STEERING RULES:
 - Keep SKILL.md concise and move detailed domain material into references/ for progressive disclosure.
 - Use lowercase hyphen-case names under 64 characters and never emit metadata.json because the server owns it.`;
 
-      const res = await window.system.runAgentViaGateway({
-        provider: activeModel?.provider || "gemini",
-        model: activeModel?.model || "3.5",
-        prompt: await buildAthenaConversationPrompt({
+      const augPromptReplay = await buildAthenaConversationPrompt({
           context: { area: "Skills > Create with Athena > Replay", repository: "savant-olympus", selected: { type: "new-skill-design" } },
           history: historyBefore,
           userMessage: lastUserMsg.text,
@@ -733,10 +753,28 @@ STEERING RULES:
           baseUrl,
           apiKey,
           repo: "savant-olympus",
-        })
+        });
+      const res = await window.system.runAgentViaGateway({
+        provider: activeModel?.provider || "gemini",
+        model: activeModel?.model || "3.5",
+        prompt: augPromptReplay,
       });
 
-      let cleanRes = res || "";
+      const summaryMatch = augPromptReplay.match(/- Persona: (\S+)/);
+      const kgMatch = augPromptReplay.match(/Savant Knowledge MCP: (\d+)/);
+      const codeMatch = augPromptReplay.match(/Savant (?:Context|Research) MCP: (\d+)/);
+      const tasksMatch = augPromptReplay.match(/Savant Workspace Tasks: (\d+)/);
+      const remindersMatch = augPromptReplay.match(/Savant Reminders: (\d+)/);
+      setLastAthenaMcpState({
+        persona: summaryMatch?.[1],
+        knowledgeRefs: kgMatch ? Number(kgMatch[1]) : undefined,
+        codeRefs: codeMatch ? Number(codeMatch[1]) : undefined,
+        workspaceTasks: tasksMatch ? Number(tasksMatch[1]) : undefined,
+        remindersChecked: remindersMatch ? Number(remindersMatch[1]) : undefined,
+      });
+
+      let cleanRes = ensureAthenaMcpSummary(res || "", augPromptReplay);
+
 
       const parseJsonSafely = (text: string) => {
         try {
@@ -880,10 +918,7 @@ STEERING RULES:
 - Keep SKILL.md concise and move detailed domain material into references/ for progressive disclosure.
 - Use lowercase hyphen-case names under 64 characters and never emit metadata.json because the server owns it.`;
 
-      const res = await window.system.runAgentViaGateway({
-        provider: activeModel?.provider || "gemini",
-        model: activeModel?.model || "3.5",
-        prompt: await buildAthenaConversationPrompt({
+      const augPromptSend = await buildAthenaConversationPrompt({
           context: {
             area: "Skills > Create with Athena",
             repository: "savant-olympus",
@@ -897,10 +932,28 @@ STEERING RULES:
           baseUrl,
           apiKey,
           repo: "savant-olympus",
-        })
+        });
+      const res = await window.system.runAgentViaGateway({
+        provider: activeModel?.provider || "gemini",
+        model: activeModel?.model || "3.5",
+        prompt: augPromptSend,
       });
 
-      let cleanRes = res || "";
+      const summaryMatchS = augPromptSend.match(/- Persona: (\S+)/);
+      const kgMatchS = augPromptSend.match(/Savant Knowledge MCP: (\d+)/);
+      const codeMatchS = augPromptSend.match(/Savant (?:Context|Research) MCP: (\d+)/);
+      const tasksMatchS = augPromptSend.match(/Savant Workspace Tasks: (\d+)/);
+      const remindersMatchS = augPromptSend.match(/Savant Reminders: (\d+)/);
+      setLastAthenaMcpState({
+        persona: summaryMatchS?.[1],
+        knowledgeRefs: kgMatchS ? Number(kgMatchS[1]) : undefined,
+        codeRefs: codeMatchS ? Number(codeMatchS[1]) : undefined,
+        workspaceTasks: tasksMatchS ? Number(tasksMatchS[1]) : undefined,
+        remindersChecked: remindersMatchS ? Number(remindersMatchS[1]) : undefined,
+      });
+
+      let cleanRes = ensureAthenaMcpSummary(res || "", augPromptSend);
+
       
       const parseJsonSafely = (text: string) => {
         try {
@@ -1149,8 +1202,12 @@ STEERING RULES:
                 </div>
               </div>
 
+              {/* MCP Context Bar — shows last Athena turn's MCP state */}
+              <AthenaMcpContextBar {...(lastAthenaMcpState || {})} />
+
               {/* Chat Messages */}
               <AthenaConversationExport messages={chatMessages} title="Athena skill creator" scope="skills-athena" />
+
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {chatMessages.map((msg, index) => <AthenaMessage key={msg.id} message={msg} messageIndex={index} exportScope="skills-athena" variant="skill" onCopy={handleCopyMessage} onDelete={() => handleDeleteMessage(msg.id)} actions={<AthenaMessageExportActions message={msg} index={index} title="Athena skill creator" scope="skills-athena" />} />)}
                 
@@ -1462,6 +1519,18 @@ STEERING RULES:
           </div>
           <div>
             <label className="block text-[10px] uppercase tracking-wider text-[var(--cp-cyan)] mb-2">2 / Install directory</label>
+            {exportProvider === "hermes" && (exportProfiles.hermes?.profiles?.length || 0) > 1 && <div className="mb-3">
+              <label htmlFor="hermes-profile" className="block text-[10px] uppercase tracking-wider text-[var(--cp-cyan)] mb-2">Hermes profile</label>
+              <select
+                id="hermes-profile"
+                aria-label="Hermes profile"
+                value={hermesProfile}
+                onChange={event => handleHermesProfileChange(event.target.value)}
+                className="w-full bg-[var(--cp-bg-0)] border border-[var(--cp-border)] px-3 py-2 text-[11px] text-foreground"
+              >
+                {exportProfiles.hermes?.profiles?.map(profile => <option key={profile.id} value={profile.id}>{profile.label}</option>)}
+              </select>
+            </div>}
             <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-0)] p-3 space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">

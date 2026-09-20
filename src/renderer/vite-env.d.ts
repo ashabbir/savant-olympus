@@ -42,7 +42,12 @@ interface Window {
       html: string
       defaultFilename: string
     }) => Promise<string | null>
-    getSkillExportProfiles: () => Promise<Record<string, { label: string; directory: string; format: string }>>
+    getSkillExportProfiles: () => Promise<Record<string, {
+      label: string
+      directory: string
+      format: string
+      profiles?: Array<{ id: string; label: string; directory: string }>
+    }>>
     exportSkillPackage: (args: {
       provider: string
       name: string

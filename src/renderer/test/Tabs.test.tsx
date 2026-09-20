@@ -224,6 +224,41 @@ describe('SkillsView Component', () => {
     ))
   })
 
+  it('installs a skill into a selected Hermes profile', async () => {
+    vi.mocked(window.system.getSkillExportProfiles).mockResolvedValueOnce({
+      codex: { label: 'Codex', directory: '/tmp/.codex/skills', format: 'Agent Skills / SKILL.md' },
+      hermes: {
+        label: 'Hermes',
+        directory: '/tmp/.hermes/skills/custom',
+        format: 'Hermes Agent Skill',
+        profiles: [
+          { id: 'default', label: 'Default', directory: '/tmp/.hermes/skills/custom' },
+          { id: 'research', label: 'research', directory: '/tmp/.hermes/profiles/research/skills/custom' },
+        ],
+      },
+    })
+
+    render(<SkillsView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+    await waitFor(() => expect(screen.getByText(/automated_tests_auditor/i)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByText('automated_tests_auditor'))
+    fireEvent.click(screen.getByTitle('Download folder-preserving SKILL.md package'))
+    await waitFor(() => expect(screen.getByText('Install skill for an agent')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hermes' }))
+    const profileSelect = screen.getByLabelText('Hermes profile')
+    fireEvent.change(profileSelect, { target: { value: 'research' } })
+
+    expect(screen.getByText('/tmp/.hermes/profiles/research/skills/custom')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'INSTALL FOR HERMES' }))
+    await waitFor(() => expect(window.system.exportSkillPackage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'hermes',
+        destinationRoot: '/tmp/.hermes/profiles/research/skills/custom',
+      }),
+    ))
+  })
+
   it('shows Athena recommendation while asking a necessary question', async () => {
     vi.mocked(window.system.runAgentViaGateway).mockResolvedValueOnce(JSON.stringify({
       status: 'clarifying',

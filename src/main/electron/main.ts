@@ -515,6 +515,34 @@ const SKILL_EXPORT_PROFILES = {
   hermes: { label: 'Hermes', presencePath: path.join(os.homedir(), '.hermes'), directory: path.join(os.homedir(), '.hermes', 'skills', 'custom'), format: 'Hermes Agent Skill' },
 } as const
 
+type HermesSkillProfile = { id: string; label: string; directory: string }
+
+async function getHermesSkillProfiles(): Promise<HermesSkillProfile[]> {
+  const hermesRoot = path.join(os.homedir(), '.hermes')
+  const profiles: HermesSkillProfile[] = [{
+    id: 'default',
+    label: 'Default',
+    directory: SKILL_EXPORT_PROFILES.hermes.directory,
+  }]
+  const profilesDirectory = path.join(hermesRoot, 'profiles')
+
+  try {
+    const entries = await fs.readdir(profilesDirectory, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(entry.name)) continue
+      profiles.push({
+        id: entry.name,
+        label: entry.name,
+        directory: path.join(profilesDirectory, entry.name, 'skills', 'custom'),
+      })
+    }
+  } catch (error: any) {
+    if (error?.code !== 'ENOENT') console.error('Failed to list Hermes profiles:', error)
+  }
+
+  return profiles
+}
+
 const SAVANT_DEFAULT_SKILL_IDS = new Set([
   'savant-session-workspace',
   'savant-knowledge-commit',
@@ -588,7 +616,13 @@ async function installDefaultSkillsForPresentProviders(payload: unknown) {
   return { providers }
 }
 
-ipcMain.handle('get-skill-export-profiles', () => SKILL_EXPORT_PROFILES)
+ipcMain.handle('get-skill-export-profiles', async () => ({
+  ...SKILL_EXPORT_PROFILES,
+  hermes: {
+    ...SKILL_EXPORT_PROFILES.hermes,
+    profiles: await getHermesSkillProfiles(),
+  },
+}))
 
 ipcMain.handle('install-default-skills', async (_event, payload) => installDefaultSkillsForPresentProviders(payload))
 
@@ -998,4 +1032,3 @@ ipcMain.handle('trigger-agent-setup', async (_event, payload) => {
   const provider = String(payload?.provider || 'all')
   return triggerAgentSetupInternal(provider)
 })
-
