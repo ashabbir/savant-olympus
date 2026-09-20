@@ -78,4 +78,20 @@ describe("ContextService", () => {
     expect(fetchMock.mock.calls[3][1].body).toBe(JSON.stringify({ roots: [{ id: "main" }], mode: "neighbors", depth: 1, limit: 20 }));
     expect(fetchMock.mock.calls[4][0]).toContain("/api/context/code-intelligence/repos/repo%2Fid/symbols?q=main%20entity&limit=5");
   });
+
+  it("supports querying lossless syntax trees (LST) and searching lossless trees", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ tree: { nodes: [{ id: 0, type: "source_file" }] }, source: "console.log('hi')" }))
+      .mockResolvedValueOnce(jsonResponse({ results: [{ rel_path: "src/index.ts", line: 10 }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new ContextService("http://localhost:8090", "secret");
+
+    const tree = await service.getLosslessTree("my-repo", "src/index.ts", 1, 50, 100);
+    expect(tree.tree.nodes).toHaveLength(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8090/api/context/lossless-tree?repo=my-repo&path=src%2Findex.ts&start_line=1&end_line=50&max_nodes=100");
+
+    const searchResults = await service.searchLosslessTree("console.log", "my-repo", 10);
+    expect(searchResults).toEqual([{ rel_path: "src/index.ts", line: 10 }]);
+    expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:8090/api/context/lossless-tree/search?q=console.log&limit=10&repo=my-repo");
+  });
 });

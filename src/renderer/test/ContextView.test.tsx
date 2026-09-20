@@ -485,6 +485,133 @@ describe('ContextView - FileBrowserModal Integration', () => {
       expect(cancelCall?.[1]?.body).toBe(JSON.stringify({ job_id: 'index-job-1' }))
     })
   })
+
+  it('renders LST generation status, node counts, and file counts for a context project', async () => {
+    vi.mocked(window.fetch).mockImplementation((url) => {
+      const u = url.toString()
+      if (u.endsWith('/api/context/repos')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            repos: [
+              {
+                id: 1,
+                name: 'lst-project',
+                path: '/base-code/lst-project',
+                source: 'github',
+                status: 'indexed',
+                file_count: 42,
+                ast_node_count: 120,
+                lst_file_count: 40,
+                lst_node_count: 8520,
+                chunk_count: 99,
+              },
+            ],
+          }),
+        } as Response)
+      }
+      if (u.includes('/api/context/repos/indexing-status')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+      }
+      if (u.includes('/api/context/ast/list')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ nodes: [] }) } as Response)
+      }
+      if (u.includes('/health')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ provider: 'codegraph', freshness: 'fresh' }) } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+    })
+
+    render(
+      <ContextView
+        serverUrl="http://127.0.0.1:8090"
+        apiKey="test-key"
+        onSelectProject={() => {}}
+        selectedProject="lst-project"
+        isAdmin={true}
+      />
+    )
+
+    // Verify LST badge in the project list
+    expect((await screen.findAllByText('lst-project')).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('LST')).toBeInTheDocument()
+    expect(screen.getByText('AST')).toBeInTheDocument()
+
+    // Verify AST metrics section
+    const astSection = await screen.findByTestId('ast-metrics-section')
+    expect(astSection).toBeInTheDocument()
+    expect(astSection).toHaveTextContent(/GENERATED/i)
+    expect(astSection).toHaveTextContent('120')
+
+    // Verify LST metrics section in Overview tab
+    const lstSection = await screen.findByTestId('lst-metrics-section')
+    expect(lstSection).toBeInTheDocument()
+
+    // LST status should be GENERATED
+    expect(lstSection).toHaveTextContent(/GENERATED/i)
+
+    // LST node count should be rendered (8,520)
+    expect(lstSection).toHaveTextContent('8,520')
+
+    // LST files should be rendered (40 / 42)
+    expect(lstSection).toHaveTextContent('40')
+    expect(lstSection).toHaveTextContent('/ 42')
+  })
+
+  it('renders NOT GENERATED for projects without LST data', async () => {
+    vi.mocked(window.fetch).mockImplementation((url) => {
+      const u = url.toString()
+      if (u.endsWith('/api/context/repos')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            repos: [
+              {
+                id: 2,
+                name: 'no-lst-project',
+                path: '/base-code/no-lst-project',
+                source: 'directory',
+                status: 'ready',
+                file_count: 10,
+                ast_node_count: 0,
+                lst_file_count: 0,
+                lst_node_count: 0,
+              },
+            ],
+          }),
+        } as Response)
+      }
+      if (u.includes('/api/context/repos/indexing-status')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+      }
+      if (u.includes('/api/context/ast/list')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ nodes: [] }) } as Response)
+      }
+      if (u.includes('/health')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ provider: 'legacy', freshness: 'unavailable' }) } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+    })
+
+    render(
+      <ContextView
+        serverUrl="http://127.0.0.1:8090"
+        apiKey="test-key"
+        onSelectProject={() => {}}
+        selectedProject="no-lst-project"
+        isAdmin={true}
+      />
+    )
+
+    expect((await screen.findAllByText('no-lst-project')).length).toBeGreaterThanOrEqual(1)
+    const lstSection = await screen.findByTestId('lst-metrics-section')
+    expect(lstSection).toBeInTheDocument()
+    expect(lstSection).toHaveTextContent(/NOT GENERATED/i)
+
+    const astSection = await screen.findByTestId('ast-metrics-section')
+    expect(astSection).toBeInTheDocument()
+    expect(astSection).toHaveTextContent(/NOT GENERATED/i)
+  })
 })
 
 describe('parseFileStats helper', () => {

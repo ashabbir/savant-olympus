@@ -96,6 +96,21 @@ export class ContextService {
     return data.nodes || [];
   }
 
+  async getLosslessTree(repo: string, path: string, startLine?: number, endLine?: number, maxNodes?: number): Promise<any> {
+    const params = new URLSearchParams({ repo, path });
+    if (startLine != null) params.set("start_line", String(startLine));
+    if (endLine != null) params.set("end_line", String(endLine));
+    if (maxNodes != null) params.set("max_nodes", String(maxNodes));
+    return this.client.request(`/api/context/lossless-tree?${params.toString()}`);
+  }
+
+  async searchLosslessTree(query: string, repo?: string, limit = 20): Promise<any[]> {
+    const params = new URLSearchParams({ q: query, limit: String(limit) });
+    if (repo) params.set("repo", repo);
+    const data = await this.client.request<any>(`/api/context/lossless-tree/search?${params.toString()}`);
+    return data.results || [];
+  }
+
   readCode(uri: string): Promise<any> {
     return this.client.request(`/api/context/code/read?uri=${encodeURIComponent(uri)}`);
   }

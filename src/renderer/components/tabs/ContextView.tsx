@@ -20,6 +20,9 @@ interface Repo {
   memory_bank_count?: number;
   chunk_count?: number;
   ast_node_count?: number;
+  ast_file_count?: number;
+  lst_file_count?: number;
+  lst_node_count?: number;
   indexed_at?: string;
   last_fetched_at?: string;
   created_at?: string;
@@ -1053,6 +1056,42 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                           <Cpu size={10} className={isAnalyzed ? "text-[var(--cp-green)]" : "text-[var(--cp-magenta)]"} />
                           <span className={`text-[8px] font-bold ${isAnalyzed ? "text-[var(--cp-green)]" : "text-[var(--cp-magenta)]"}`}>ANA</span>
                         </span>
+
+                        {/* AST Status */}
+                        {(() => {
+                          const isAstGenerated = (repo.ast_node_count ?? 0) > 0 || (repo.ast_file_count ?? 0) > 0;
+                          return (
+                            <span
+                              className="flex items-center gap-0.5"
+                              title={
+                                isAstGenerated
+                                  ? `AST Generated: ${(repo.ast_node_count ?? 0).toLocaleString()} symbols${(repo.ast_file_count ?? 0) > 0 ? ` (${repo.ast_file_count} files)` : ""}`
+                                  : "Abstract Syntax Tree (AST) Not Generated"
+                              }
+                            >
+                              <FileCode size={10} className={isAstGenerated ? "text-[var(--cp-green)]" : "text-[var(--cp-magenta)]"} />
+                              <span className={`text-[8px] font-bold ${isAstGenerated ? "text-[var(--cp-green)]" : "text-[var(--cp-magenta)]"}`}>AST</span>
+                            </span>
+                          );
+                        })()}
+
+                        {/* LST Status */}
+                        {(() => {
+                          const isLstGenerated = (repo.lst_node_count ?? 0) > 0 || (repo.lst_file_count ?? 0) > 0;
+                          return (
+                            <span
+                              className="flex items-center gap-0.5"
+                              title={
+                                isLstGenerated
+                                  ? `LST Generated: ${(repo.lst_node_count ?? 0).toLocaleString()} nodes (${repo.lst_file_count ?? 0} files)`
+                                  : "Lossless Syntax Tree (LST) Not Generated"
+                              }
+                            >
+                              <Layers size={10} className={isLstGenerated ? "text-[var(--cp-green)]" : "text-[var(--cp-magenta)]"} />
+                              <span className={`text-[8px] font-bold ${isLstGenerated ? "text-[var(--cp-green)]" : "text-[var(--cp-magenta)]"}`}>LST</span>
+                            </span>
+                          );
+                        })()}
                       </div>
 
                       <div className="text-[9px] text-muted-foreground font-mono">
@@ -1205,6 +1244,8 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                       <div className="flex items-center gap-2 uppercase text-[10px]">
                         <span>Provider: <strong className="text-foreground">{structuralProvider}</strong></span>
                         <span>Freshness: <strong className={structuralFreshness === "fresh" ? "text-green-400" : structuralFreshness === "pending_sync" ? "text-amber-400" : "text-red-400"}>{isLoadingStructuralHealth ? "loading" : structuralFreshness}</strong></span>
+                        <span>AST: <strong className={(selectedRepo.ast_node_count ?? 0) > 0 || (selectedRepo.ast_file_count ?? 0) > 0 ? "text-green-400" : "text-[var(--cp-magenta)]"}>{(selectedRepo.ast_node_count ?? 0) > 0 || (selectedRepo.ast_file_count ?? 0) > 0 ? "GENERATED" : "NOT GENERATED"}</strong></span>
+                        <span>LST: <strong className={(selectedRepo.lst_node_count ?? 0) > 0 || (selectedRepo.lst_file_count ?? 0) > 0 ? "text-green-400" : "text-[var(--cp-magenta)]"}>{(selectedRepo.lst_node_count ?? 0) > 0 || (selectedRepo.lst_file_count ?? 0) > 0 ? "GENERATED" : "NOT GENERATED"}</strong></span>
                       </div>
                     </div>
                     {structuralHealth?.graph_version && <p className="mt-1 text-[10px] text-muted-foreground">Graph version: {structuralHealth.graph_version}</p>}
@@ -1222,7 +1263,11 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         <span className="text-amber-500 font-bold uppercase">
                           {statusInfo.job_type === "initial_repo_sync"
                             ? "Repository Setup In Progress"
-                            : statusInfo.job_type === "ast" ? "AST Generation In Progress" : "Indexing In Progress"}
+                            : statusInfo.job_type === "ast"
+                            ? "AST Generation In Progress"
+                            : statusInfo.job_type === "lossless" || statusInfo.job_type === "lst"
+                            ? "LST Generation In Progress"
+                            : "Indexing In Progress"}
                         </span>
                         <span className="text-amber-400">{Math.round(statusInfo.progress || 0)}%</span>
                       </div>
@@ -1300,9 +1345,145 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         <span className="block text-[10px] font-mono text-muted-foreground uppercase">Memory Bank</span>
                         <span className="text-lg font-bold text-foreground">{selectedRepo.memory_bank_count ?? selectedRepo.memory_count ?? 0}</span>
                       </div>
+                      <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded" title="Abstract syntax tree symbol declarations (classes, functions, methods)">
+                        <span className="block text-[10px] font-mono text-muted-foreground uppercase">AST Symbols</span>
+                        <span className="text-lg font-bold text-foreground">{(selectedRepo.ast_node_count ?? 0).toLocaleString()}</span>
+                      </div>
+                      <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded" title="Total concrete syntax tree nodes parsed with Tree-sitter">
+                        <span className="block text-[10px] font-mono text-muted-foreground uppercase">LST Nodes</span>
+                        <span className="text-lg font-bold text-foreground">{(selectedRepo.lst_node_count ?? 0).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Abstract Syntax Tree (AST) & Semantic Declarations */}
+                  <div className="space-y-2" data-testid="ast-metrics-section">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-[11px] uppercase font-mono text-[var(--section-label)] tracking-wider flex items-center gap-1.5">
+                        <FileCode size={13} className="text-[var(--cp-cyan)]" />
+                        Abstract Syntax Tree (AST)
+                      </h4>
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                        <span className="text-muted-foreground">STATUS:</span>
+                        {(() => {
+                          const hasAst = (selectedRepo.ast_node_count ?? 0) > 0 || (selectedRepo.ast_file_count ?? 0) > 0;
+                          return (
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                hasAst
+                                  ? "bg-green-950/60 text-[var(--cp-green)] border border-green-800/60"
+                                  : isCurrentlyIndexing
+                                  ? "bg-amber-950/60 text-amber-400 border border-amber-800/60 animate-pulse"
+                                  : "bg-red-950/40 text-[var(--cp-magenta)] border border-red-900/40"
+                              }`}
+                            >
+                              {hasAst ? "GENERATED" : isCurrentlyIndexing ? "GENERATING..." : "NOT GENERATED"}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded">
-                        <span className="block text-[10px] font-mono text-muted-foreground uppercase">Index Chunks</span>
-                        <span className="text-lg font-bold text-foreground">{selectedRepo.chunk_count ?? 0}</span>
+                        <span className="block text-[10px] font-mono text-muted-foreground uppercase">AST Status</span>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          {((selectedRepo.ast_node_count ?? 0) > 0 || (selectedRepo.ast_file_count ?? 0) > 0) ? (
+                            <>
+                              <CheckCircle size={14} className="text-[var(--cp-green)]" />
+                              <span className="text-sm font-bold text-[var(--cp-green)]">GENERATED</span>
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle size={14} className="text-[var(--cp-magenta)]" />
+                              <span className="text-sm font-bold text-[var(--cp-magenta)]">NOT GENERATED</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded" title="Total abstract syntax tree declarations (classes, functions, methods)">
+                        <span className="block text-[10px] font-mono text-muted-foreground uppercase">AST Symbols</span>
+                        <span className="text-lg font-bold text-foreground">{(selectedRepo.ast_node_count ?? 0).toLocaleString()}</span>
+                      </div>
+                      <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded" title="Number of files with indexed AST symbols">
+                        <span className="block text-[10px] font-mono text-muted-foreground uppercase">AST Files</span>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-lg font-bold text-foreground">{(selectedRepo.ast_file_count ?? 0).toLocaleString()}</span>
+                          {selectedRepo.file_count != null && selectedRepo.file_count > 0 && (
+                            <span className="text-xs text-muted-foreground">/ {selectedRepo.file_count}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded" title="Semantic chunks indexed for code search">
+                        <span className="block text-[10px] font-mono text-muted-foreground uppercase">Semantic Chunks</span>
+                        <span className="text-lg font-bold text-foreground">{(selectedRepo.chunk_count ?? 0).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Lossless Syntax Tree (LST) & Concrete Structure */}
+                  <div className="space-y-2" data-testid="lst-metrics-section">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-[11px] uppercase font-mono text-[var(--section-label)] tracking-wider flex items-center gap-1.5">
+                        <Layers size={13} className="text-[var(--cp-cyan)]" />
+                        Lossless Syntax Tree (LST)
+                      </h4>
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                        <span className="text-muted-foreground">STATUS:</span>
+                        {(() => {
+                          const hasLst = (selectedRepo.lst_node_count ?? 0) > 0 || (selectedRepo.lst_file_count ?? 0) > 0;
+                          return (
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                hasLst
+                                  ? "bg-green-950/60 text-[var(--cp-green)] border border-green-800/60"
+                                  : isCurrentlyIndexing
+                                  ? "bg-amber-950/60 text-amber-400 border border-amber-800/60 animate-pulse"
+                                  : "bg-red-950/40 text-[var(--cp-magenta)] border border-red-900/40"
+                              }`}
+                            >
+                              {hasLst ? "GENERATED" : isCurrentlyIndexing ? "GENERATING..." : "NOT GENERATED"}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded">
+                        <span className="block text-[10px] font-mono text-muted-foreground uppercase">LST Status</span>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          {((selectedRepo.lst_node_count ?? 0) > 0 || (selectedRepo.lst_file_count ?? 0) > 0) ? (
+                            <>
+                              <CheckCircle size={14} className="text-[var(--cp-green)]" />
+                              <span className="text-sm font-bold text-[var(--cp-green)]">GENERATED</span>
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle size={14} className="text-[var(--cp-magenta)]" />
+                              <span className="text-sm font-bold text-[var(--cp-magenta)]">NOT GENERATED</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded" title="Total concrete syntax tree nodes parsed with Tree-sitter">
+                        <span className="block text-[10px] font-mono text-muted-foreground uppercase">LST Nodes</span>
+                        <span className="text-lg font-bold text-foreground">{(selectedRepo.lst_node_count ?? 0).toLocaleString()}</span>
+                      </div>
+                      <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded" title="Number of files with concrete syntax trees stored">
+                        <span className="block text-[10px] font-mono text-muted-foreground uppercase">LST Files</span>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-lg font-bold text-foreground">{(selectedRepo.lst_file_count ?? 0).toLocaleString()}</span>
+                          {selectedRepo.file_count != null && selectedRepo.file_count > 0 && (
+                            <span className="text-xs text-muted-foreground">/ {selectedRepo.file_count}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-3 rounded" title="Concrete syntax tree coverage across repository files">
+                        <span className="block text-[10px] font-mono text-muted-foreground uppercase">LST Coverage</span>
+                        <span className="text-lg font-bold text-foreground">
+                          {selectedRepo.file_count && selectedRepo.lst_file_count
+                            ? `${Math.round((selectedRepo.lst_file_count / selectedRepo.file_count) * 100)}%`
+                            : ((selectedRepo.lst_node_count ?? 0) > 0 ? "100%" : "0%")}
+                        </span>
                       </div>
                     </div>
                   </div>
