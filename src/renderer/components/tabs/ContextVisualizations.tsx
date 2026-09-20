@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 import { Folder, FileCode, CheckCircle, Database, AlertTriangle, Square, Trash, Zap, Clock, Info, ShieldAlert, FileText, ChevronRight, ChevronDown, Layers, HelpCircle, MessageSquare, Send, Sparkles, Trash2, Loader2, Copy } from "lucide-react";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
+import { AthenaMcpContextBar, type AthenaMcpContextBarProps } from "@/components/shared/AthenaMcpContextBar";
 import { AthenaConversationExport, AthenaMessageExportActions } from "@/components/shared/AthenaExportActions";
 import { useAthenaThread } from "@/hooks/useAthenaThread";
 import { buildAthenaConversationPrompt, ensureAthenaMcpSummary } from "@/services/athenaService";
 import { ASTNode, ComplexityFunction, ComplexityFile, CodeDoc, Finding, AnalysisResults } from "./context/types";
+
 import { computeAstComplexity, complexityColor } from "./context/utils/complexityUtils";
 import { analyzeProjectSource } from "./context/utils/heuristicsEngine";
 import { DetailDrawer } from "./context/components/DetailDrawer";
@@ -494,7 +496,9 @@ function AnalysisChatPanel({
 }) {
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [lastAthenaMcpState, setLastAthenaMcpState] = useState<Omit<AthenaMcpContextBarProps, "className"> | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
 
   // Resizing state
   const [width, setWidth] = useState(384); 
@@ -586,6 +590,19 @@ ${analysis.findings.slice(0, 100).map((f, i) => `${i + 1}. [${f.severity.toUpper
       });
       const response = ensureAthenaMcpSummary(rawResponse || "No response from ATHENA.", augmentedPrompt);
 
+      const sumCV = augmentedPrompt.match(/- Persona: (\S+)/);
+      const kgCV = augmentedPrompt.match(/Savant Knowledge MCP: (\d+)/);
+      const codeCV = augmentedPrompt.match(/Savant (?:Context|Research) MCP: (\d+)/);
+      const tasksCV = augmentedPrompt.match(/Savant Workspace Tasks: (\d+)/);
+      const remindersCV = augmentedPrompt.match(/Savant Reminders: (\d+)/);
+      setLastAthenaMcpState({
+        persona: sumCV?.[1],
+        knowledgeRefs: kgCV ? Number(kgCV[1]) : undefined,
+        codeRefs: codeCV ? Number(codeCV[1]) : undefined,
+        workspaceTasks: tasksCV ? Number(tasksCV[1]) : undefined,
+        remindersChecked: remindersCV ? Number(remindersCV[1]) : undefined,
+      });
+
       const aiMsg: ChatMessage = {
         id: Math.random().toString(),
         sender: "assistant",
@@ -593,6 +610,7 @@ ${analysis.findings.slice(0, 100).map((f, i) => `${i + 1}. [${f.severity.toUpper
         timestamp: new Date().toISOString(),
       };
       saveMessages([...updated, aiMsg]);
+
     } catch (error: any) {
       console.error("Analysis Chat Error:", error);
       const errorMsg: ChatMessage = {
@@ -649,6 +667,8 @@ ${analysis.findings.slice(0, 100).map((f, i) => `${i + 1}. [${f.severity.toUpper
 
       {/* Messages Area */}
       <AthenaConversationExport messages={messages} title="Olympus analysis" scope="analysis-athena" />
+      {/* MCP Context Bar — shows last Athena turn's MCP state */}
+      <AthenaMcpContextBar {...(lastAthenaMcpState || {})} />
       <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2 space-y-3 min-h-0 flex flex-col pr-1">
         {messages.length === 0 ? (
           <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-4 my-auto">

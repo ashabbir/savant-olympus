@@ -5,10 +5,12 @@ import { SearchBar } from "../shared/SearchBar";
 import { ViewHeader } from "../shared/ViewHeader";
 import { StatusBadge } from "../shared/StatusBadge";
 import { ModalBackdrop } from "../shared/ModalBackdrop";
-import { buildAthenaConversationPrompt } from "../../lib/athenaContext";
+import { buildAthenaConversationPrompt, ensureAthenaMcpSummary } from "../../lib/athenaContext";
 import { AthenaMessage } from "../shared/AthenaMessage";
+import { AthenaMcpContextBar, type AthenaMcpContextBarProps } from "../shared/AthenaMcpContextBar";
 import { AthenaConversationExport, AthenaMessageExportActions } from "../shared/AthenaExportActions";
 import { createScopedLocalAthenaThreadStore, readLocalAthenaHistory, useAthenaThread } from "../../hooks/useAthenaThread";
+
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
@@ -86,7 +88,9 @@ export function AbilitiesView({ serverUrl, apiKey, isAdmin, activeModel }: Abili
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [assetProposal, setAssetProposal] = useState<AbilityAssetProposal | null>(null);
   const [isCreatingAsset, setIsCreatingAsset] = useState(false);
+  const [lastAthenaMcpState, setLastAthenaMcpState] = useState<Omit<AthenaMcpContextBarProps, "className"> | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
 
   const baseUrl = serverUrl.replace(/\/+$/, "");
   const abilitiesService = createAbilitiesService(serverUrl, apiKey);
@@ -290,10 +294,7 @@ STEERING RULES:
 - Recommend specific tags and includes based on existing assets to reduce replication of guidelines.
 - Always provide a solid default value for the body prompt in FINALIZE mode.`;
 
-      const res = await window.system.runAgentViaGateway({
-        provider: activeModel?.provider || "gemini",
-        model: activeModel?.model || "3.5",
-        prompt: await buildAthenaConversationPrompt({
+      const augPromptAbil = await buildAthenaConversationPrompt({
           context: {
             area: "Abilities > Create with Athena",
             repository: "savant-olympus",
@@ -307,10 +308,28 @@ STEERING RULES:
           baseUrl,
           apiKey,
           repo: "savant-olympus",
-        })
+        });
+      const res = await window.system.runAgentViaGateway({
+        provider: activeModel?.provider || "gemini",
+        model: activeModel?.model || "3.5",
+        prompt: augPromptAbil,
       });
 
-      let cleanRes = res || "";
+      const summaryMatchA = augPromptAbil.match(/- Persona: (\S+)/);
+      const kgMatchA = augPromptAbil.match(/Savant Knowledge MCP: (\d+)/);
+      const codeMatchA = augPromptAbil.match(/Savant (?:Context|Research) MCP: (\d+)/);
+      const tasksMatchA = augPromptAbil.match(/Savant Workspace Tasks: (\d+)/);
+      const remindersMatchA = augPromptAbil.match(/Savant Reminders: (\d+)/);
+      setLastAthenaMcpState({
+        persona: summaryMatchA?.[1],
+        knowledgeRefs: kgMatchA ? Number(kgMatchA[1]) : undefined,
+        codeRefs: codeMatchA ? Number(codeMatchA[1]) : undefined,
+        workspaceTasks: tasksMatchA ? Number(tasksMatchA[1]) : undefined,
+        remindersChecked: remindersMatchA ? Number(remindersMatchA[1]) : undefined,
+      });
+
+      let cleanRes = ensureAthenaMcpSummary(res || "", augPromptAbil);
+
 
       const parseJsonSafely = (text: string) => {
         try {
@@ -889,8 +908,12 @@ STEERING RULES:
                 </div>
               </div>
 
+              {/* MCP Context Bar — shows last Athena turn's MCP state */}
+              <AthenaMcpContextBar {...(lastAthenaMcpState || {})} />
+
               {/* Chat Messages */}
               <AthenaConversationExport messages={chatMessages} title="Athena ability creator" scope="abilities-athena" />
+
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {chatMessages.map((msg, index) => (
                   <div key={msg.id} className="space-y-2">

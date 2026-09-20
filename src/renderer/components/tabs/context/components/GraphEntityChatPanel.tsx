@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { AthenaMessage, AthenaMessageModel } from "@/components/shared/AthenaMessage";
+import { AthenaMcpContextBar, type AthenaMcpContextBarProps } from "@/components/shared/AthenaMcpContextBar";
 import { AthenaConversationExport, AthenaMessageExportActions } from "@/components/shared/AthenaExportActions";
 import { AthenaThreadStore, useAthenaThread } from "@/hooks/useAthenaThread";
 import {
   buildAthenaConversationPrompt,
   ensureAthenaMcpSummary,
 } from "@/lib/athenaContext";
+
 
 export interface GraphEntityChatTarget {
   node_id: string;
@@ -44,10 +46,12 @@ function createGraphChatStore(): AthenaThreadStore<GraphChatMessage> {
 export function GraphEntityChatPanel({ node, repoName, serverUrl, apiKey, activeModel }: GraphEntityChatPanelProps) {
   const [inputValue, setInputValue] = useState("");
   const [isThinking, setIsThinking] = useState(false);
+  const [lastAthenaMcpState, setLastAthenaMcpState] = useState<Omit<AthenaMcpContextBarProps, "className"> | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const store = useMemo(createGraphChatStore, []);
   const threadId = `savant_chat_history_graphify_${repoName}_${node.node_id}`;
   const { messages, setMessages, removeMessage, clearMessages } = useAthenaThread<GraphChatMessage>({ threadId, store });
+
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -87,6 +91,20 @@ export function GraphEntityChatPanel({ node, repoName, serverUrl, apiKey, active
         prompt: augmentedPrompt,
       });
       const response = ensureAthenaMcpSummary(rawResponse || "No response received from the gateway.", augmentedPrompt);
+
+      const sumG = augmentedPrompt.match(/- Persona: (\S+)/);
+      const kgG = augmentedPrompt.match(/Savant Knowledge MCP: (\d+)/);
+      const codeG = augmentedPrompt.match(/Savant (?:Context|Research) MCP: (\d+)/);
+      const tasksG = augmentedPrompt.match(/Savant Workspace Tasks: (\d+)/);
+      const remindersG = augmentedPrompt.match(/Savant Reminders: (\d+)/);
+      setLastAthenaMcpState({
+        persona: sumG?.[1],
+        knowledgeRefs: kgG ? Number(kgG[1]) : undefined,
+        codeRefs: codeG ? Number(codeG[1]) : undefined,
+        workspaceTasks: tasksG ? Number(tasksG[1]) : undefined,
+        remindersChecked: remindersG ? Number(remindersG[1]) : undefined,
+      });
+
       setMessages([...history, { id: crypto.randomUUID(), sender: "assistant", text: response || "No response received from the gateway.", timestamp: new Date().toISOString() }]);
     } catch (error: any) {
       setMessages([...history, { id: crypto.randomUUID(), sender: "assistant", text: `Error calling ATHENA agent: ${error.message || "Unknown error"}. Make sure Savant Gateway is running.`, timestamp: new Date().toISOString() }]);
@@ -98,6 +116,8 @@ export function GraphEntityChatPanel({ node, repoName, serverUrl, apiKey, active
   return (
     <div className="flex-1 flex flex-col min-h-0 space-y-3">
       <AthenaConversationExport messages={messages} title={`Graph entity ${node.title}`} scope="graph-entity-athena" />
+      {/* MCP Context Bar — shows last Athena turn's MCP state */}
+      <AthenaMcpContextBar {...(lastAthenaMcpState || {})} />
       <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2 space-y-3 min-h-0 flex flex-col pr-1">
         {messages.length === 0 ? (
           <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-4 my-auto">
