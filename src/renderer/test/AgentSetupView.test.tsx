@@ -284,7 +284,26 @@ describe('AgentSetupView Component', () => {
         expect.stringContaining('/api/agents/setup/trigger'),
         expect.objectContaining({
           method: 'POST',
-          body: expect.stringContaining('"provider":"copilot"'),
+          // Streamable HTTP is the default, while the selector below covers SSE compatibility.
+          body: expect.stringMatching(/"provider":"copilot".*"transport":"streamable-http"/),
+        })
+      )
+    })
+  })
+
+  it('lets the user choose SSE again before rewiring an agent', async () => {
+    render(<AgentSetupView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+
+    await screen.findByText('GitHub Copilot')
+    fireEvent.change(screen.getByLabelText(/MCP transport/i), { target: { value: 'sse' } })
+    fireEvent.click(screen.getByRole('button', { name: /SETUP FOR COPILOT/i }))
+
+    await waitFor(() => {
+      expect(window.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/agents/setup/trigger'),
+        expect.objectContaining({
+          method: 'POST',
+          body: expect.stringContaining('"transport":"sse"'),
         })
       )
     })

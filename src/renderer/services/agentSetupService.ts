@@ -1,6 +1,7 @@
 import { buildAuthHeaders, normalizeBaseUrl } from "./httpClient";
 
 export type AgentProvider = "copilot" | "claude" | "hermes" | "codex";
+export type AgentMcpTransport = "streamable-http" | "sse";
 
 export interface AgentPartStatus {
   id: "mcp" | "instructions" | "skills" | "hook";
@@ -20,6 +21,7 @@ export interface AgentSetupInfo {
   parts: AgentPartStatus[];
   lastChecked?: string;
   lastConfigured?: string;
+  mcpTransport?: AgentMcpTransport;
 }
 
 export interface AgentSetupReport {
@@ -76,7 +78,7 @@ function buildFallbackReport(serverUrl: string): AgentSetupReport {
           label: "MCP Knowledge Bridge",
           configured: false,
           path: "~/.copilot/mcp.json",
-          details: "SSE connection to Savant Knowledge (port 8094) & Context (port 8093)",
+          details: "Streamable HTTP connection to Savant Knowledge & Context (ports 8194 / 8193)",
         },
         {
           id: "instructions",
@@ -115,7 +117,7 @@ function buildFallbackReport(serverUrl: string): AgentSetupReport {
           label: "MCP Knowledge Bridge",
           configured: false,
           path: "~/.claude/claude_desktop_config.json",
-          details: "SSE connection to Savant Knowledge (port 8094) & Context (port 8093)",
+          details: "Streamable HTTP connection to Savant Knowledge & Context (ports 8194 / 8193)",
         },
         {
           id: "instructions",
@@ -154,7 +156,7 @@ function buildFallbackReport(serverUrl: string): AgentSetupReport {
           label: "MCP Knowledge Bridge",
           configured: false,
           path: "~/.hermes/mcp.json",
-          details: "SSE connection to Savant Knowledge (port 8094) & Context (port 8093)",
+          details: "Streamable HTTP connection to Savant Knowledge & Context (ports 8194 / 8193)",
         },
         {
           id: "instructions",
@@ -193,7 +195,7 @@ function buildFallbackReport(serverUrl: string): AgentSetupReport {
           label: "MCP Knowledge Bridge",
           configured: false,
           path: "~/.codex/mcp.json",
-          details: "SSE connection to Savant Knowledge (port 8094) & Context (port 8093)",
+          details: "Streamable HTTP connection to Savant Knowledge & Context (ports 8194 / 8193)",
         },
         {
           id: "instructions",
@@ -272,11 +274,11 @@ export class AgentSetupService {
     return buildFallbackReport(this.baseUrl);
   }
 
-  async triggerSetup(provider: AgentProvider | "all", parts?: string[]): Promise<TriggerSetupResult> {
+  async triggerSetup(provider: AgentProvider | "all", parts?: string[], transport: AgentMcpTransport = "streamable-http"): Promise<TriggerSetupResult> {
     // Priority 1: Check Electron native system IPC
     if (typeof window !== "undefined" && (window as any).system?.triggerAgentSetup) {
       try {
-        const result = await (window as any).system.triggerAgentSetup({ provider, parts });
+        const result = await (window as any).system.triggerAgentSetup({ provider, parts, transport });
         if (result && result.report) return result;
       } catch (err) {
         console.warn("Electron triggerAgentSetup IPC error, falling back to HTTP:", err);
@@ -288,7 +290,7 @@ export class AgentSetupService {
       const res = await fetch(`${this.baseUrl}/api/agents/setup/trigger`, {
         method: "POST",
         headers: buildAuthHeaders(this.apiKey),
-        body: JSON.stringify({ provider, parts }),
+        body: JSON.stringify({ provider, parts, transport }),
       });
       if (res.ok) {
         const data = await res.json();

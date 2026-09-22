@@ -46,7 +46,7 @@ contextBridge.exposeInMainWorld('system', {
   installDefaultSkills: (args: { skills: Array<{ id: string; files: Array<{ path: string; content: string }> }> }) =>
     ipcRenderer.invoke('install-default-skills', args),
   getAgentSetupStatus: () => ipcRenderer.invoke('get-agent-setup-status'),
-  triggerAgentSetup: (args: { provider: string; parts?: string[]; workspaceRoot?: string }) =>
+  triggerAgentSetup: (args: { provider: string; parts?: string[]; workspaceRoot?: string; transport?: 'streamable-http' | 'sse' }) =>
     ipcRenderer.invoke('trigger-agent-setup', args),
 })
 

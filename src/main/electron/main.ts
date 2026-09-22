@@ -741,6 +741,22 @@ const AGENT_INTEGRATION_PROFILES = {
   },
 } as const
 
+type AgentMcpTransport = 'streamable-http' | 'sse'
+
+const MCP_TRANSPORT_CONFIG: Record<AgentMcpTransport, { type: string; ports: [number, number, number] }> = {
+  'streamable-http': { type: 'streamable-http', ports: [8194, 8193, 8191] },
+  sse: { type: 'sse', ports: [8094, 8093, 8091] },
+}
+
+function normalizeAgentMcpTransport(value: unknown): AgentMcpTransport {
+  return value === 'sse' ? 'sse' : 'streamable-http'
+}
+
+function mcpEntryUrl(transport: AgentMcpTransport, port: number): string {
+  const suffix = transport === 'sse' ? 'sse' : 'mcp'
+  return `http://127.0.0.1:${port}/${suffix}?api_key=sk-ahmed-savant-001&app_name=savant-mcp`
+}
+
 const LEARNING_PROTOCOL_TEXT = `
 <!-- SAVANT KNOWLEDGE PROTOCOL START -->
 ## Savant Knowledge & Memory Persistence Protocol
@@ -832,11 +848,13 @@ async function checkAgentSetupInternal() {
 
     // 1. Check MCP
     let mcpConfigured = false
+    let mcpTransport: AgentMcpTransport | undefined
     try {
       const content = await fs.readFile(profile.mcpPath, 'utf8')
-      if (content.includes('8094') || content.includes('savant-knowledge')) {
-        mcpConfigured = true
-      }
+      const parsed = JSON.parse(content)
+      const knowledge = parsed?.mcpServers?.['savant-knowledge']
+      mcpConfigured = Boolean(knowledge)
+      if (knowledge) mcpTransport = normalizeAgentMcpTransport(knowledge.type)
     } catch {}
 
     // 2. Check Instructions
@@ -868,7 +886,9 @@ async function checkAgentSetupInternal() {
         label: 'MCP Knowledge Bridge',
         configured: mcpConfigured,
         path: profile.mcpPath,
-        details: 'SSE connection to Savant Knowledge (port 8094) & Context (port 8093)',
+        details: mcpTransport
+          ? `${mcpTransport === 'sse' ? 'SSE' : 'Streamable HTTP'} connection to Savant Knowledge & Context`
+          : 'No MCP transport configured',
       },
       {
         id: 'instructions',
@@ -906,6 +926,7 @@ async function checkAgentSetupInternal() {
       status,
       parts,
       lastChecked: new Date().toISOString(),
+      mcpTransport,
     }
   }
 
@@ -923,7 +944,9 @@ async function checkAgentSetupInternal() {
   }
 }
 
-async function triggerAgentSetupInternal(providerName: string) {
+async function triggerAgentSetupInternal(providerName: string, requestedTransport?: unknown) {
+  const transport = normalizeAgentMcpTransport(requestedTransport)
+  const config = MCP_TRANSPORT_CONFIG[transport]
   const targets = providerName === 'all'
     ? Object.keys(AGENT_INTEGRATION_PROFILES)
     : [providerName]
@@ -947,16 +970,16 @@ async function triggerAgentSetupInternal(providerName: string) {
       } catch {}
 
       currentMcp.mcpServers['savant-knowledge'] = {
-        type: 'sse',
-        url: 'http://127.0.0.1:8094/sse?api_key=sk-ahmed-savant-001&app_name=savant-mcp',
+        type: config.type,
+        url: mcpEntryUrl(transport, config.ports[0]),
       }
       currentMcp.mcpServers['savant-context'] = {
-        type: 'sse',
-        url: 'http://127.0.0.1:8093/sse?api_key=sk-ahmed-savant-001&app_name=savant-mcp',
+        type: config.type,
+        url: mcpEntryUrl(transport, config.ports[1]),
       }
       currentMcp.mcpServers['savant-workspace'] = {
-        type: 'sse',
-        url: 'http://127.0.0.1:8091/sse?api_key=sk-ahmed-savant-001&app_name=savant-mcp',
+        type: config.type,
+        url: mcpEntryUrl(transport, config.ports[2]),
       }
       await fs.writeFile(profile.mcpPath, JSON.stringify(currentMcp, null, 2), 'utf8')
       configuredParts.push(`${p}:mcp`)
@@ -1030,5 +1053,5 @@ ipcMain.handle('get-agent-setup-status', async () => checkAgentSetupInternal())
 
 ipcMain.handle('trigger-agent-setup', async (_event, payload) => {
   const provider = String(payload?.provider || 'all')
-  return triggerAgentSetupInternal(provider)
+  return triggerAgentSetupInternal(provider, payload?.transport)
 })

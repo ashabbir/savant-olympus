@@ -11,7 +11,8 @@ import {
   AgentSetupReport,
   AgentProvider,
   AgentSetupInfo,
-  AgentPartStatus
+  AgentPartStatus,
+  AgentMcpTransport
 } from "../../services/agentSetupService";
 import { toast } from "sonner";
 
@@ -36,6 +37,7 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
   const [expandedPreview, setExpandedPreview] = useState<Record<string, boolean>>({});
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [setupScope, setSetupScope] = useState<"global" | "workspace">("global");
+  const [mcpTransport, setMcpTransport] = useState<AgentMcpTransport>("streamable-http");
 
   // Test learning ingestion state
   const [isTestingPost, setIsTestingPost] = useState(false);
@@ -66,7 +68,7 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
     setTriggeringProvider(provider);
     try {
       toast.info(`Configuring ${provider.toUpperCase()} integration...`);
-      const result = await agentService.triggerSetup(provider);
+      const result = await agentService.triggerSetup(provider, undefined, mcpTransport);
       if (result.success && result.report) {
         setReport(result.report);
         toast.success(`Successfully configured ${provider.toUpperCase()} for Savant Knowledge!`);
@@ -84,7 +86,7 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
     setIsTriggeringAll(true);
     try {
       toast.info("Triggering setup for all agents (Copilot, Claude, Hermes, Codex)...");
-      const result = await agentService.triggerSetup("all");
+      const result = await agentService.triggerSetup("all", undefined, mcpTransport);
       if (result.success && result.report) {
         setReport(result.report);
         toast.success("All 4 agents successfully configured for Savant Knowledge!");
@@ -159,6 +161,19 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
               </button>
             </div>
 
+            <label className="flex items-center gap-2 border border-[var(--cp-border)] bg-[var(--cp-bg-3)] rounded px-2 py-1.5 text-[10px] text-muted-foreground" title="Choose how each Savant MCP server connects">
+              <span className="uppercase tracking-wide">MCP transport</span>
+              <select
+                aria-label="MCP transport"
+                value={mcpTransport}
+                onChange={(event) => setMcpTransport(event.target.value as AgentMcpTransport)}
+                className="bg-transparent text-[var(--cp-cyan)] font-bold focus:outline-none cursor-pointer"
+              >
+                <option value="streamable-http">Streamable HTTP (recommended)</option>
+                <option value="sse">SSE (legacy)</option>
+              </select>
+            </label>
+
             {/* Test Post Button */}
             <button
               type="button"
@@ -199,7 +214,7 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
         </div>
         <div className="flex items-center justify-between p-2 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)]">
           <span className="text-muted-foreground">KNOWLEDGE MCP</span>
-          <span className="font-bold text-[var(--cp-cyan)]">PORT 8094 (SSE)</span>
+          <span className="font-bold text-[var(--cp-cyan)]">{mcpTransport === "streamable-http" ? "PORTS 8191–8194 (HTTP)" : "PORTS 8091–8094 (SSE)"}</span>
         </div>
       </div>
 
@@ -343,8 +358,8 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
                         </div>
                         <pre className="text-slate-300">
 {`"savant-knowledge": {
-  "type": "sse",
-  "url": "http://127.0.0.1:8094/sse?api_key=sk-ahmed-savant-001&app_name=savant-mcp"
+  "type": "${mcpTransport}",
+  "url": "http://127.0.0.1:${mcpTransport === "streamable-http" ? "8194/mcp" : "8094/sse"}?api_key=sk-ahmed-savant-001&app_name=savant-mcp"
 }`}
                         </pre>
                       </div>
