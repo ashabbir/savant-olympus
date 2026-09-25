@@ -23,9 +23,23 @@ export class KnowledgeService {
     this.client = new SavantHttpClient(baseUrl, apiKey);
   }
 
+  /**
+   * Loads the graph skeleton: every node type except insights, which outnumber
+   * everything else ~2:1 and would push domains out of the row limit.
+   * A domain's insights and related items are pulled on drill-down via fetchDomainNeighbors.
+   */
   fetchGraph(includeStaged = true, slim = false, workspaceId?: string): Promise<{ nodes: any[]; edges: any[] }> {
     const workspace = workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : "";
-    return this.client.request(`/api/knowledge/graph?slim=${slim}&include_staged=${includeStaged}${workspace}&_=${Date.now()}`);
+    return this.client.request(
+      `/api/knowledge/graph?slim=${slim}&include_staged=${includeStaged}&limit=20000&exclude_types=insight${workspace}&_=${Date.now()}`,
+    );
+  }
+
+  /** Insights (and other 1-hop neighbours) for a single domain, loaded on demand. */
+  fetchDomainNeighbors(domainId: string, includeStaged = true): Promise<{ nodes: any[]; edges: any[] }> {
+    return this.client.request(
+      `/api/knowledge/neighbors/${encodeURIComponent(domainId)}?depth=1&include_staged=${includeStaged}`,
+    );
   }
 
   getNode(nodeId: string): Promise<any> {

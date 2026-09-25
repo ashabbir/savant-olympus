@@ -212,6 +212,13 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
   const [showInsights, setShowInsights] = useState(false);
   const [rawNodes, setRawNodes] = useState<any[]>([]);
   const [rawEdges, setRawEdges] = useState<any[]>([]);
+  // Insights are excluded from the initial graph load and fetched per domain on
+  // drill-down. These hold what has been pulled in so far so redraws keep it.
+  const expandedDomainsRef = useRef<Set<string>>(new Set());
+  const lazyInsightsRef = useRef<{ nodes: Map<string, any>; edges: Map<string, any> }>({
+    nodes: new Map(),
+    edges: new Map(),
+  });
   const { runGraphAction } = useKnowledgeGraphActions(setIsLoading);
 
   useEffect(() => {
@@ -410,6 +417,13 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
   const loadedLabelsRef = useRef<Set<string>>(new Set());
   const nodeLabelsRef = useRef<Map<string, string>>(new Map());
 
+  // Insights only enter the graph once a domain is drilled into, so this gates the
+  // Show/Hide insights toggle: no drill-down yet means nothing to toggle.
+  const hasLoadedInsights = useMemo(
+    () => rawNodes.some((node: any) => node?.node_type === "insight"),
+    [rawNodes],
+  );
+
   const filterReachability = useMemo(
     () => deriveKnowledgeFilterState(
       focalsByType,
@@ -541,11 +555,29 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
       const raw = await knowledgeService.fetchGraph(true, true);
       if (loadId !== graphLoadIdRef.current) return;
 
-      setRawNodes(raw.nodes || []);
-      setRawEdges(raw.edges || []);
+      // Fold in neighbourhoods already pulled by earlier domain drill-downs.
+      // Dedupe: a domain's related items may already be in the skeleton.
+      const lazy = lazyInsightsRef.current;
+      let graphNodes = raw.nodes || [];
+      let graphEdges = raw.edges || [];
+      if (lazy.nodes.size) {
+        const seen = new Set(graphNodes.map((n: any) => n.node_id));
+        graphNodes = [...graphNodes, ...[...lazy.nodes.values()].filter((n: any) => !seen.has(n.node_id))];
+      }
+      if (lazy.edges.size) {
+        const seenEdge = new Set(
+          graphEdges.map((e: any) => e.edge_id ?? `${e.source_id}->${e.target_id}:${e.edge_type ?? ""}`),
+        );
+        graphEdges = [
+          ...graphEdges,
+          ...[...lazy.edges.values()].filter(
+            (e: any) => !seenEdge.has(e.edge_id ?? `${e.source_id}->${e.target_id}:${e.edge_type ?? ""}`),
+          ),
+        ];
+      }
 
-      const graphNodes = raw.nodes || [];
-      const graphEdges = raw.edges || [];
+      setRawNodes(graphNodes);
+      setRawEdges(graphEdges);
       const loadedGraphIndex = buildKnowledgeGraphIndex(graphNodes, graphEdges);
       // Make the newly loaded adjacency available before React commits graph state.
       adjRef.current = loadedGraphIndex.adjacency;
@@ -1467,6 +1499,58 @@ const handleExploreNode = (nodeId: string) => {
 };
 
 // Full select: highlight in graph + open info panel + fetch details. Mirrors graph-click.
+/**
+ * Stepped load: the initial graph carries no insights, so the first time a domain
+ * is drilled into we pull its 1-hop neighbourhood — insights plus related items —
+ * cache it, and redraw. Insights are revealed automatically since they are hidden
+ * by default and the user explicitly asked for this domain.
+ */
+const loadDomainNeighbors = async (domainId: string) => {
+  if (expandedDomainsRef.current.has(domainId)) return;
+  expandedDomainsRef.current.add(domainId);
+  try {
+    const { nodes = [], edges = [] } = await knowledgeService.fetchDomainNeighbors(domainId);
+    const lazy = lazyInsightsRef.current;
+    let addedNodes = false;
+    for (const n of nodes) {
+      if (!n?.node_id || lazy.nodes.has(n.node_id)) continue;
+      lazy.nodes.set(n.node_id, n);
+      addedNodes = true;
+    }
+    for (const e of edges) {
+      const key = e.edge_id ?? `${e.source_id}->${e.target_id}:${e.edge_type ?? ""}`;
+      if (!lazy.edges.has(key)) lazy.edges.set(key, e);
+    }
+    if (addedNodes) await loadGraph();
+  } catch (e) {
+    expandedDomainsRef.current.delete(domainId);
+    console.error("Failed to load domain neighbourhood", e);
+  }
+};
+
+// Insights belong to a single focused domain. With one domain selected we pull and
+// reveal its neighbourhood; with several selected the canvas would be swamped, so
+// insights stay hidden and nothing new is fetched. Selecting no domain is left
+// alone so the manual Show/Hide insights toggle keeps working.
+useEffect(() => {
+  // A domain can be picked two ways: the sidebar checkboxes (focalsByType) or a
+  // click on the canvas (selectedNode/selectedNodes). Count both.
+  const picked = new Set<string>(focalsByType["domain"] || []);
+  const clicked = selectedNodes.size > 0
+    ? [...selectedNodes.values()]
+    : (selectedNode ? [selectedNode] : []);
+  for (const n of clicked) {
+    if ((n as any)?.node_type === "domain") picked.add((n as any).node_id);
+  }
+  const domainIds = [...picked];
+  if (domainIds.length === 1) {
+    setShowInsights(true);
+    void loadDomainNeighbors(domainIds[0]);
+  } else if (domainIds.length > 1) {
+    setShowInsights(false);
+  }
+}, [focalsByType, selectedNode, selectedNodes]);
+
 const selectNodeById = async (nodeId: string) => {
   const node = graphIndexRef.current.nodesById.get(nodeId);
   if (!node) return;
@@ -2889,13 +2973,17 @@ return (
       >
         {isLoading && <div className="absolute inset-0 flex items-center justify-center bg-black/25 z-10 text-xs font-mono text-[var(--cp-cyan)] animate-pulse">SYNCING_VECTORS...</div>}
         <svg ref={svgRef} id="kb-graph-svg" className="w-full h-full cursor-grab active:cursor-grabbing" />
-        {isExploreActive && (
+        {(isExploreActive || hasLoadedInsights) && (
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1 bg-[var(--cp-bg-1)] border border-[var(--cp-cyan)] rounded shadow-2xl font-mono text-xs z-20">
-            <span className="text-[var(--section-label)] font-bold uppercase tracking-wider">DEPTH</span>
-            <button onClick={() => setExploreDepth((d) => Math.max(1, d - 1))} className="w-5 h-5 flex items-center justify-center bg-[var(--cp-bg-2)] border border-[var(--cp-border)] hover:bg-[var(--cp-bg-3)] rounded font-bold cursor-pointer">-</button>
-            <span className="text-foreground font-bold px-1">{exploreDepth}</span>
-            <button onClick={() => setExploreDepth((d) => d + 1)} className="w-5 h-5 flex items-center justify-center bg-[var(--cp-bg-2)] border border-[var(--cp-border)] hover:bg-[var(--cp-bg-3)] rounded font-bold cursor-pointer">+</button>
-            {filterReachability.visibleNodes.some((node) => node.node_type === "insight") && (
+            {isExploreActive && (
+              <>
+                <span className="text-[var(--section-label)] font-bold uppercase tracking-wider">DEPTH</span>
+                <button onClick={() => setExploreDepth((d) => Math.max(1, d - 1))} className="w-5 h-5 flex items-center justify-center bg-[var(--cp-bg-2)] border border-[var(--cp-border)] hover:bg-[var(--cp-bg-3)] rounded font-bold cursor-pointer">-</button>
+                <span className="text-foreground font-bold px-1">{exploreDepth}</span>
+                <button onClick={() => setExploreDepth((d) => d + 1)} className="w-5 h-5 flex items-center justify-center bg-[var(--cp-bg-2)] border border-[var(--cp-border)] hover:bg-[var(--cp-bg-3)] rounded font-bold cursor-pointer">+</button>
+              </>
+            )}
+            {hasLoadedInsights && (
               <button
                 type="button"
                 onClick={() => setShowInsights((current) => !current)}
@@ -2909,7 +2997,9 @@ return (
                 {showInsights ? "Hide insights" : "Show insights"}
               </button>
             )}
-            <button onClick={clearExploreMode} className="ml-2 px-2 py-0.5 border border-red-950 text-red-500 rounded bg-red-950/20 hover:bg-red-900/40 text-[10px] cursor-pointer">✕ CLEAR</button>
+            {isExploreActive && (
+              <button onClick={clearExploreMode} className="ml-2 px-2 py-0.5 border border-red-950 text-red-500 rounded bg-red-950/20 hover:bg-red-900/40 text-[10px] cursor-pointer">✕ CLEAR</button>
+            )}
           </div>
         )}
       </div>
