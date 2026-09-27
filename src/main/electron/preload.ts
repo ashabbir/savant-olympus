@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld('system', {
   saveChatHistory: (target_id: string, messages: any[], metadata?: { title?: string; context?: any; kind?: string }) =>
     ipcRenderer.invoke('save-athena-thread', { target_id, messages, ...metadata }),
   clearChatHistory: (target_id: string) => ipcRenderer.invoke('clear-athena-thread', target_id),
-  loadAthenaThreads: (kind?: string) => ipcRenderer.invoke('load-athena-threads', kind),
+  loadAthenaThreads: (kind?: string, options?: { summaryOnly?: boolean }) => ipcRenderer.invoke('load-athena-threads', kind, options),
   saveAthenaThread: (target_id: string, messages: any[]) => ipcRenderer.invoke('save-athena-thread', { target_id, messages }),
   clearAthenaThread: (target_id: string) => ipcRenderer.invoke('clear-athena-thread', target_id),
   readGraphifyJson: (repoPath: string) => ipcRenderer.invoke('read-graphify-json', repoPath),

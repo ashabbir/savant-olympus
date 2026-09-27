@@ -32,7 +32,7 @@ interface Window {
       metadata?: { title?: string; context?: any; kind?: string },
     ) => Promise<boolean>
     clearChatHistory: (target_id: string) => Promise<boolean>
-    loadAthenaThreads: (kind?: string) => Promise<any[]>
+    loadAthenaThreads: (kind?: string, options?: { summaryOnly?: boolean }) => Promise<any[]>
     saveAthenaThread: (target_id: string, messages: any[]) => Promise<boolean>
     clearAthenaThread: (target_id: string) => Promise<boolean>
     readGraphifyJson: (repoPath: string) => Promise<any | null>

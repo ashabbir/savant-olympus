@@ -3,12 +3,9 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import mermaid from 'mermaid'
 
-const Mermaid = ({ chart }: { chart: string }) => {
-  const [svg, setSvg] = useState<string>('')
-  const [error, setError] = useState<boolean>(false)
-  const id = useRef(`mermaid-${Math.random().toString(36).substr(2, 9)}`)
-
-  useEffect(() => {
+let mermaidInitialized = false;
+function ensureMermaidInitialized() {
+  if (!mermaidInitialized) {
     mermaid.initialize({
       startOnLoad: false,
       theme: 'dark',
@@ -22,20 +19,32 @@ const Mermaid = ({ chart }: { chart: string }) => {
         secondaryColor: '#f4ea00',
         tertiaryColor: '#0a0a0a'
       }
-    } as any)
+    } as any);
+    mermaidInitialized = true;
+  }
+}
+
+const Mermaid = ({ chart }: { chart: string }) => {
+  const [svg, setSvg] = useState<string>('')
+  const [error, setError] = useState<boolean>(false)
+  const id = useRef(`mermaid-${Math.random().toString(36).substr(2, 9)}`)
+
+  useEffect(() => {
+    ensureMermaidInitialized();
+    let isCancelled = false;
 
     const renderDiagram = async () => {
       try {
         setError(false)
         const { svg: renderedSvg } = await mermaid.render(id.current, chart)
-        setSvg(renderedSvg)
+        if (!isCancelled) setSvg(renderedSvg)
       } catch (err: any) {
-        // Silently fail and fallback to code block
-        setError(true)
+        if (!isCancelled) setError(true)
       }
     }
 
     renderDiagram()
+    return () => { isCancelled = true; }
   }, [chart])
 
   if (error) {

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs/promises'
+import nodeFs from 'node:fs'
 import os from 'node:os'
 import { pathToFileURL } from 'node:url'
 
@@ -10,9 +11,25 @@ const OLYMPUS_DB_PATH = path.join(SAVANT_DIR, 'olympus.db')
 const GATEWAY_URL = 'http://127.0.0.1:3100'
 
 const LOG_FILE = path.join(SAVANT_DIR, 'olympus.log');
+let logStream: nodeFs.WriteStream | null = null;
+function getLogStream() {
+  if (!logStream) {
+    try {
+      nodeFs.mkdirSync(SAVANT_DIR, { recursive: true });
+      logStream = nodeFs.createWriteStream(LOG_FILE, { flags: 'a', encoding: 'utf8' });
+      logStream.on('error', () => { logStream = null; });
+    } catch {
+      // Fallback
+    }
+  }
+  return logStream;
+}
+
 function writeLog(level: string, ...args: any[]) {
+  const stream = getLogStream();
+  if (!stream) return;
   const msg = `[${new Date().toISOString()}] [${level}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}\n`;
-  fs.appendFile(LOG_FILE, msg).catch(() => {}); // Fire and forget
+  stream.write(msg);
 }
 const origLog = console.log;
 const origError = console.error;
@@ -29,6 +46,12 @@ async function initDb() {
     await fs.mkdir(SAVANT_DIR, { recursive: true })
     const Database = require('better-sqlite3')
     db = new Database(OLYMPUS_DB_PATH)
+
+    // Performance PRAGMAs for high throughput and reduced disk contention
+    db.pragma('journal_mode = WAL');
+    db.pragma('synchronous = NORMAL');
+    db.pragma('temp_store = MEMORY');
+    db.pragma('cache_size = -64000'); // 64MB cache
     
     db.exec(`
       CREATE TABLE IF NOT EXISTS settings (
@@ -43,6 +66,8 @@ async function initDb() {
         kind TEXT DEFAULT 'general',
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+      CREATE INDEX IF NOT EXISTS idx_chat_history_kind_updated ON chat_history(kind, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_chat_history_updated ON chat_history(updated_at DESC);
     `)
     const chatHistoryColumns = new Set(
       db.prepare('PRAGMA table_info(chat_history)').all().map((column: any) => column.name)
@@ -211,6 +236,15 @@ app.on('window-all-closed', () => {
   }
 })
 
+app.on('before-quit', () => {
+  if (logStream) {
+    try {
+      logStream.end();
+    } catch {}
+    logStream = null;
+  }
+})
+
 app.whenReady().then(async () => {
   await initDb()
   process.env.GEMINI_CLI_TRUST_WORKSPACE = "true"
@@ -374,31 +408,42 @@ ipcMain.handle('save-athena-thread', async (_event, { target_id, messages, title
   }
 })
 
-ipcMain.handle('load-athena-threads', async (_event, kind?: string) => {
+ipcMain.handle('load-athena-threads', async (_event, kind?: string, options?: { summaryOnly?: boolean }) => {
   if (!db) return []
   try {
-    const rows = kind
-      ? db.prepare('SELECT target_id, messages, title, context, kind, updated_at FROM chat_history WHERE kind = ? ORDER BY updated_at DESC').all(kind)
-      : db.prepare('SELECT target_id, messages, title, context, kind, updated_at FROM chat_history ORDER BY updated_at DESC').all()
+    const summaryOnly = options?.summaryOnly === true;
+    const query = summaryOnly
+      ? (kind
+          ? db.prepare('SELECT target_id, title, context, kind, updated_at FROM chat_history WHERE kind = ? ORDER BY updated_at DESC')
+          : db.prepare('SELECT target_id, title, context, kind, updated_at FROM chat_history ORDER BY updated_at DESC'))
+      : (kind
+          ? db.prepare('SELECT target_id, messages, title, context, kind, updated_at FROM chat_history WHERE kind = ? ORDER BY updated_at DESC')
+          : db.prepare('SELECT target_id, messages, title, context, kind, updated_at FROM chat_history ORDER BY updated_at DESC'));
+    const rows = kind ? query.all(kind) : query.all();
     return rows.map((row: any) => {
-      try {
-        return {
-          target_id: row.target_id,
-          title: row.title,
-          context: row.context ? JSON.parse(row.context) : null,
-          kind: row.kind,
-          messages: JSON.parse(row.messages),
-          updated_at: row.updated_at,
+      let messages: any[] = [];
+      if (!summaryOnly && row.messages) {
+        try {
+          messages = JSON.parse(row.messages);
+        } catch {
+          messages = [];
         }
-      } catch {
-        return {
-          target_id: row.target_id,
-          title: row.title,
-          context: null,
-          kind: row.kind,
-          messages: [],
-          updated_at: row.updated_at,
+      }
+      let context = null;
+      if (row.context) {
+        try {
+          context = typeof row.context === 'string' ? JSON.parse(row.context) : row.context;
+        } catch {
+          context = null;
         }
+      }
+      return {
+        target_id: row.target_id,
+        title: row.title,
+        context,
+        kind: row.kind,
+        messages,
+        updated_at: row.updated_at,
       }
     })
   } catch (e) {

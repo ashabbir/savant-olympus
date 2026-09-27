@@ -41,54 +41,58 @@ export function BottomBar() {
 
   // Periodic check of system statuses & gateway runs
   useEffect(() => {
+    let cachedSettings: any = null;
+    let lastSettingsFetch = 0;
+
     const checkStatuses = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+
       let name = "operator";
       let dir = "~/code";
       let gUrl = "http://127.0.0.1:3100";
       let gEnabled = true;
       let sUrl = "http://127.0.0.1:8090";
 
-      try {
-        const settings = await window.system.getSettings();
-        const osUser = await window.system.getUser().catch(() => "operator");
-        name = settings["user:name"] || osUser || "operator";
-        
-        if (settings["system:defaultDirectory"]) {
-          dir = settings["system:defaultDirectory"];
+      const now = Date.now();
+      if (!cachedSettings || now - lastSettingsFetch > 30000) {
+        try {
+          const settings = await window.system.getSettings();
+          const osUser = await window.system.getUser().catch(() => "operator");
+          cachedSettings = { settings, osUser };
+          lastSettingsFetch = now;
+        } catch (e) {
+          console.error("Failed to load settings in BottomBar:", e);
         }
-        
+      }
+
+      if (cachedSettings) {
+        const { settings, osUser } = cachedSettings;
+        name = settings["user:name"] || osUser || "operator";
+        if (settings["system:defaultDirectory"]) dir = settings["system:defaultDirectory"];
         if (settings["gateway:config"]) {
           gUrl = settings["gateway:config"].url || gUrl;
           gEnabled = settings["gateway:config"].enabled !== false;
         }
-
-        if (settings["server:config"]) {
-          sUrl = settings["server:config"].url || sUrl;
-        }
-      } catch (e) {
-        console.error("Failed to load settings in BottomBar:", e);
+        if (settings["server:config"]) sUrl = settings["server:config"].url || sUrl;
       }
+
       setUserName(name);
       setDefaultDir(dir);
       setGatewayUrl(gUrl);
 
-      if (gEnabled) {
-        // Health check
-        try {
-          setGatewayStatus(await runtimeService.checkGateway(gUrl) ? "online" : "offline");
-        } catch (e) {
-          setGatewayStatus("offline");
-        }
+      const [gwResult, runsResult, savantResult, dbResult] = await Promise.allSettled([
+        gEnabled ? runtimeService.checkGateway(gUrl) : Promise.resolve(false),
+        gEnabled ? runtimeService.listGatewayRuns(gUrl, 4_000) : Promise.resolve([]),
+        runtimeService.checkSavant(sUrl),
+        window.system.getDbStatus(),
+      ]);
 
-        // Fetch recent runs
-        try {
-          const validData = await runtimeService.listGatewayRuns(gUrl, 4_000);
-          setRuns(validData);
-          setActiveRunsCount(validData.filter((r: any) => r.status === "running").length);
-        } catch (e) {
-          if (!isAbortError(e)) {
-            console.error("Failed to fetch runs in BottomBar:", e);
-          }
+      if (gEnabled) {
+        setGatewayStatus(gwResult.status === "fulfilled" && gwResult.value ? "online" : "offline");
+        if (runsResult.status === "fulfilled" && Array.isArray(runsResult.value)) {
+          setRuns(runsResult.value);
+          setActiveRunsCount(runsResult.value.filter((r: any) => r.status === "running").length);
+        } else {
           setRuns([]);
           setActiveRunsCount(0);
         }
@@ -98,23 +102,18 @@ export function BottomBar() {
         setActiveRunsCount(0);
       }
 
-      try {
-        setSavantStatus(await runtimeService.checkSavant(sUrl) ? "online" : "offline");
-      } catch (e) {
-        setSavantStatus("offline");
-      }
-
-      try {
-        const status = await window.system.getDbStatus();
-        setDbStatus(status === "connected" ? "connected" : "offline");
-      } catch (e) {
-        setDbStatus("offline");
-      }
+      setSavantStatus(savantResult.status === "fulfilled" && savantResult.value ? "online" : "offline");
+      setDbStatus(dbResult.status === "fulfilled" && dbResult.value === "connected" ? "connected" : "offline");
     };
 
     checkStatuses();
     const interval = setInterval(checkStatuses, 4000);
-    return () => clearInterval(interval);
+    const onFocus = () => { cachedSettings = null; checkStatuses(); };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
   }, []);
 
   // Poll selected run events

@@ -1,9 +1,10 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Bot, Copy, HelpCircle, Trash2, Cpu, ChevronDown, ChevronRight } from "lucide-react";
-import Mermaid from "@/components/Mermaid";
 import { normalizeMermaidMarkdown } from "@/utils/mermaidMarkdown";
+
+const Mermaid = lazy(() => import("@/components/Mermaid"));
 
 export interface AthenaMessageModel {
   id?: string;
@@ -29,7 +30,11 @@ const markdownComponents = {
     const language = /language-(\w+)/.exec(className || "")?.[1];
     const source = String(children).replace(/\n$/, "");
     if (!inline && language === "mermaid") {
-      return <Mermaid chart={source} />;
+      return (
+        <Suspense fallback={<div className="font-mono text-[10px] text-muted-foreground p-2 animate-pulse">RENDERING_DIAGRAM...</div>}>
+          <Mermaid chart={source} />
+        </Suspense>
+      );
     }
     return <code className={className} {...props}>{children}</code>;
   },

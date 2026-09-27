@@ -153,6 +153,15 @@ export function DetailDrawer({
   useEffect(() => {
     async function load() {
       const key = getStorageKey();
+      if (window.system.getChatHistory) {
+        try {
+          const direct = await window.system.getChatHistory(key);
+          if (Array.isArray(direct) && direct.length > 0) {
+            setMessages(direct);
+            return;
+          }
+        } catch {}
+      }
       const threads = await window.system.loadAthenaThreads();
       const stored = Array.isArray(threads) ? threads.find((thread: any) => thread?.target_id === key) : null;
       setMessages(Array.isArray(stored?.messages) ? stored.messages : []);

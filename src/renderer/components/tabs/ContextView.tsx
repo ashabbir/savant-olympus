@@ -182,7 +182,10 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
   useEffect(() => {
     fetchPeriodicSyncData();
-    const interval = setInterval(fetchPeriodicSyncData, 15000);
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      fetchPeriodicSyncData();
+    }, 15000);
     return () => clearInterval(interval);
   }, [fetchPeriodicSyncData]);
 
@@ -246,6 +249,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     fetchIndexingStatus();
     fetchJobsSummary();
     const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
       fetchIndexingStatus();
       fetchJobsSummary();
     }, 5000);
@@ -462,8 +466,14 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         })
       );
 
-      const analysis = analyzeProjectSource(nodes, docs);
-      setAnalysisResults(analysis);
+      setTimeout(() => {
+        try {
+          const analysis = analyzeProjectSource(nodes, docs);
+          setAnalysisResults(analysis);
+        } catch (e) {
+          console.error("Heuristics failed:", e);
+        }
+      }, 0);
     } catch (e) {
       console.error("Heuristics failed:", e);
       setAnalysisResults(null);

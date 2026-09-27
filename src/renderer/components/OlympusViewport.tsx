@@ -1,14 +1,22 @@
-import { AbilitiesView } from "./tabs/AbilitiesView";
-import { ContextView } from "./tabs/ContextView";
-import { KnowledgeView } from "./tabs/KnowledgeView";
+import { lazy, Suspense } from "react";
 import { RemindersView } from "./tabs/RemindersView";
-import { SkillsView } from "./tabs/SkillsView";
-import { ToolsView } from "./tabs/ToolsView";
-import { UsersView } from "./tabs/UsersView";
 import { WorkspaceView } from "./tabs/WorkspaceView";
-import { ActivityLogsView } from "./tabs/ActivityLogsView";
-import { AgentSetupView } from "./tabs/AgentSetupView";
 import type { OlympusModel } from "@/services/olympusRuntime";
+
+const KnowledgeView = lazy(() => import("./tabs/KnowledgeView").then((m) => ({ default: m.KnowledgeView })));
+const ContextView = lazy(() => import("./tabs/ContextView").then((m) => ({ default: m.ContextView })));
+const AbilitiesView = lazy(() => import("./tabs/AbilitiesView").then((m) => ({ default: m.AbilitiesView })));
+const SkillsView = lazy(() => import("./tabs/SkillsView").then((m) => ({ default: m.SkillsView })));
+const ToolsView = lazy(() => import("./tabs/ToolsView").then((m) => ({ default: m.ToolsView })));
+const UsersView = lazy(() => import("./tabs/UsersView").then((m) => ({ default: m.UsersView })));
+const ActivityLogsView = lazy(() => import("./tabs/ActivityLogsView").then((m) => ({ default: m.ActivityLogsView })));
+const AgentSetupView = lazy(() => import("./tabs/AgentSetupView").then((m) => ({ default: m.AgentSetupView })));
+
+const ViewportFallback = (
+  <div className="size-full flex items-center justify-center font-mono text-xs text-[var(--cp-cyan)] animate-pulse">
+    INITIALIZING_VIEWPORT_STREAM...
+  </div>
+);
 
 interface OlympusViewportProps {
   activeTab: string;
@@ -62,5 +70,9 @@ export function OlympusViewport(props: OlympusViewportProps) {
       view = <WorkspaceView serverUrl={serverUrl} apiKey={apiKey} sessionId={null} />;
   }
 
-  return <main className="flex-1 overflow-hidden">{view}</main>;
+  return (
+    <main className="flex-1 overflow-hidden">
+      <Suspense fallback={ViewportFallback}>{view}</Suspense>
+    </main>
+  );
 }

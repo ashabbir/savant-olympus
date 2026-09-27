@@ -22,6 +22,20 @@ export default defineConfig({
   build: {
     outDir: '../../dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('mermaid')) return 'vendor-mermaid';
+            if (id.includes('d3') || id.includes('cytoscape')) return 'vendor-viz';
+            if (id.includes('react-syntax-highlighter') || id.includes('prismjs')) return 'vendor-syntax';
+            if (id.includes('recharts')) return 'vendor-charts';
+            if (id.includes('@radix-ui') || id.includes('lucide-react')) return 'vendor-ui';
+            if (id.includes('react') || id.includes('react-dom')) return 'vendor-react';
+          }
+        },
+      },
+    },
   },
   define: {
     'APP_VERSION': JSON.stringify(pkg.version),

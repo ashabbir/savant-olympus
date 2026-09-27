@@ -287,7 +287,12 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeV
   const searchMatchesRef = useRef<Set<string>>(new Set());
   const intelligentFilteringRef = useRef(true);
   const distMapCacheRef = useRef<{ config: string; distMap: Map<string, number> | null }>({ config: "", distMap: null });
-  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchQuery);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearchQuery(searchQuery), 150);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+  const normalizedSearchQuery = debouncedSearchQuery.trim().toLowerCase();
   const searchResults = useMemo(
     () => normalizedSearchQuery.length >= 4
       ? rawNodes.filter((node) => (node.title || "").toLowerCase().includes(normalizedSearchQuery))
@@ -2879,7 +2884,7 @@ return (
                     </button>
                     {isOpen && (
                       <div className="max-h-64 overflow-y-auto">
-                          {typeNodes.map((n) => {
+                          {typeNodes.slice(0, 100).map((n) => {
                               const idx = nodePositionByType.get(nodeType)?.get(n.node_id || n.id) || 0;
                               const color = palette[idx % palette.length];
                               const isActive = selectedInType.has(n.node_id);
@@ -2901,6 +2906,11 @@ return (
                                 </label>
                               );
                             })}
+                          {typeNodes.length > 100 && (
+                            <div className="text-[9px] font-mono text-muted-foreground p-1 text-center bg-white/5">
+                              Showing 100 of {typeNodes.length} (filter to narrow)
+                            </div>
+                          )}
                       </div>
                     )}
                   </div>
@@ -2928,7 +2938,7 @@ return (
                 </div>
               </div>
               <div className="max-h-80 overflow-y-auto">
-                {visible.map((n) => {
+                {visible.slice(0, 150).map((n) => {
                   const color = typeColors[n.node_type] || "#6b7280";
                   const isSelected = selectedNode?.node_id === n.node_id;
                   return (
@@ -2946,6 +2956,11 @@ return (
                     </button>
                   );
                 })}
+                {visible.length > 150 && (
+                  <div className="text-[9px] font-mono text-muted-foreground p-1 text-center bg-white/5">
+                    Showing 150 of {visible.length}
+                  </div>
+                )}
               </div>
             </div>
           );

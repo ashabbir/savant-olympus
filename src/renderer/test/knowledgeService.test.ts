@@ -16,7 +16,7 @@ describe("KnowledgeService", () => {
     await service.fetchGraph(true, true, "olympus");
     await service.getNode("node/id");
 
-    expect(fetchMock.mock.calls[0][0]).toContain("/api/knowledge/graph?slim=true&include_staged=true&workspace_id=olympus");
+    expect(fetchMock.mock.calls[0][0]).toContain("/api/knowledge/graph?slim=true&include_staged=true&limit=20000&exclude_types=insight&workspace_id=olympus");
     expect(fetchMock.mock.calls[1][0]).toBe("http://localhost:8090/api/knowledge/nodes/node%2Fid");
   });
 

@@ -9,6 +9,12 @@ export interface AthenaThreadStore<TMessage extends AthenaMessageModel> {
 export function createSystemAthenaThreadStore<TMessage extends AthenaMessageModel>(): AthenaThreadStore<TMessage> {
   return {
     async load(threadId) {
+      if (window.system.getChatHistory) {
+        try {
+          const direct = await window.system.getChatHistory(threadId);
+          if (Array.isArray(direct) && direct.length > 0) return direct;
+        } catch {}
+      }
       const threads = await window.system.loadAthenaThreads();
       const thread = Array.isArray(threads)
         ? threads.find((candidate: any) => candidate?.target_id === threadId)
