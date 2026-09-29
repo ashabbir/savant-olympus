@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { AthenaContextMeter } from "@/components/shared/AthenaContextMeter";
+import { runAthenaAgent, formatAthenaModel, useAthenaModel } from "@/lib/athenaModel";
 import * as d3 from "d3";
 import { GitFork, Network, Layers, RefreshCw, ZoomIn, ZoomOut, Maximize, Plus, Trash2, Search, ArrowRight, ArrowLeft, Download, Upload, Info, Check, Copy, Box, ChevronDown, ChevronLeft, ChevronRight, History, FileCode2, FileText } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -106,6 +108,7 @@ const KNOWLEDGE_NODE_TYPES = [
 
 
 export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeViewProps) {
+  const athenaModel = useAthenaModel();
   const svgRef = useRef<SVGSVGElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const zoomInRef = useRef<() => void>(() => {});
@@ -2555,19 +2558,6 @@ const confirmImport = async () => {
     setIsAiLoading(true);
 
     try {
-      let provider = "gemini";
-      let model = "3.5";
-      try {
-        const s = await window.system.getSettings();
-        const chain = s?.["provider:chain"] || [];
-        if (chain.length > 0) {
-          provider = chain[0].provider;
-          model = chain[0].model;
-        }
-      } catch (err) {
-        console.error("Failed to load settings:", err);
-      }
-
       const isFilteredChat = chatContextPayload.isFiltered;
       const distances = chatContextPayload.distances;
       const neighborNodes = chatContextPayload.nodes;
@@ -2583,6 +2573,7 @@ const confirmImport = async () => {
       ).join("\n");
 
       const augmentedPrompt = await buildAthenaConversationPrompt({
+        sessionKey: `knowledge:${activeNodeId}`,
         context: {
           area: isFilteredChat ? "Knowledge > Filtered Graph Context" : "Knowledge > Selected Node",
           repository: activeNode?.metadata?.repo,
@@ -2615,9 +2606,7 @@ const confirmImport = async () => {
         workspaceTasks: Number(summary.match(/Workspace Tasks: (\d+)/)?.[1] || 0),
         remindersChecked: Number(summary.match(/Reminders: (\d+)/)?.[1] || 0),
       });
-      const rawResponseText = await window.system.runAgentViaGateway({
-        provider,
-        model,
+      const rawResponseText = await runAthenaAgent({
         prompt: augmentedPrompt,
       });
       const responseText = ensureAthenaMcpSummary(rawResponseText || "No response received from the gateway.", augmentedPrompt);
@@ -3374,6 +3363,7 @@ return (
                     </div>
                   </div>
                 )}
+                <AthenaContextMeter sessionKey={`knowledge:${activeChatScopeId}`} messages={chatMessages} />
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                   {chatMessages.length === 0 ? (
                     <div className="h-full flex items-center justify-center text-xs font-mono text-muted-foreground p-8 text-center leading-relaxed">
@@ -3405,7 +3395,11 @@ return (
                   )}
                   <div ref={chatEndRef} />
                 </div>
-                <form onSubmit={handleSendChatMessage} className="p-3 border-t border-[var(--cp-border)] bg-[var(--cp-bg-2)] flex gap-2 shrink-0">
+                <div className="px-3 pt-2 flex items-center gap-1.5 font-mono text-[9px] text-muted-foreground border-t border-[var(--cp-border)] bg-[var(--cp-bg-2)]" title="Change in Settings → ATHENA Mental Mode">
+                  <span className="uppercase tracking-wider opacity-60">Model</span>
+                  <span className="px-1.5 py-0.5 rounded-full border bg-violet-500/15 border-violet-500/40 text-violet-300 font-bold">{formatAthenaModel(athenaModel)}</span>
+                </div>
+                <form onSubmit={handleSendChatMessage} className="p-3 border-[var(--cp-border)] bg-[var(--cp-bg-2)] flex gap-2 shrink-0">
                   <textarea
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}

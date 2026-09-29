@@ -1,6 +1,7 @@
 export interface OlympusModel {
   provider: string;
   model: string;
+  thinkingLevel?: string;
 }
 
 export interface OlympusRuntimeConfig {

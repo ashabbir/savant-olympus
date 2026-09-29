@@ -1,4 +1,8 @@
 import '@testing-library/jest-dom'
+import { configure } from '@testing-library/react'
+
+// Lazy tabs and async ATHENA plumbing can exceed the 1s default under parallel load
+configure({ asyncUtilTimeout: 5000 })
 import { vi } from 'vitest'
 
 // Mock mermaid

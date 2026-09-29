@@ -33,37 +33,40 @@ describe("AthenaMessage", () => {
     expect(screen.getByRole("button", { name: "Export message" })).toBeInTheDocument();
   });
 
-  it("renders MCP Activity banner, server badges, and supports trace collapse/expand", () => {
+  it("renders a collapsed Facts accordion with summary pills and per-MCP details", () => {
     const mcpMessage = {
       id: "message-2",
       sender: "assistant" as const,
-      text: "Analysis completed.\n\n### Savant MCP Execution & Audit\n\n| MCP Server | Tool | When (UTC) | Why (Rationale) | How (Query / Params) | Result (Evidence) |\n| :--- | :--- | :--- | :--- | :--- | :--- |\n| `savant-abilities` | `resolve_abilities` | 2026-09-20T12:00:00Z | Load rules | `persona=\"engineer\"` | engineer loaded |\n| `savant-knowledge` | `search` | 2026-09-20T12:00:00Z | Find nodes | `query=\"test\"` | 2 nodes |\n| `savant-context` | `research` | 2026-09-20T12:00:00Z | AST scan | `query=\"test\"` | 3 files |\n| `savant-workspace` | `list_tasks` | 2026-09-20T12:00:00Z | Sync tasks | `workspace_id=\"123\"` | 5 tasks |\n| `savant-reminders` | `list_reminders` | 2026-09-20T12:00:00Z | Check alerts | `status=\"active\"` | 1 alert |",
+      text: [
+        '● search (MCP: savant-knowledge) · query: "ahmed"',
+        "  └ [1,2,3]",
+        "",
+        '✗ list_jira_tickets (MCP: savant-workspace) · assignee: "ahmed"',
+        "  └ workspace_id is required.",
+        "",
+        "Analysis completed.",
+      ].join("\n"),
       timestamp: "2026-09-20T12:00:00.000Z",
     };
 
     render(<AthenaMessage message={mcpMessage} variant="standard" />);
 
     expect(screen.getByText(/Analysis completed\./)).toBeInTheDocument();
-    expect(screen.getByText(/MCP Activity/)).toBeInTheDocument();
-    expect(screen.getByText("abilities")).toBeInTheDocument();
-    expect(screen.getByText("knowledge")).toBeInTheDocument();
-    expect(screen.getByText("context")).toBeInTheDocument();
-    expect(screen.getByText("workspace")).toBeInTheDocument();
-    expect(screen.getByText("reminders")).toBeInTheDocument();
+    expect(screen.queryByText(/workspace_id is required/)).not.toBeInTheDocument();
+    expect(screen.getByText("2 MCP")).toBeInTheDocument();
+    expect(screen.getByText("2 calls")).toBeInTheDocument();
+    expect(screen.getByText("3 facts")).toBeInTheDocument();
 
-    // Trace is expanded by default
-    expect(screen.getByText("Hide Trace")).toBeInTheDocument();
-    expect(screen.getByText(/When \(UTC\)/)).toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: /Facts/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("list_jira_tickets")).not.toBeInTheDocument();
 
-    // Click to collapse
-    fireEvent.click(screen.getByTitle("Collapse MCP execution audit"));
-    expect(screen.getByText("View Trace")).toBeInTheDocument();
-    expect(screen.queryByText(/When \(UTC\)/)).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("list_jira_tickets")).toBeInTheDocument();
+    expect(screen.getByText("ERR")).toBeInTheDocument();
 
-    // Click to expand again
-    fireEvent.click(screen.getByTitle("Expand MCP execution audit"));
-    expect(screen.getByText("Hide Trace")).toBeInTheDocument();
-    expect(screen.getByText(/When \(UTC\)/)).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.queryByText("list_jira_tickets")).not.toBeInTheDocument();
   });
 });
-

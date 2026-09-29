@@ -5,11 +5,13 @@ import { getStoredApiKey } from "../services/auth";
 import { runtimeService } from "../services/runtimeService";
 import { createAbilitiesService } from "../services/abilitiesService";
 import { TagInput } from "./ui/tag-input";
+import { ATHENA_MODEL_CHANGED_EVENT, athenaModelFromSettings, reconcileAthenaModel, thinkingLevelsFor } from "../lib/athenaModel";
 
 interface ProviderChainItem {
   id: string;
   provider: string;
   model: string;
+  thinkingLevel?: string;
 }
 
 interface ProviderOption {
@@ -17,6 +19,10 @@ interface ProviderOption {
   label: string;
   defaultModel?: string;
   models: string[];
+  configuredModel?: string;
+  thinkingLevels?: string[];
+  modelThinkingLevels?: Record<string, string[]>;
+  defaultThinkingLevel?: string;
   source: "gateway" | "terminal";
   installed: boolean;
 }
@@ -227,6 +233,82 @@ function ServicePanel({
   );
 }
 
+function AthenaMentalMode({ value, options, loading, onRefresh, onChange, labelStyle, inputStyle }: {
+  value: { provider: string; model: string; thinkingLevel: string };
+  options: ProviderOption[];
+  loading: boolean;
+  onRefresh: () => void;
+  onChange: (next: { provider: string; model: string; thinkingLevel: string }) => void;
+  labelStyle: React.CSSProperties;
+  inputStyle: React.CSSProperties;
+}) {
+  const provider = options.find(option => option.id === value.provider);
+  const models = provider?.models.length ? provider.models : [value.model];
+  const levels = thinkingLevelsFor(provider, value.model);
+  const selectStyle = { ...inputStyle, width: "100%", outline: "none", border: "1px solid var(--cp-border)", borderRadius: "4px" };
+  const modelLabel = (model: string) => (model === "configured" && provider?.configuredModel ? `configured (${provider.configuredModel})` : model);
+
+  return (
+    <div className="pt-2">
+      <div className="flex items-center justify-between mb-2">
+        <label style={labelStyle} className="block text-xs opacity-70">ATHENA Mental Mode</label>
+        <button type="button" onClick={onRefresh} className="flex items-center gap-1 text-[10px] opacity-60 hover:opacity-100" title="Reload providers and models from gateway">
+          <RefreshCw size={10} className={loading ? "animate-spin" : ""} /> refresh
+        </button>
+      </div>
+      <div className="grid grid-cols-[1fr_2fr_1fr] gap-2">
+        <div>
+          <span className="block text-[9px] uppercase tracking-wider opacity-50 mb-1">Provider</span>
+          <select
+            aria-label="ATHENA provider"
+            value={value.provider}
+            onChange={(e) => onChange(reconcileAthenaModel({ ...value, provider: e.target.value, model: "" }, options))}
+            style={selectStyle}
+            className="px-2 py-2 text-xs cursor-pointer"
+          >
+            {!provider && <option value={value.provider}>{value.provider}</option>}
+            {options.map(option => (
+              <option key={option.id} value={option.id} className="bg-[var(--cp-bg-3)]">{option.label || option.id}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <span className="block text-[9px] uppercase tracking-wider opacity-50 mb-1">Model <span className="opacity-60">({models.length})</span></span>
+          <select
+            aria-label="ATHENA model"
+            value={value.model}
+            onChange={(e) => onChange(reconcileAthenaModel({ ...value, model: e.target.value }, options))}
+            style={selectStyle}
+            className="px-2 py-2 text-xs cursor-pointer"
+          >
+            {models.map(model => (
+              <option key={model} value={model} className="bg-[var(--cp-bg-3)]">{modelLabel(model)}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <span className="block text-[9px] uppercase tracking-wider opacity-50 mb-1">Effort</span>
+          <select
+            aria-label="ATHENA effort"
+            value={levels.length ? value.thinkingLevel : ""}
+            disabled={!levels.length}
+            title={levels.length ? undefined : "This model does not support an effort setting"}
+            onChange={(e) => onChange({ ...value, thinkingLevel: e.target.value })}
+            style={selectStyle}
+            className="px-2 py-2 text-xs cursor-pointer"
+          >
+            {!levels.length && <option value="">n/a</option>}
+            {levels.length > 0 && !levels.includes(value.thinkingLevel) && <option value={value.thinkingLevel}>{value.thinkingLevel}</option>}
+            {levels.map(level => (
+              <option key={level} value={level} className="bg-[var(--cp-bg-3)]">{level}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>("system");
   const [defaultDirectory, setDefaultDirectory] = useState<string>("");
@@ -333,6 +415,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
       await window.system.saveSetting("agents:list", agents);
       await window.system.saveSetting("gateway:config", { ...gateway, status: "idle", url: normalizeServiceUrl(gateway.url) });
       await window.system.saveSetting("server:config", { ...server, status: "idle", url: normalizeServiceUrl(server.url) });
+      window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
       if (onSettingsChanged) onSettingsChanged();
     }, 500);
 
@@ -346,6 +429,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
     await window.system.saveSetting("agents:list", agents);
     await window.system.saveSetting("gateway:config", { ...gateway, status: "idle", url: normalizeServiceUrl(gateway.url) });
     await window.system.saveSetting("server:config", { ...server, status: "idle", url: normalizeServiceUrl(server.url) });
+    window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
     if (onSettingsChanged) onSettingsChanged();
     onClose();
   }
@@ -361,6 +445,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
     await window.system.saveSetting("agents:list", backupRef.current["agents:list"]);
     await window.system.saveSetting("gateway:config", backupRef.current["gateway:config"]);
     await window.system.saveSetting("server:config", backupRef.current["server:config"]);
+    window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
     if (onSettingsChanged) onSettingsChanged();
     onClose();
   }
@@ -394,16 +479,9 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
       }
       setProviderChain(prev => {
         if (result.providers.length === 0) return prev;
-        const validIds = new Set(result.providers.map(provider => provider.id));
-        return prev.map((item, index) => {
-          if (validIds.has(item.provider)) return item;
-          const replacement = result.providers[index] || result.providers[0];
-          return {
-            ...item,
-            provider: replacement.id,
-            model: replacement.defaultModel || replacement.models[0] || item.model,
-          };
-        });
+        // Keep the ATHENA mental mode valid against the live catalog (drops stale models/efforts)
+        const athena = reconcileAthenaModel(athenaModelFromSettings({ "provider:chain": prev }), result.providers);
+        return [{ ...(prev[0] || { id: "p1" }), ...athena }, ...prev.slice(1)];
       });
     } catch (error: any) {
       setProvidersError(error?.message || "Failed to load provider list.");
@@ -592,30 +670,15 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
                   <input ref={directoryInputRef} type="file" onChange={handleDirectorySelect} className="hidden" {...({ webkitdirectory: "", directory: "" } as any)} />
                 </div>
 
-                <div className="pt-2">
-                  <label style={labelStyle} className="block text-xs mb-2 opacity-70">ATHENA Mental Mode</label>
-                  <select
-                    value={providerChain[0] ? `${providerChain[0].provider}/${providerChain[0].model}` : "gemini/3.5"}
-                    onChange={(e) => {
-                      const [provider, model] = e.target.value.split("/");
-                      setProviderChain([{ id: "p1", provider, model }]);
-                    }}
-                    style={{ ...inputStyle, width: "100%", outline: "none", border: "1px solid var(--cp-border)", borderRadius: "4px" }}
-                    className="px-3 py-2 text-xs cursor-pointer"
-                  >
-                    {selectedProviderOptions.flatMap(p => 
-                      p.models.map(m => ({
-                        provider: p.id,
-                        model: m,
-                        label: `${p.label || p.id.toUpperCase()}: ${m}`
-                      }))
-                    ).map((opt, i) => (
-                      <option key={i} value={`${opt.provider}/${opt.model}`} className="bg-[var(--cp-bg-3)]">
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <AthenaMentalMode
+                  value={athenaModelFromSettings({ "provider:chain": providerChain })}
+                  options={selectedProviderOptions}
+                  loading={providersLoading}
+                  onRefresh={() => refreshProviders()}
+                  onChange={(next) => setProviderChain(prev => [{ ...(prev[0] || { id: "p1" }), ...next }, ...prev.slice(1)])}
+                  labelStyle={labelStyle}
+                  inputStyle={inputStyle}
+                />
               </div>
             )}
 

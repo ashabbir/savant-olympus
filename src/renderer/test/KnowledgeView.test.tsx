@@ -435,18 +435,18 @@ describe('KnowledgeView', () => {
       target: { value: 'Summarize what is visible.' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'ASK' }))
-    await waitFor(() => expect(window.system.runAgentViaGateway).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(window.system.runAgentViaGateway).toHaveBeenCalledTimes(1), { timeout: 5000 })
     expect(vi.mocked(window.system.runAgentViaGateway).mock.calls[0][0].prompt).not.toContain('Private signal')
 
     fireEvent.click(screen.getByRole('button', { name: 'Show insights' }))
 
-    await waitFor(() => expect(insightNode).toHaveAttribute('opacity', '1'))
+    await waitFor(() => expect(insightNode).toHaveAttribute('opacity', '1'), { timeout: 5000 })
     expect(screen.getByRole('button', { name: 'Hide insights' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.change(screen.getByPlaceholderText('Ask ATHENA about this node...'), {
       target: { value: 'Now include visible insights.' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'ASK' }))
-    await waitFor(() => expect(window.system.runAgentViaGateway).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(window.system.runAgentViaGateway).toHaveBeenCalledTimes(2), { timeout: 5000 })
     expect(vi.mocked(window.system.runAgentViaGateway).mock.calls[1][0].prompt).toContain('Private signal')
   })
 

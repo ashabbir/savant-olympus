@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
+import { AthenaContextMeter } from "@/components/shared/AthenaContextMeter";
+import { runAthenaAgent } from "@/lib/athenaModel";
 import { Cpu, Save, Plus, Trash2, Shield, RefreshCcw, Sparkles, Folder, FileText, Check, ChevronLeft, ChevronRight, Download, Upload, PackageOpen, Bot, Send } from "lucide-react";
 import { createAbilitiesService } from "../../services/abilitiesService";
 import { SearchBar } from "../shared/SearchBar";
@@ -295,6 +297,7 @@ STEERING RULES:
 - Always provide a solid default value for the body prompt in FINALIZE mode.`;
 
       const augPromptAbil = await buildAthenaConversationPrompt({
+          sessionKey: "abilities-athena",
           context: {
             area: "Abilities > Create with Athena",
             repository: "savant-olympus",
@@ -309,9 +312,7 @@ STEERING RULES:
           apiKey,
           repo: "savant-olympus",
         });
-      const res = await window.system.runAgentViaGateway({
-        provider: activeModel?.provider || "gemini",
-        model: activeModel?.model || "3.5",
+      const res = await runAthenaAgent({
         prompt: augPromptAbil,
       });
 
@@ -910,6 +911,7 @@ STEERING RULES:
 
               {/* MCP Context Bar — shows last Athena turn's MCP state */}
               <AthenaMcpContextBar {...(lastAthenaMcpState || {})} />
+              <AthenaContextMeter sessionKey="abilities-athena" messages={chatMessages} />
 
               {/* Chat Messages */}
               <AthenaConversationExport messages={chatMessages} title="Athena ability creator" scope="abilities-athena" />

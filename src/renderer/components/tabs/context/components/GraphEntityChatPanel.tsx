@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { AthenaContextMeter } from "@/components/shared/AthenaContextMeter";
+import { runAthenaAgent } from "@/lib/athenaModel";
 import { Loader2, Sparkles } from "lucide-react";
 import { AthenaMessage, AthenaMessageModel } from "@/components/shared/AthenaMessage";
 import { AthenaMcpContextBar, type AthenaMcpContextBarProps } from "@/components/shared/AthenaMcpContextBar";
@@ -67,11 +69,8 @@ export function GraphEntityChatPanel({ node, repoName, serverUrl, apiKey, active
     setIsThinking(true);
 
     try {
-      const settings = activeModel ? null : await window.system.getSettings();
-      const chain = settings?.["provider:chain"] || [];
-      const provider = activeModel?.provider || chain[0]?.provider || "gemini";
-      const model = activeModel?.model || chain[0]?.model || "3.5";
       const augmentedPrompt = await buildAthenaConversationPrompt({
+        sessionKey: threadId,
         context: {
           area: "Context > Project > Graphify > Entity Inspector",
           repository: repoName,
@@ -85,9 +84,7 @@ export function GraphEntityChatPanel({ node, repoName, serverUrl, apiKey, active
         apiKey,
         repo: repoName,
       });
-      const rawResponse = await window.system.runAgentViaGateway({
-        provider,
-        model,
+      const rawResponse = await runAthenaAgent({
         prompt: augmentedPrompt,
       });
       const response = ensureAthenaMcpSummary(rawResponse || "No response received from the gateway.", augmentedPrompt);
@@ -118,6 +115,7 @@ export function GraphEntityChatPanel({ node, repoName, serverUrl, apiKey, active
       <AthenaConversationExport messages={messages} title={`Graph entity ${node.title}`} scope="graph-entity-athena" />
       {/* MCP Context Bar — shows last Athena turn's MCP state */}
       <AthenaMcpContextBar {...(lastAthenaMcpState || {})} />
+      <AthenaContextMeter sessionKey={threadId} messages={messages} />
       <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2 space-y-3 min-h-0 flex flex-col pr-1">
         {messages.length === 0 ? (
           <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-4 my-auto">

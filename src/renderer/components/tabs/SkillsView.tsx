@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
+import { AthenaContextMeter } from "@/components/shared/AthenaContextMeter";
+import { runAthenaAgent, formatAthenaModel, useAthenaModel } from "@/lib/athenaModel";
 import JSZip from "jszip";
 import { 
   Award, ShieldCheck, Trash2, Plus, Search, Bot, Send, 
@@ -164,6 +166,7 @@ module.exports = run;`,
 ];
 
 export function SkillsView({ serverUrl, apiKey, activeModel, isAdmin }: SkillsViewProps) {
+  const athenaModel = useAthenaModel();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -587,9 +590,8 @@ The user wishes to refine the file with these changes:
 
 Please output the FULL updated contents of the file. Do NOT include markdown styling or surrounding explanations, return ONLY the raw contents of the updated file so it can be directly saved.`;
 
-      const response = await window.system.runAgentViaGateway({
-        provider: activeModel?.provider || "gemini",
-        model: activeModel?.model || "3.5",
+      const response = await runAthenaAgent({
+        tagModel: false,
         prompt: await buildAthenaConversationPrompt({
           context: {
             area: "Skills > Skill Editor > Refine with Athena",
@@ -745,6 +747,7 @@ STEERING RULES:
 - Use lowercase hyphen-case names under 64 characters and never emit metadata.json because the server owns it.`;
 
       const augPromptReplay = await buildAthenaConversationPrompt({
+          sessionKey: "skills-athena",
           context: { area: "Skills > Create with Athena > Replay", repository: "savant-olympus", selected: { type: "new-skill-design" } },
           history: historyBefore,
           userMessage: lastUserMsg.text,
@@ -754,9 +757,7 @@ STEERING RULES:
           apiKey,
           repo: "savant-olympus",
         });
-      const res = await window.system.runAgentViaGateway({
-        provider: activeModel?.provider || "gemini",
-        model: activeModel?.model || "3.5",
+      const res = await runAthenaAgent({
         prompt: augPromptReplay,
       });
 
@@ -919,6 +920,7 @@ STEERING RULES:
 - Use lowercase hyphen-case names under 64 characters and never emit metadata.json because the server owns it.`;
 
       const augPromptSend = await buildAthenaConversationPrompt({
+          sessionKey: "skills-athena",
           context: {
             area: "Skills > Create with Athena",
             repository: "savant-olympus",
@@ -933,9 +935,7 @@ STEERING RULES:
           apiKey,
           repo: "savant-olympus",
         });
-      const res = await window.system.runAgentViaGateway({
-        provider: activeModel?.provider || "gemini",
-        model: activeModel?.model || "3.5",
+      const res = await runAthenaAgent({
         prompt: augPromptSend,
       });
 
@@ -1047,7 +1047,7 @@ STEERING RULES:
           <Bot size={13} className="text-[var(--cp-cyan)]" />
           <span className="text-muted-foreground text-[10px]">MODEL:</span>
           <span className="text-foreground text-[11px] font-bold uppercase">
-            {activeModel ? `${activeModel.provider}: ${activeModel.model}` : "GEMINI: 3.5"}
+            {formatAthenaModel(athenaModel)}
           </span>
         </div>
       </div>
@@ -1204,6 +1204,7 @@ STEERING RULES:
 
               {/* MCP Context Bar — shows last Athena turn's MCP state */}
               <AthenaMcpContextBar {...(lastAthenaMcpState || {})} />
+              <AthenaContextMeter sessionKey="skills-athena" messages={chatMessages} />
 
               {/* Chat Messages */}
               <AthenaConversationExport messages={chatMessages} title="Athena skill creator" scope="skills-athena" />

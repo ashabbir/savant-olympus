@@ -124,6 +124,10 @@ function normalizeGatewayProviders(payload: any) {
         label: String(provider.label || provider.name || id),
         defaultModel: provider.defaultModel ? String(provider.defaultModel) : models[0],
         models,
+        configuredModel: provider.configuredModel ? String(provider.configuredModel) : undefined,
+        thinkingLevels: Array.isArray(provider.thinkingLevels) ? provider.thinkingLevels.map(String) : undefined,
+        modelThinkingLevels: provider.modelThinkingLevels && typeof provider.modelThinkingLevels === 'object' ? provider.modelThinkingLevels : undefined,
+        defaultThinkingLevel: provider.defaultThinkingLevel ? String(provider.defaultThinkingLevel) : undefined,
         source: 'gateway',
         installed: true,
       }
@@ -252,7 +256,7 @@ app.whenReady().then(async () => {
   createTray()
 })
 
-async function runGatewayAgent(provider: string, model: string, prompt: string) {
+async function runGatewayAgent(provider: string, model: string, prompt: string, thinkingLevel?: string) {
   try {
     let gatewayUrl = GATEWAY_URL;
     let apiKey = '';
@@ -278,7 +282,8 @@ async function runGatewayAgent(provider: string, model: string, prompt: string) 
        },
        body: JSON.stringify({
          prompt,
-         chain: [{ provider, model }]
+         ...(thinkingLevel ? { thinking_level: thinkingLevel } : {}),
+         chain: [{ provider, model, ...(thinkingLevel ? { thinking_level: thinkingLevel } : {}) }]
        })
     });
     
@@ -338,7 +343,7 @@ async function runGatewayAgent(provider: string, model: string, prompt: string) 
   }
 }
 
-ipcMain.handle('run-agent', async (_event, { provider, model, prompt }) => runGatewayAgent(provider, model, prompt))
+ipcMain.handle('run-agent', async (_event, { provider, model, prompt, thinkingLevel }) => runGatewayAgent(provider, model, prompt, thinkingLevel))
 
 ipcMain.handle('export-document', async (event, { format, html, defaultFilename }) => {
   if ((format !== 'html' && format !== 'pdf') || typeof html !== 'string' || !html.trim()) {

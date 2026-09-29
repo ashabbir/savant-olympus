@@ -37,7 +37,7 @@ contextBridge.exposeInMainWorld('system', {
   saveAthenaThread: (target_id: string, messages: any[]) => ipcRenderer.invoke('save-athena-thread', { target_id, messages }),
   clearAthenaThread: (target_id: string) => ipcRenderer.invoke('clear-athena-thread', target_id),
   readGraphifyJson: (repoPath: string) => ipcRenderer.invoke('read-graphify-json', repoPath),
-  runAgentViaGateway: (args: { provider: string; model: string; prompt: string }) => ipcRenderer.invoke('run-agent', args),
+  runAgentViaGateway: (args: { provider: string; model: string; thinkingLevel?: string; prompt: string }) => ipcRenderer.invoke('run-agent', args),
   exportDocument: (args: { format: 'html' | 'pdf'; html: string; defaultFilename: string }) =>
     ipcRenderer.invoke('export-document', args),
   getSkillExportProfiles: () => ipcRenderer.invoke('get-skill-export-profiles'),

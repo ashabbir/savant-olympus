@@ -68,6 +68,8 @@ export interface AthenaConversationPromptOptions {
   baseUrl: string
   apiKey: string
   repo?: string
+  /** Stable id for the chat thread; prefetch and context stats are scoped to it */
+  sessionKey?: string
 }
 
 export const ATHENA_WORKSPACE = {
@@ -465,25 +467,116 @@ export async function buildAthenaAugmentedPrompt(
   ])
 }
 
+interface AthenaPrefetch {
+  fetchedAt: string
+  ability: { persona: string; prompt: string }
+  knowledgeHits: AthenaContextHit[]
+  researchQuery: string
+  codeHits: AthenaContextHit[]
+  workspaceContext: AthenaWorkspaceContext
+  remindersContext: AthenaReminderItem[]
+  tools: Array<{ name: string; description: string; server?: string }>
+  relevantTools: Array<{ name: string; description: string; server?: string }>
+  impactSearched: boolean
+}
+
+export interface AthenaPromptStats {
+  promptTokens: number
+  historyTokens: number
+  overheadTokens: number
+  messages: number
+  prefetchCached: boolean
+  at: number
+}
+
+const MAX_PREFETCH_SESSIONS = 50
+const prefetchCache = new Map<string, AthenaPrefetch>()
+const promptStats = new Map<string, AthenaPromptStats>()
+const statsListeners = new Set<() => void>()
+
+/** Rough token estimate (~4 chars/token) used for context-window budgeting. */
+export function estimateTokens(text: string) {
+  return Math.ceil((text || "").length / 4)
+}
+
+export function getAthenaPromptStats(sessionKey: string) {
+  return promptStats.get(sessionKey)
+}
+
+export function subscribeAthenaPromptStats(listener: () => void) {
+  statsListeners.add(listener)
+  return () => { statsListeners.delete(listener) }
+}
+
+/** Drops cached MCP prefetch for a chat, e.g. when the user clears it. */
+export function resetAthenaSession(sessionKey: string) {
+  prefetchCache.delete(sessionKey)
+  promptStats.delete(sessionKey)
+  statsListeners.forEach((listener) => listener())
+}
+
+export function athenaSessionKey(context: AthenaConversationContext) {
+  const selected = JSON.stringify(context.selected ?? null)
+  let hash = 0
+  for (let i = 0; i < selected.length; i++) hash = (hash * 31 + selected.charCodeAt(i)) | 0
+  return `${context.area}|${context.repository || ""}|${hash}`
+}
+
+async function prefetchAthenaMcp(options: AthenaConversationPromptOptions, query: string): Promise<AthenaPrefetch> {
+  const researchQuery = buildAthenaResearchQuery(query)
+  const [ability, knowledgeHits, codeHits, workspaceContext, remindersContext, tools] = await Promise.all([
+    resolveAthenaAbility(options.baseUrl, options.apiKey, query, options.repo),
+    fetchAthenaKnowledgeContext(options.baseUrl, options.apiKey, query).catch(() => []),
+    fetchAthenaCodeContext(options.baseUrl, options.apiKey, researchQuery, options.repo).catch(() => []),
+    fetchAthenaWorkspaceContext(options.baseUrl, options.apiKey, ATHENA_WORKSPACE.id),
+    fetchAthenaRemindersContext(options.baseUrl, options.apiKey),
+    fetchAthenaMcpTools(options.baseUrl, options.apiKey).catch(() => []),
+  ])
+  return {
+    fetchedAt: new Date().toISOString(),
+    ability,
+    knowledgeHits,
+    researchQuery,
+    codeHits,
+    workspaceContext,
+    remindersContext,
+    tools,
+    relevantTools: inferRelevantMcpTools(query, tools),
+    impactSearched: requiresAthenaImpactAnalysis(query),
+  }
+}
+
+/** History sent to the model: assistant turns without MCP trace/audit noise. */
+function historyForModel(history: AthenaConversationMessage[]) {
+  return history.map((message) => (
+    message.sender === "assistant"
+      ? { ...message, text: parseAthenaResponse(message.text).body || message.text }
+      : message
+  ))
+}
+
 export async function buildAthenaConversationPrompt(options: AthenaConversationPromptOptions) {
-  const now = new Date().toISOString()
   const userMessage = options.userMessage.trim()
   const query = options.query?.trim() || userMessage
-  const ability = await resolveAthenaAbility(options.baseUrl, options.apiKey, query, options.repo)
-  const knowledgeHits = await fetchAthenaKnowledgeContext(options.baseUrl, options.apiKey, query)
-  const researchQuery = buildAthenaResearchQuery(query)
-  const codeHits = await fetchAthenaCodeContext(options.baseUrl, options.apiKey, researchQuery, options.repo)
-  const workspaceContext = await fetchAthenaWorkspaceContext(options.baseUrl, options.apiKey, ATHENA_WORKSPACE.id)
-  const remindersContext = await fetchAthenaRemindersContext(options.baseUrl, options.apiKey)
-  const tools: Array<{ name: string; description: string; server?: string }> = await fetchAthenaMcpTools(options.baseUrl, options.apiKey)
-  const relevantTools = inferRelevantMcpTools(query, tools)
-  const impactSearched = requiresAthenaImpactAnalysis(query)
+  const sessionKey = options.sessionKey || athenaSessionKey(options.context)
+
+  // MCP prefetch runs once when a chat starts; later turns reuse it with the full history
+  let prefetch = options.history.length > 0 ? prefetchCache.get(sessionKey) : undefined
+  const prefetchCached = Boolean(prefetch)
+  if (!prefetch) {
+    prefetch = await prefetchAthenaMcp(options, query)
+    prefetchCache.delete(sessionKey)
+    prefetchCache.set(sessionKey, prefetch)
+    while (prefetchCache.size > MAX_PREFETCH_SESSIONS) prefetchCache.delete(prefetchCache.keys().next().value as string)
+  }
+  const { ability, knowledgeHits, researchQuery, codeHits, workspaceContext, remindersContext, tools, relevantTools, impactSearched, fetchedAt } = prefetch
+  const when = prefetchCached ? `${fetchedAt} (cached from chat start)` : fetchedAt
 
   const events: AthenaMcpExecutionEvent[] = [
     {
       server: "savant-abilities",
       tool: "resolve_abilities",
-      when: now,
+      when,
       why: "Resolve optimal persona and behavioral guidelines tailored to query intent",
       how: `persona="${ability.persona}", repo="${options.repo || "savant-olympus"}"`,
       result: `Resolved persona "${ability.persona}" with active steering prompt`,
@@ -491,7 +584,7 @@ export async function buildAthenaConversationPrompt(options: AthenaConversationP
     {
       server: "savant-knowledge",
       tool: "search",
-      when: now,
+      when,
       why: "Retrieve architectural entity graph, business domains, and durable relationships",
       how: `query="${query}"`,
       result: `${knowledgeHits.length} graph node(s) retrieved: ${knowledgeHits.map((h: AthenaContextHit) => h.title).slice(0, 3).join(", ") || "No direct matches"}`,
@@ -499,7 +592,7 @@ export async function buildAthenaConversationPrompt(options: AthenaConversationP
     {
       server: "savant-context",
       tool: "research",
-      when: now,
+      when,
       why: "Retrieve physical code AST declarations, callers/callees, and impact surface",
       how: `query="${researchQuery}", repo="${options.repo || "savant-olympus"}"`,
       result: `${codeHits.length} code reference(s) found: ${codeHits.map((h: AthenaContextHit) => h.path).slice(0, 3).join(", ") || "No source code hits"}`,
@@ -507,7 +600,7 @@ export async function buildAthenaConversationPrompt(options: AthenaConversationP
     {
       server: "savant-workspace",
       tool: "list_tasks",
-      when: now,
+      when,
       why: `Track work and synchronize tasks in workspace "${ATHENA_WORKSPACE.name}" (${ATHENA_WORKSPACE.id})`,
       how: `workspace_id="${ATHENA_WORKSPACE.id}"`,
       result: `${workspaceContext.tasks.length} task(s) active/tracked: ${workspaceContext.tasks.map((t) => `[${t.status}] ${t.title}`).slice(0, 2).join("; ") || "Workspace active (0 tasks)"}`,
@@ -515,46 +608,53 @@ export async function buildAthenaConversationPrompt(options: AthenaConversationP
     {
       server: "savant-reminders",
       tool: "list_reminders",
-      when: now,
+      when,
       why: "Check pending reminders, follow-ups, and scheduled alerts",
       how: 'status="active"',
       result: `${remindersContext.length} reminder(s) checked: ${remindersContext.map((r) => r.title).slice(0, 2).join("; ") || "No pending reminders"}`,
     },
   ]
 
-  for (const relTool of relevantTools) {
-    events.push({
-      server: relTool.server || "external-mcp",
-      tool: relTool.name,
-      when: now,
-      why: `External MCP tool matched from query intent terms`,
-      how: `query="${query}"`,
-      result: `Matched in active MCP catalog: ${relTool.description || "ready"}`,
-    })
-  }
-
   const auditMarkdown = formatAthenaMcpAuditMarkdown(events)
+  const historyText = formatConversationHistory(historyForModel(options.history))
 
-  return buildAthenaPromptSections([
+  const prompt = buildAthenaPromptSections([
     ["SELECTED USER CONTEXT — PINNED, ALWAYS FIRST, NEVER DROP", JSON.stringify(options.context, null, 2)],
     ["AREA-SPECIFIC INSTRUCTIONS", options.instructions],
-    ["COMPLETE CONVERSATION HISTORY — UNTRUNCATED", formatConversationHistory(options.history)],
-    ["LATEST USER MESSAGE — HANDLE ONCE", userMessage],
     ["RESOLVED SAVANT ABILITIES", `Persona: ${ability.persona}\n${ability.prompt}`],
     ["MANDATORY SAVANT WORKSPACE TRACKING", `Workspace: ${ATHENA_WORKSPACE.name}\nWorkspace ID: ${ATHENA_WORKSPACE.id}\nUse Savant Workspace tools autonomously for tasks and notes. Store durable new knowledge with Savant Knowledge in this workspace.`],
+    ["MCP PREFETCH STATUS", prefetchCached
+      ? `Olympus retrieved the Savant MCP context below when this chat started (${fetchedAt}) and reuses it for every turn. Call MCP tools again only if the latest message needs information that is not already here.`
+      : `Olympus retrieved the Savant MCP context below for this new chat (${fetchedAt}).`],
     ["PRIMARY SAVANT KNOWLEDGE MCP RESULTS", formatAthenaContextHits(knowledgeHits)],
     ["SECONDARY SAVANT CONTEXT AND RESEARCH MCP RESULTS", formatAthenaContextHits(codeHits)],
     ["SAVANT WORKSPACE MCP STATE & TASKS", formatAthenaWorkspaceTasks(workspaceContext.tasks)],
     ["SAVANT REMINDERS MCP STATE", formatAthenaReminders(remindersContext)],
     ["UPSTREAM AND DOWNSTREAM IMPACT SEARCH", impactSearched ? `Performed using research query: ${researchQuery}` : "Not required for this question."],
-    ["INFERRED MCP TOOLS FOR THIS USER MESSAGE", relevantTools.length > 0 ? relevantTools.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n") : "No external MCP matched explicitly; continue to prefer the mandatory Savant MCP tools."],
+    ["INFERRED MCP TOOLS FOR THIS CHAT", relevantTools.length > 0 ? relevantTools.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n") : "No external MCP matched explicitly; continue to prefer the mandatory Savant MCP tools."],
     ["COMPLETE AVAILABLE MCP CATALOG — ALL TOOLS ACCESSIBLE", tools.length > 0 ? tools.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools were returned by the catalog endpoint."],
+    ["COMPLETE CONVERSATION HISTORY — UNTRUNCATED, OLDEST FIRST", historyText],
+    ["LATEST USER MESSAGE — ANSWER THIS, USING THE HISTORY ABOVE", userMessage],
     ["REQUIRED MCP EXECUTION AUDIT", auditMarkdown],
-    ["REQUIRED MCP SUMMARY", `- Persona: ${ability.persona}\n- Savant Abilities: used\n- Savant Workspace: ${ATHENA_WORKSPACE.name} (${ATHENA_WORKSPACE.id})\n- Savant Knowledge MCP: ${knowledgeHits.length} references\n- Savant Context/Research MCP: ${codeHits.length} references\n- Savant Workspace Tasks: ${workspaceContext.tasks.length} tracked\n- Savant Reminders: ${remindersContext.length} checked\n- Available MCP tools: ${tools.length}\n- Inferred relevant MCP tools: ${relevantTools.map((tool) => tool.name).join(", ") || "mandatory Savant MCP only"}\n- Upstream/downstream impact search: ${impactSearched ? "performed" : "not required"}`],
+    ["REQUIRED MCP SUMMARY", `- Persona: ${ability.persona}\n- Savant Abilities: used\n- Savant Workspace: ${ATHENA_WORKSPACE.name} (${ATHENA_WORKSPACE.id})\n- Savant Knowledge MCP: ${knowledgeHits.length} references\n- Savant Context/Research MCP: ${codeHits.length} references\n- Savant Workspace Tasks: ${workspaceContext.tasks.length} tracked\n- Savant Reminders: ${remindersContext.length} checked\n- Available MCP tools: ${tools.length}\n- MCP prefetch: ${prefetchCached ? "reused from chat start" : "fetched for new chat"}\n- Inferred relevant MCP tools: ${relevantTools.map((tool) => tool.name).join(", ") || "mandatory Savant MCP only"}\n- Upstream/downstream impact search: ${impactSearched ? "performed" : "not required"}`],
   ])
+
+  const promptTokens = estimateTokens(prompt)
+  const historyTokens = estimateTokens(historyText)
+  promptStats.set(sessionKey, {
+    promptTokens,
+    historyTokens,
+    overheadTokens: Math.max(0, promptTokens - historyTokens - estimateTokens(userMessage)),
+    messages: options.history.length + 1,
+    prefetchCached,
+    at: Date.now(),
+  })
+  statsListeners.forEach((listener) => listener())
+  return prompt
 }
 
 export function serializeAthenaThreads(threads: AthenaThreadRecord[]) {
   return threads
 }
 import { createAbilitiesService } from "./abilitiesService"
+import { parseAthenaResponse } from "@/lib/athenaFacts"

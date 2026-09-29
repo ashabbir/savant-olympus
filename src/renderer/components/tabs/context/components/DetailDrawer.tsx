@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
+import { AthenaContextMeter } from "@/components/shared/AthenaContextMeter";
+import { runAthenaAgent, formatAthenaModel, athenaModelFromSettings } from "@/lib/athenaModel";
 import { Trash2, Sparkles, Loader2, ChevronRight, ChevronDown } from "lucide-react";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
 import { AthenaMcpContextBar, type AthenaMcpContextBarProps } from "@/components/shared/AthenaMcpContextBar";
@@ -175,16 +177,8 @@ export function DetailDrawer({
         const s = await window.system.getSettings();
         setSettings(s);
         
-        const chain = s["provider:chain"] || [];
-        if (chain.length > 0) {
-          setSelectedChainItem({
-            provider: chain[0].provider,
-            model: chain[0].model,
-            label: `${chain[0].provider.toUpperCase()}: ${chain[0].model}`
-          });
-        } else {
-          setSelectedChainItem({ provider: "gemini", model: "3.5", label: "GEMINI: 3.5" });
-        }
+        const selection = athenaModelFromSettings(s);
+        setSelectedChainItem({ ...selection, label: formatAthenaModel(selection) });
       } catch (err) {
         console.error("Error loading settings in DetailDrawer:", err);
       }
@@ -225,21 +219,8 @@ export function DetailDrawer({
     setIsLoading(true);
 
     try {
-      let provider = "gemini";
-      let model = "3.5";
-      if (selectedChainItem) {
-        provider = selectedChainItem.provider;
-        model = selectedChainItem.model;
-      } else {
-        const s = settings || await window.system.getSettings();
-        const chain = s?.["provider:chain"] || [];
-        if (chain.length > 0) {
-          provider = chain[0].provider;
-          model = chain[0].model;
-        }
-      }
-
       const augmentedPrompt = await buildAthenaConversationPrompt({
+        sessionKey: `complexity:${repoName}:${id}`,
         context: {
           area: `Context > Project > Visualization and Heuristics > ${visualization}`,
           repository: repoName,
@@ -258,9 +239,7 @@ export function DetailDrawer({
         apiKey,
         repo: repoName,
       });
-      const rawResponseText = await window.system.runAgentViaGateway({
-        provider,
-        model,
+      const rawResponseText = await runAthenaAgent({
         prompt: augmentedPrompt,
       });
       const responseText = ensureAthenaMcpSummary(rawResponseText || "No response from ATHENA.", augmentedPrompt);
@@ -485,7 +464,7 @@ export function DetailDrawer({
             <div className="flex flex-col flex-1 min-w-0">
               <span className="text-[8px] text-muted-foreground uppercase font-bold tracking-wider">Gateway Model</span>
               <span className="text-[10px] font-bold text-[var(--cp-cyan)] uppercase truncate">
-                {selectedChainItem ? selectedChainItem.label || `${selectedChainItem.provider}: ${selectedChainItem.model}` : "GEMINI: 3.5"}
+                {selectedChainItem?.label || formatAthenaModel(null)}
               </span>
             </div>
             <button
@@ -500,6 +479,7 @@ export function DetailDrawer({
           <AthenaConversationExport messages={messages} title={`${visualization} component`} scope="complexity-athena" />
           {/* MCP Context Bar — shows last Athena turn's MCP state */}
           <AthenaMcpContextBar {...(lastAthenaMcpState || {})} className="rounded-t border border-[var(--cp-border)] border-b-0" />
+          <AthenaContextMeter sessionKey={`complexity:${repoName}:${id}`} messages={messages} className="border-x border-[var(--cp-border)]" />
           <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2 space-y-3 min-h-0 flex flex-col pr-1">
             {messages.length === 0 ? (
               <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-4 my-auto">

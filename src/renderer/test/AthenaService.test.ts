@@ -3,6 +3,7 @@ import {
   ATHENA_SYSTEM_DIRECTIVE,
   ATHENA_WORKSPACE,
   buildAthenaConversationPrompt,
+  getAthenaPromptStats,
   buildAthenaResearchQuery,
   ensureAthenaMcpSummary,
   requiresAthenaImpactAnalysis,
@@ -49,6 +50,47 @@ describe("Athena MCP orchestration", () => {
     expect(result).toContain("Useful analysis.");
     expect(result).toContain("Refactor safely.");
     expect(result).toContain("Savant MCP Summary");
+  });
+
+  it("prefetches MCP once per chat and reuses it with the full, trace-free history", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = input.toString();
+      if (url.includes("/api/knowledge/graph")) return { ok: true, json: async () => ({ nodes: [{ node_id: "n1", title: "Ahmed node", content: "ahmed" }] }) } as Response;
+      if (url.includes("/api/context/search")) return { ok: true, json: async () => ({ results: [] }) } as Response;
+      if (url.includes("/api/mcp/tools")) return { ok: true, json: async () => ({ tools: [] }) } as Response;
+      return { ok: false, json: async () => ({}) } as Response;
+    });
+    const base = {
+      sessionKey: "knowledge:test-thread",
+      context: { area: "Knowledge > Selected Node", selected: { id: "n1" } },
+      instructions: "Answer.",
+      baseUrl: "http://127.0.0.1:8090",
+      apiKey: "k",
+    };
+
+    await buildAthenaConversationPrompt({ ...base, history: [], userMessage: "who is ahmed" });
+    const firstCalls = vi.mocked(fetch).mock.calls.length;
+    expect(getAthenaPromptStats("knowledge:test-thread")?.prefetchCached).toBe(false);
+
+    const second = await buildAthenaConversationPrompt({
+      ...base,
+      history: [
+        { sender: "user", text: "who is ahmed" },
+        { sender: "assistant", text: '● search (MCP: savant-knowledge) · q\n  └ []\n\nAhmed leads UNO.\n\n<!-- athena-model: COPILOT: auto · medium -->' },
+      ],
+      userMessage: "what does he own?",
+    });
+
+    expect(vi.mocked(fetch).mock.calls.length).toBe(firstCalls);
+    expect(second).toContain("Ahmed node");
+    expect(second).toContain("reused from chat start");
+    expect(second).toContain("ATHENA: Ahmed leads UNO.");
+    expect(second).not.toContain("● search");
+    expect(second.indexOf("COMPLETE CONVERSATION HISTORY")).toBeLessThan(second.indexOf("LATEST USER MESSAGE"));
+    expect(getAthenaPromptStats("knowledge:test-thread")?.prefetchCached).toBe(true);
+
+    await buildAthenaConversationPrompt({ ...base, history: [], userMessage: "new chat" });
+    expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(firstCalls);
   });
 
   it("pins selected context, keeps full history, exposes every MCP, and infers Jira use", async () => {

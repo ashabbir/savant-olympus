@@ -5,3 +5,5 @@ export * from "./StatusBadge";
 export * from "./EmptyState";
 export * from "./AthenaMessage";
 export * from "./AthenaMcpContextBar";
+export * from "./AthenaContextMeter";
+export * from "./AthenaFactsPanel";

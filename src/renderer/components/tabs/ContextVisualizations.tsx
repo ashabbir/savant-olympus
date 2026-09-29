@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
+import { AthenaContextMeter } from "@/components/shared/AthenaContextMeter";
+import { runAthenaAgent, formatAthenaModel, useAthenaModel } from "@/lib/athenaModel";
 import * as d3 from "d3";
 import { Folder, FileCode, CheckCircle, Database, AlertTriangle, Square, Trash, Zap, Clock, Info, ShieldAlert, FileText, ChevronRight, ChevronDown, Layers, HelpCircle, MessageSquare, Send, Sparkles, Trash2, Loader2, Copy } from "lucide-react";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
@@ -494,6 +496,7 @@ function AnalysisChatPanel({
   apiKey: string;
   filePath?: string;
 }) {
+  const athenaModel = useAthenaModel();
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [lastAthenaMcpState, setLastAthenaMcpState] = useState<Omit<AthenaMcpContextBarProps, "className"> | null>(null);
@@ -552,11 +555,6 @@ function AnalysisChatPanel({
     setIsLoading(true);
 
     try {
-      const s = await window.system.getSettings();
-      const chain = s["provider:chain"] || [];
-      const provider = activeModel?.provider || chain[0]?.provider || "gemini";
-      const model = activeModel?.model || chain[0]?.model || "3.5";
-
       const analysisSummary = `
 ANALYSIS OVERVIEW for ${repoName}:
 - Files Analyzed: ${analysis.summary.filesAnalyzed}
@@ -569,6 +567,7 @@ ${analysis.findings.slice(0, 100).map((f, i) => `${i + 1}. [${f.severity.toUpper
       `;
 
       const augmentedPrompt = await buildAthenaConversationPrompt({
+        sessionKey: `analysis:${repoName}:${filePath || "all"}`,
         context: {
           area: filePath ? "Context > Project > Visualization and Heuristics > Complexity Heatmap" : "Context > Project > Visualization and Heuristics > Analysis",
           repository: repoName,
@@ -583,9 +582,7 @@ ${analysis.findings.slice(0, 100).map((f, i) => `${i + 1}. [${f.severity.toUpper
         apiKey,
         repo: repoName,
       });
-      const rawResponse = await window.system.runAgentViaGateway({
-        provider,
-        model,
+      const rawResponse = await runAthenaAgent({
         prompt: augmentedPrompt,
       });
       const response = ensureAthenaMcpSummary(rawResponse || "No response from ATHENA.", augmentedPrompt);
@@ -653,7 +650,7 @@ ${analysis.findings.slice(0, 100).map((f, i) => `${i + 1}. [${f.severity.toUpper
         <div className="flex flex-col flex-1 min-w-0">
           <span className="text-[8px] text-muted-foreground uppercase font-bold tracking-wider">ATHENA Mode</span>
           <span className="text-[10px] font-bold text-[var(--cp-cyan)] uppercase truncate">
-            {activeModel ? `${activeModel.provider.toUpperCase()}: ${activeModel.model}` : "GEMINI: 3.5"}
+            {formatAthenaModel(athenaModel)}
           </span>
         </div>
         <button
@@ -669,6 +666,7 @@ ${analysis.findings.slice(0, 100).map((f, i) => `${i + 1}. [${f.severity.toUpper
       <AthenaConversationExport messages={messages} title="Olympus analysis" scope="analysis-athena" />
       {/* MCP Context Bar — shows last Athena turn's MCP state */}
       <AthenaMcpContextBar {...(lastAthenaMcpState || {})} />
+      <AthenaContextMeter sessionKey={`analysis:${repoName}:${filePath || "all"}`} messages={messages} />
       <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-2)] rounded p-2 space-y-3 min-h-0 flex flex-col pr-1">
         {messages.length === 0 ? (
           <div className="flex-1 flex flex-col justify-center items-center text-center p-4 space-y-4 my-auto">

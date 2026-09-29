@@ -20,6 +20,10 @@ interface Window {
         label: string
         defaultModel?: string
         models: string[]
+        configuredModel?: string
+        thinkingLevels?: string[]
+        modelThinkingLevels?: Record<string, string[]>
+        defaultThinkingLevel?: string
         source: 'gateway' | 'terminal'
         installed: boolean
       }>
@@ -36,7 +40,7 @@ interface Window {
     saveAthenaThread: (target_id: string, messages: any[]) => Promise<boolean>
     clearAthenaThread: (target_id: string) => Promise<boolean>
     readGraphifyJson: (repoPath: string) => Promise<any | null>
-    runAgentViaGateway: (args: { provider: string; model: string; prompt: string }) => Promise<string>
+    runAgentViaGateway: (args: { provider: string; model: string; thinkingLevel?: string; prompt: string }) => Promise<string>
     exportDocument: (args: {
       format: 'html' | 'pdf'
       html: string
