@@ -9,6 +9,34 @@ export interface UserPayload {
   is_active?: boolean;
 }
 
+export interface ToolUsage {
+  mcp_server: string;
+  tool_name: string;
+  calls: number;
+  active_days: number;
+  avg_calls_per_active_day: number;
+  last_called_at: string | null;
+}
+
+export interface UserUsage {
+  user_id: string;
+  days: number;
+  last_login_at: string | null;
+  total_calls: number;
+  tools: ToolUsage[];
+  daily: { day: string; mcp_server: string; tool_name: string; calls: number }[];
+  logins_per_day: { day: string; logins: number }[];
+  projects: {
+    project_type: "repo" | "workspace";
+    project: string;
+    project_name: string;
+    calls: number;
+    active_days: number;
+    last_used_at: string | null;
+  }[];
+  recent_queries: { mcp_server: string; tool_name: string; query: string; repo: string; created_at: string }[];
+}
+
 export class UsersService {
   private baseUrl: string;
   private apiKey: string;
@@ -99,6 +127,12 @@ export class UsersService {
       body: JSON.stringify({ domain_node_id: domainNodeId, can_write: canWrite }),
     });
     if (!res.ok) throw new Error(`Failed to assign domain: ${res.statusText}`);
+  }
+
+  async getUserUsage(userId: string, days = 30): Promise<UserUsage> {
+    const res = await fetch(`${this.baseUrl}/api/users/${userId}/usage?days=${days}`, { headers: this.headers });
+    if (!res.ok) throw new Error(`Failed to load user usage: ${res.statusText}`);
+    return res.json();
   }
 
   async removeDomain(userId: string, domainNodeId: string): Promise<void> {

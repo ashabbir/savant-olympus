@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ToolsView } from '../components/tabs/ToolsView'
 import { SkillsView } from '../components/tabs/SkillsView'
@@ -327,7 +327,61 @@ describe('UsersView Component', () => {
       const u = url.toString()
       const method = (options?.method || 'GET').toUpperCase()
 
+      if (u.includes('/api/knowledge/graph')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({
+            nodes: [
+              { node_id: 'domain-1', title: 'Research', node_type: 'domain' },
+              { node_id: 'domain-2', title: 'Operations', node_type: 'domain' },
+              { node_id: 'domain-3', title: 'Legal', node_type: 'domain' },
+            ]
+          })
+        } as Response)
+      }
+
       if (u.includes('/api/users')) {
+        if (u.includes('/usage')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({
+              user_id: 'usr-2',
+              days: 30,
+              last_login_at: '2026-09-30T21:15:00+00:00',
+              total_calls: 18,
+              tools: [
+                { mcp_server: 'savant-context', tool_name: 'research', calls: 12, active_days: 2, avg_calls_per_active_day: 6, last_called_at: '2026-09-30T21:10:00+00:00' },
+                { mcp_server: 'savant-knowledge', tool_name: 'search', calls: 6, active_days: 3, avg_calls_per_active_day: 2, last_called_at: '2026-09-29T10:00:00+00:00' },
+              ],
+              daily: [],
+              logins_per_day: [
+                { day: '2026-09-30', logins: 3 },
+                { day: '2026-09-29', logins: 1 },
+              ],
+              projects: [
+                { project_type: 'repo', project: 'icn', project_name: 'icn', calls: 9, active_days: 2, last_used_at: '2026-09-30T21:10:00+00:00' },
+                { project_type: 'workspace', project: '17791265844502783839305', project_name: 'Data Sync', calls: 4, active_days: 1, last_used_at: '2026-09-30T20:00:00+00:00' },
+              ],
+              recent_queries: [
+                { mcp_server: 'savant-context', tool_name: 'research', query: 'kafka consumer retries', repo: 'icn', created_at: '2026-09-30T21:10:00+00:00' },
+              ]
+            })
+          } as Response)
+        }
+
+        if (u.includes('/domains')) {
+          const domains = method === 'GET' && u.includes('/usr-2/')
+            ? [{ domain_node_id: 'domain-1', domain_title: 'Research', can_write: 1 }]
+            : []
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve(domains)
+          } as Response)
+        }
+
         if (method === 'DELETE') {
           const userId = u.split('/').pop()
           mockUsers = mockUsers.map(user => 
@@ -453,6 +507,54 @@ describe('UsersView Component', () => {
     })
   })
 
+  it('copies a user with a new username, same profile and domains, and shows the new key', async () => {
+    const { UsersView } = await import('../components/tabs/UsersView')
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Lex Friedman')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('Lex Friedman'))
+    fireEvent.click(await screen.findByRole('button', { name: /COPY_USER/i }))
+
+    fireEvent.change(screen.getByLabelText(/New Username/i), { target: { value: 'lex2' } })
+    fireEvent.click(screen.getByRole('button', { name: /CREATE_COPY/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('CREDENTIALS GENERATED')).toBeInTheDocument()
+      expect(screen.getByText('sk-generated-key')).toBeInTheDocument()
+    })
+
+    const calls = (window.fetch as any).mock.calls as [string, RequestInit | undefined][]
+    const createCall = calls.filter(([url, opts]) => url.toString().endsWith('/api/users') && opts?.method === 'POST').pop()
+    expect(JSON.parse(createCall![1]!.body as string)).toEqual({
+      user_id: 'lex2',
+      username: 'lex2',
+      name: 'Lex Friedman',
+      email: 'lex@savant.ai',
+      role: 'operator',
+      is_active: true,
+    })
+    const domainCall = calls.filter(([url, opts]) => url.toString().includes('/domains') && opts?.method === 'POST').pop()
+    expect(JSON.parse(domainCall![1]!.body as string)).toEqual({ domain_node_id: 'domain-1', can_write: true })
+    expect(mockUsers.find(u => u.id === 'usr-2')!.api_keys).toEqual(['sk-lex-savant-001'])
+  })
+
+  it('rejects copying to an existing username', async () => {
+    const { UsersView } = await import('../components/tabs/UsersView')
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Lex Friedman')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('Lex Friedman'))
+    fireEvent.click(await screen.findByRole('button', { name: /COPY_USER/i }))
+    fireEvent.change(screen.getByLabelText(/New Username/i), { target: { value: 'Ahmed' } })
+    fireEvent.click(screen.getByRole('button', { name: /CREATE_COPY/i }))
+
+    expect(await screen.findByText(/already exists/i)).toBeInTheDocument()
+  })
+
   it('allows clicking a user and editing name, email, and role', async () => {
     const { UsersView } = await import('../components/tabs/UsersView')
     render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
@@ -512,6 +614,85 @@ describe('UsersView Component', () => {
     await waitFor(() => {
       expect(screen.getByText('sk-regenerated-new-key-123')).toBeInTheDocument()
     })
+  })
+
+  it('shows last login and per-tool MCP usage to admins', async () => {
+    const { UsersView } = await import('../components/tabs/UsersView')
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Lex Friedman')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('Lex Friedman'))
+
+    expect(screen.queryByTestId('user-mcp-usage')).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('tab', { name: /Usage/i }))
+    const usage = await screen.findByTestId('user-mcp-usage')
+    expect(usage).toHaveTextContent('Last login:')
+    const tools = await screen.findByTestId('usage-tools')
+    const researchRow = within(tools).getByText('research').closest('tr')!
+    expect(researchRow).toHaveTextContent('savant-context')
+    expect(researchRow).toHaveTextContent('12')
+    expect(researchRow).toHaveTextContent('6')
+    expect(within(tools).getByText('savant-knowledge')).toBeInTheDocument()
+    expect(usage).toHaveTextContent('Tool calls (30d): 18')
+    expect(usage).toHaveTextContent('Logins (30d): 4')
+
+    const logins = screen.getByTestId('usage-logins')
+    expect(within(logins).getByText('2026-09-30').parentElement).toHaveTextContent('3')
+
+    const projects = screen.getByTestId('usage-projects')
+    expect(within(projects).getByText('Data Sync').closest('tr')).toHaveTextContent('workspace')
+    expect(within(projects).getByText('icn').closest('tr')).toHaveTextContent('9')
+
+    const queries = screen.getByTestId('usage-queries')
+    expect(within(queries).getByText('kafka consumer retries')).toBeInTheDocument()
+    expect(within(queries).getByText('repo: icn')).toBeInTheDocument()
+    expect(screen.getByTestId('user-last-login')).not.toHaveTextContent('Never')
+
+    const calls = (window.fetch as any).mock.calls as [string, RequestInit | undefined][]
+    expect(calls.some(([url]) => url.toString().includes('/api/users/usr-2/usage?days=30'))).toBe(true)
+  })
+
+  it('hides usage and last login from non-admins and never requests usage', async () => {
+    const { UsersView } = await import('../components/tabs/UsersView')
+    ;(window.fetch as any).mockClear()
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={false} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Lex Friedman')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('Lex Friedman'))
+
+    expect(await screen.findByText(/Read-only user record/i)).toBeInTheDocument()
+    expect(screen.queryByTestId('user-mcp-usage')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('user-last-login')).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: /Usage/i })).not.toBeInTheDocument()
+    const calls = (window.fetch as any).mock.calls as [string, RequestInit | undefined][]
+    expect(calls.some(([url]) => url.toString().includes('/usage'))).toBe(false)
+  })
+
+  it('adds every missing domain as read-only in one click', async () => {
+    const { UsersView } = await import('../components/tabs/UsersView')
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Lex Friedman')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('Lex Friedman'))
+
+    const bulkBtn = await screen.findByRole('button', { name: /ADD_ALL_MISSING_READ_ONLY \(2\)/i })
+    fireEvent.click(bulkBtn)
+
+    expect(await screen.findByText('Added 2 domains as read-only.')).toBeInTheDocument()
+    const calls = (window.fetch as any).mock.calls as [string, RequestInit | undefined][]
+    const assigned = calls
+      .filter(([url, opts]) => url.toString().includes('/usr-2/domains') && opts?.method === 'POST')
+      .map(([, opts]) => JSON.parse(opts!.body as string))
+    expect(assigned).toEqual([
+      { domain_node_id: 'domain-2', can_write: false },
+      { domain_node_id: 'domain-3', can_write: false },
+    ])
   })
 })
 
