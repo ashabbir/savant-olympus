@@ -51,7 +51,7 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
         if (active && settings) {
           const configured = settings?.["mcp:endpoints"]?.knowledge;
           if (configured) setKnowledgeMcpUrl(configured);
-          const ea = settings?.["agents:enabledList"] ?? settings?.["agents:enabled"] ?? settings?.["agents:enabledProviders"];
+          const ea = settings?.["agents:enabledList"] ?? settings?.["agents:enabled"];
           setEnabledAgents(Array.isArray(ea) ? ea : null);
         }
       } catch {
@@ -60,10 +60,12 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
     };
     loadSettings();
     window.addEventListener(ATHENA_MODEL_CHANGED_EVENT, loadSettings);
+    window.addEventListener("savant:settings-changed", loadSettings);
     window.addEventListener("focus", loadSettings);
     return () => {
       active = false;
       window.removeEventListener(ATHENA_MODEL_CHANGED_EVENT, loadSettings);
+      window.removeEventListener("savant:settings-changed", loadSettings);
       window.removeEventListener("focus", loadSettings);
     };
   }, []);
@@ -91,6 +93,15 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
 
   useEffect(() => {
     loadStatus();
+
+    const handleSwitchTab = (e: Event) => {
+      const tab = (e as CustomEvent<string>).detail;
+      if (tab === "Agents") {
+        loadStatus();
+      }
+    };
+    window.addEventListener("switch-tab", handleSwitchTab);
+    return () => window.removeEventListener("switch-tab", handleSwitchTab);
   }, [loadStatus]);
 
   const handleTriggerSetup = async (provider: AgentProvider) => {

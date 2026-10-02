@@ -619,7 +619,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
     provider => enabledProviders === null || enabledProviders.includes(provider.id)
   );
 
-  function toggleProviderEnabled(providerId: string) {
+  async function toggleProviderEnabled(providerId: string) {
     const currentEnabled = enabledProviders !== null
       ? [...enabledProviders]
       : allDiscoveredProviders.map(p => p.id);
@@ -630,19 +630,29 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
 
     setEnabledProviders(nextEnabled);
     invalidateCatalogCache();
+    await window.system.saveSetting("gateway:enabledProviders", nextEnabled);
+    window.dispatchEvent(new CustomEvent("savant:settings-changed", { detail: { "gateway:enabledProviders": nextEnabled } }));
     window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
+    if (onSettingsChanged) onSettingsChanged();
   }
 
-  function enableAllProviders() {
-    setEnabledProviders(allDiscoveredProviders.map(p => p.id));
+  async function enableAllProviders() {
+    const nextEnabled = allDiscoveredProviders.map(p => p.id);
+    setEnabledProviders(nextEnabled);
     invalidateCatalogCache();
+    await window.system.saveSetting("gateway:enabledProviders", nextEnabled);
+    window.dispatchEvent(new CustomEvent("savant:settings-changed", { detail: { "gateway:enabledProviders": nextEnabled } }));
     window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
+    if (onSettingsChanged) onSettingsChanged();
   }
 
-  function disableAllProviders() {
+  async function disableAllProviders() {
     setEnabledProviders([]);
     invalidateCatalogCache();
+    await window.system.saveSetting("gateway:enabledProviders", []);
+    window.dispatchEvent(new CustomEvent("savant:settings-changed", { detail: { "gateway:enabledProviders": [] } }));
     window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
+    if (onSettingsChanged) onSettingsChanged();
   }
 
   const displayAgents = [
@@ -652,7 +662,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
     { id: "codex", label: "Codex Agent", description: "Codex CLI & OpenAI developer environment", icon: FileText },
   ];
 
-  function toggleAgentEnabled(agentId: string) {
+  async function toggleAgentEnabled(agentId: string) {
     const current = enabledAgents !== null
       ? [...enabledAgents]
       : displayAgents.map(a => a.id);
@@ -660,17 +670,27 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
       ? current.filter(id => id !== agentId)
       : [...current, agentId];
     setEnabledAgents(next);
+    await window.system.saveSetting("agents:enabledList", next);
+    window.dispatchEvent(new CustomEvent("savant:settings-changed", { detail: { "agents:enabledList": next } }));
     window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
+    if (onSettingsChanged) onSettingsChanged();
   }
 
-  function enableAllAgents() {
-    setEnabledAgents(displayAgents.map(a => a.id));
+  async function enableAllAgents() {
+    const next = displayAgents.map(a => a.id);
+    setEnabledAgents(next);
+    await window.system.saveSetting("agents:enabledList", next);
+    window.dispatchEvent(new CustomEvent("savant:settings-changed", { detail: { "agents:enabledList": next } }));
     window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
+    if (onSettingsChanged) onSettingsChanged();
   }
 
-  function disableAllAgents() {
+  async function disableAllAgents() {
     setEnabledAgents([]);
+    await window.system.saveSetting("agents:enabledList", []);
+    window.dispatchEvent(new CustomEvent("savant:settings-changed", { detail: { "agents:enabledList": [] } }));
     window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
+    if (onSettingsChanged) onSettingsChanged();
   }
 
   useEffect(() => {
@@ -1126,7 +1146,11 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
                   </p>
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
+                      if (enabledAgents !== null) {
+                        await window.system.saveSetting("agents:enabledList", enabledAgents);
+                      }
+                      if (onSettingsChanged) onSettingsChanged();
                       onClose();
                       window.dispatchEvent(new CustomEvent("switch-tab", { detail: "Agents" }));
                     }}

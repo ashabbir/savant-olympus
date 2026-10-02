@@ -144,7 +144,7 @@ export function AppVariablesManager({
       )}
 
       {/* Standard Status Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
         {(["GITHUB_TOKEN", "GITLAB_TOKEN"] as const).map((tokenKey) => {
           const info = effective[tokenKey];
           const hasDb = info?.db_configured;
@@ -154,49 +154,64 @@ export function AppVariablesManager({
           return (
             <div
               key={tokenKey}
-              className="p-2.5 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded-none flex items-center justify-between gap-2"
+              className="p-3 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] flex flex-col justify-between gap-2.5 min-w-0"
             >
-              <div>
-                <div className="text-[11px] font-bold text-foreground flex items-center gap-1.5">
-                  <span>{tokenKey}</span>
+              <div className="space-y-1.5 min-w-0">
+                <div className="flex items-center justify-between gap-1.5 flex-wrap min-w-0">
+                  <span className="text-[11px] font-bold text-foreground truncate" title={tokenKey}>
+                    {tokenKey}
+                  </span>
                   {activeSource === "db" ? (
-                    <span className="text-[9px] px-1.5 py-0.2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 uppercase">
+                    <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 uppercase whitespace-nowrap shrink-0">
                       Active: Database
                     </span>
                   ) : activeSource === "env" ? (
-                    <span className="text-[9px] px-1.5 py-0.2 bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 uppercase">
+                    <span className="text-[9px] px-1.5 py-0.5 bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 uppercase whitespace-nowrap shrink-0">
                       Active: ENV
                     </span>
                   ) : (
-                    <span className="text-[9px] px-1.5 py-0.2 bg-zinc-500/20 border border-zinc-500/40 text-zinc-400 uppercase">
+                    <span className="text-[9px] px-1.5 py-0.5 bg-zinc-500/20 border border-zinc-500/40 text-zinc-400 uppercase whitespace-nowrap shrink-0">
                       Not Configured
                     </span>
                   )}
                 </div>
-                <div className="text-[10px] text-muted-foreground flex gap-2 mt-1">
-                  <span className="flex items-center gap-1">
+                <div className="text-[10px] text-muted-foreground flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                  <span className="flex items-center gap-1 shrink-0">
                     <Database size={10} className={hasDb ? "text-emerald-400" : "opacity-30"} />
                     DB: {hasDb ? "Configured" : "None"}
                   </span>
-                  <span className="flex items-center gap-1">
+                  <span className="flex items-center gap-1 shrink-0">
                     <Terminal size={10} className={hasEnv ? "text-cyan-400" : "opacity-30"} />
                     ENV: {hasEnv ? "Configured" : "None"}
                   </span>
                 </div>
               </div>
 
-              {!hasDb && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNewKey(tokenKey);
-                    setNewValue("");
-                  }}
-                  className="px-2 py-1 text-[10px] bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold hover:opacity-90 cursor-pointer uppercase shrink-0"
-                >
-                  Set in DB
-                </button>
-              )}
+              <div className="pt-2 border-t border-[var(--cp-border)]/40 flex items-center justify-end">
+                {!hasDb ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewKey(tokenKey);
+                      setNewValue("");
+                    }}
+                    className="w-full py-1 px-2 text-[10px] bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold hover:opacity-90 cursor-pointer uppercase tracking-wider text-center"
+                  >
+                    Set in DB
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewKey(tokenKey);
+                      setNewValue(variables[tokenKey] || "");
+                    }}
+                    className="w-full py-1 px-2 text-[10px] bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground hover:text-foreground hover:border-[var(--cp-cyan)] cursor-pointer uppercase tracking-wider text-center"
+                  >
+                    Edit in DB
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}
@@ -209,50 +224,54 @@ export function AppVariablesManager({
           const isEffectiveDisabled = isDbDisabled || (dirInfo?.source === "env" && dirInfo?.is_set);
 
           return (
-            <div className="p-2.5 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded-none flex items-center justify-between gap-2">
-              <div>
-                <div className="text-[11px] font-bold text-foreground flex items-center gap-1.5">
-                  <span>LOCAL DIRECTORY</span>
+            <div className="p-3 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] flex flex-col justify-between gap-2.5 min-w-0">
+              <div className="space-y-1.5 min-w-0">
+                <div className="flex items-center justify-between gap-1.5 flex-wrap min-w-0">
+                  <span className="text-[11px] font-bold text-foreground truncate" title="LOCAL DIRECTORY">
+                    LOCAL DIRECTORY
+                  </span>
                   {isEffectiveDisabled ? (
-                    <span className="text-[9px] px-1.5 py-0.2 bg-red-500/20 border border-red-500/40 text-red-300 uppercase">
+                    <span className="text-[9px] px-1.5 py-0.5 bg-red-500/20 border border-red-500/40 text-red-300 uppercase whitespace-nowrap shrink-0">
                       DISABLED
                     </span>
                   ) : (
-                    <span className="text-[9px] px-1.5 py-0.2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 uppercase">
+                    <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 uppercase whitespace-nowrap shrink-0">
                       ENABLED
                     </span>
                   )}
                 </div>
-                <div className="text-[10px] text-muted-foreground flex gap-2 mt-1">
-                  <span>DB Override: {isDbDisabled ? "Disabled" : dirInfo?.db_configured ? "Explicitly Enabled" : "Not Set"}</span>
+                <div className="text-[10px] text-muted-foreground flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                  <span>DB: {isDbDisabled ? "Disabled" : dirInfo?.db_configured ? "Explicitly Enabled" : "Not Set"}</span>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={async () => {
-                  setSaving(true);
-                  try {
-                    const nextVal = isEffectiveDisabled ? "false" : "true";
-                    await service.set("DISABLE_LOCAL_DIRECTORY", nextVal);
-                    toast.success(nextVal === "true" ? "Local Directory disabled" : "Local Directory enabled");
-                    await fetchVariables();
-                    onVariablesChanged?.();
-                  } catch (e: any) {
-                    toast.error("Failed to update: " + (e?.message || e));
-                  } finally {
-                    setSaving(false);
-                  }
-                }}
-                disabled={saving}
-                className={`px-2 py-1 text-[10px] font-bold hover:opacity-90 cursor-pointer uppercase shrink-0 ${
-                  isEffectiveDisabled
-                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                    : "bg-red-600 text-white hover:bg-red-700"
-                }`}
-              >
-                {isEffectiveDisabled ? "ENABLE LOCAL" : "DISABLE LOCAL"}
-              </button>
+              <div className="pt-2 border-t border-[var(--cp-border)]/40 flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setSaving(true);
+                    try {
+                      const nextVal = isEffectiveDisabled ? "false" : "true";
+                      await service.set("DISABLE_LOCAL_DIRECTORY", nextVal);
+                      toast.success(nextVal === "true" ? "Local Directory disabled" : "Local Directory enabled");
+                      await fetchVariables();
+                      onVariablesChanged?.();
+                    } catch (e: any) {
+                      toast.error("Failed to update: " + (e?.message || e));
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                  disabled={saving}
+                  className={`w-full py-1 px-2 text-[10px] font-bold hover:opacity-90 cursor-pointer uppercase tracking-wider text-center ${
+                    isEffectiveDisabled
+                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                      : "bg-red-600 text-white hover:bg-red-700"
+                  }`}
+                >
+                  {isEffectiveDisabled ? "ENABLE LOCAL" : "DISABLE LOCAL"}
+                </button>
+              </div>
             </div>
           );
         })()}
