@@ -167,8 +167,10 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
   const handleAssignDomain = async (uid: string, targetDomainId?: string, canWrite = true) => {
     const domainId = targetDomainId || selectedDomainToAdd;
     if (!domainId) return;
+    const targetUser = users.find((u) => (u.id || u.username) === uid);
+    const effectiveCanWrite = targetUser?.role === "guest" ? false : canWrite;
     try {
-      await usersService.assignDomain(uid, domainId, canWrite);
+      await usersService.assignDomain(uid, domainId, effectiveCanWrite);
       if (!targetDomainId) setSelectedDomainToAdd("");
       await fetchUserDomains(uid);
     } catch (error) {
@@ -757,6 +759,79 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
           {user.role === "admin" ? (
             <div className="p-3 border border-[var(--cp-green)]/30 bg-[rgba(0,255,136,0.05)] text-xs text-[var(--cp-green)] font-mono">
               ★ ADMIN ROLE ACTIVE: Admin users have unrestricted Read and Write access across all domains and knowledge nodes.
+            </div>
+          ) : user.role === "guest" ? (
+            <div className="space-y-3">
+              <div className="p-3 border border-amber-500/40 bg-[rgba(255,170,0,0.06)] text-xs text-amber-300 font-mono">
+                ⚠ GUEST USER RESTRICTIONS: Guest users have strictly Read-Only search access to their assigned domains. Write access cannot be granted to guest accounts.
+              </div>
+              {/* Assigned Domains List */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">Assigned Domain Permissions</label>
+                {userDomains.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic bg-[var(--cp-bg-3)] border border-[var(--cp-border)]/50 p-2.5">
+                    No domains assigned. Guest user has no access to any knowledge nodes or MCP tools.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {userDomains.map((ud) => (
+                      <div key={ud.domain_node_id} className="flex items-center gap-2 bg-[var(--cp-bg-3)] border border-amber-500/40 px-2.5 py-1.5 rounded text-xs font-mono">
+                        <span className="text-foreground font-medium">{ud.domain_title || ud.domain_node_id}</span>
+                        <span
+                          className="text-[9px] px-2 py-0.5 border rounded font-semibold bg-[rgba(255,170,0,0.15)] text-amber-400 border-amber-500/40 cursor-not-allowed opacity-90"
+                          title="Guest users are strictly read-only"
+                        >
+                          👁 READ ONLY
+                        </span>
+                        <button
+                          onClick={() => handleRemoveDomain(userId, ud.domain_node_id)}
+                          className="text-red-400 hover:text-red-300 ml-1 cursor-pointer"
+                          title="Remove domain assignment"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Assign New Domain Dropdown */}
+              <div className="flex items-center gap-2 pt-1">
+                <select
+                  value={selectedDomainToAdd}
+                  onChange={(e) => setSelectedDomainToAdd(e.target.value)}
+                  className="bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-3 py-1.5 focus:outline-none focus:border-[var(--cp-cyan)] font-mono cursor-pointer flex-1"
+                >
+                  <option value="">-- Select Domain to Assign (Read-Only) --</option>
+                  {availableDomains
+                    .filter((ad) => !userDomains.some((ud) => ud.domain_node_id === ad.node_id))
+                    .map((ad) => (
+                      <option key={ad.node_id} value={ad.node_id}>
+                        {ad.title} ({ad.node_id})
+                      </option>
+                    ))}
+                </select>
+                <button
+                  onClick={() => handleAssignDomain(userId, undefined, false)}
+                  disabled={!selectedDomainToAdd}
+                  className="px-3 py-1.5 border border-[var(--cp-cyan)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] disabled:opacity-40 disabled:cursor-not-allowed text-xs font-mono flex items-center gap-1 cursor-pointer transition-all"
+                  title="Assign read-only access to the selected domain"
+                >
+                  <Plus size={12} />
+                </button>
+                <button
+                  onClick={() => handleAssignAllMissingReadOnly(userId)}
+                  disabled={missingDomains.length === 0 || isAddingAllDomains}
+                  className="px-3 py-1.5 border border-amber-500/50 text-amber-400 hover:bg-[rgba(255,170,0,0.1)] disabled:opacity-40 disabled:cursor-not-allowed text-xs font-mono flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap"
+                  title={`Assign every domain this guest user is missing (${missingDomains.length}), with read-only access`}
+                >
+                  <Plus size={12} /><Plus size={12} /> {isAddingAllDomains ? "..." : "RO"}
+                </button>
+              </div>
+              {domainBulkNote && (
+                <p className="text-[10px] text-muted-foreground font-mono">{domainBulkNote}</p>
+              )}
             </div>
           ) : (
             <div className="space-y-3">

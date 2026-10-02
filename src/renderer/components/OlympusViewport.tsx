@@ -25,6 +25,7 @@ interface OlympusViewportProps {
   apiKey: string;
   activeModel: OlympusModel;
   isAdmin: boolean;
+  isGuest?: boolean;
   activeUserId: string;
   selectedProject: string | null;
   onSelectProject: (project: string | null) => void;
@@ -32,12 +33,23 @@ interface OlympusViewportProps {
 }
 
 export function OlympusViewport(props: OlympusViewportProps) {
-  const { activeTab, serverUrl, apiKey, activeModel, isAdmin } = props;
+  const { activeTab, serverUrl, apiKey, activeModel, isAdmin, isGuest } = props;
+
+  if (isGuest) {
+    return (
+      <div className="flex-1 min-w-0 h-full overflow-hidden relative">
+        <Suspense fallback={ViewportFallback}>
+          <KnowledgeView serverUrl={serverUrl} apiKey={apiKey} isAdmin={false} isGuest={true} />
+        </Suspense>
+      </div>
+    );
+  }
+
   let view;
 
   switch (activeTab) {
     case "Knowledge":
-      view = <KnowledgeView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} />;
+      view = <KnowledgeView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} isGuest={isGuest} />;
       break;
     case "Context":
       view = <ContextView serverUrl={serverUrl} apiKey={apiKey} selectedProject={props.selectedProject} onSelectProject={props.onSelectProject} activeModel={activeModel} isAdmin={isAdmin} />;

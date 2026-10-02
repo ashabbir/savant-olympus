@@ -76,6 +76,7 @@ export interface KnowledgeViewProps {
   serverUrl: string;
   apiKey: string;
   isAdmin?: boolean;
+  isGuest?: boolean;
 }
 
 export interface GraphFilterState {

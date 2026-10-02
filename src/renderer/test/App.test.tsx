@@ -166,4 +166,27 @@ describe('App Component', () => {
       expect(screen.getByTitle('Users')).toBeInTheDocument()
     })
   })
+
+  it('restricts guest users strictly to Knowledge tab with other tabs hidden', async () => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (String(input).includes('/api/auth/validate')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ valid: true, user_id: 'guest-user', name: 'guest-user', role: 'guest' }),
+        } as Response)
+      }
+      return originalFetch(input, init)
+    })
+
+    await waitForAppReady()
+    expect(screen.getByTitle('Knowledge')).toBeInTheDocument()
+    expect(screen.queryByTitle('Workspace')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Abilities')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Context')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Reminders')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Users')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Tools')).not.toBeInTheDocument()
+  })
 })

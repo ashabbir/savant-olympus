@@ -107,7 +107,7 @@ const KNOWLEDGE_NODE_TYPES = [
 ];
 
 
-export function KnowledgeView({ serverUrl, apiKey, isAdmin = false }: KnowledgeViewProps) {
+export function KnowledgeView({ serverUrl, apiKey, isAdmin = false, isGuest = false }: KnowledgeViewProps) {
   const athenaModel = useAthenaModel();
   const svgRef = useRef<SVGSVGElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -2353,10 +2353,10 @@ const confirmImport = async () => {
 
   useKnowledgeEventSubscriptions({
     reload: () => void loadGraph(),
-    openAddNode: () => setIsAddModalOpen(true),
-    commitAll: () => void handleCommitAll(),
-    purge: () => void handlePurgeGraph(),
-    upload: triggerUpload,
+    openAddNode: () => { if (!isGuest) setIsAddModalOpen(true); },
+    commitAll: () => { if (!isGuest) void handleCommitAll(); },
+    purge: () => { if (!isGuest) void handlePurgeGraph(); },
+    upload: () => { if (!isGuest) triggerUpload(); },
     download: () => void triggerDownload(),
     openChatHistory,
   });

@@ -14,6 +14,7 @@ interface LeftSidebarProps {
   activeTab: string;
   onChangeTab: (tab: string) => void;
   isAdmin?: boolean;
+  isGuest?: boolean;
 }
 
 function NavIcon({
@@ -74,11 +75,13 @@ const TAB_ITEMS = [
   { id: "Activity", label: "Activity Log", icon: <ScrollText size={16} /> },
 ];
 
-export function LeftSidebar({ onSettingsChanged, onLogout, activeTab, onChangeTab, isAdmin }: LeftSidebarProps) {
+export function LeftSidebar({ onSettingsChanged, onLogout, activeTab, onChangeTab, isAdmin, isGuest }: LeftSidebarProps) {
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
 
-  const visibleTabs = TAB_ITEMS.filter((tab) => !["Users", "Jobs", "Activity"].includes(tab.id) || isAdmin);
+  const visibleTabs = isGuest
+    ? TAB_ITEMS.filter((tab) => tab.id === "Knowledge")
+    : TAB_ITEMS.filter((tab) => !["Users", "Jobs", "Activity"].includes(tab.id) || isAdmin);
 
   return (
     <aside

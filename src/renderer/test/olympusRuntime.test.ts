@@ -15,6 +15,8 @@ describe("resolveOlympusRuntimeConfig", () => {
       apiKey: "sk-settings",
       activeModel: { provider: "codex", model: "gpt-5" },
       isAdmin: true,
+      isGuest: false,
+      role: "admin",
     });
   });
 
@@ -26,6 +28,21 @@ describe("resolveOlympusRuntimeConfig", () => {
       apiKey: "sk-local",
       activeModel: { provider: "gemini", model: "3.5" },
       isAdmin: false,
+      isGuest: false,
+      role: "operator",
+    });
+  });
+
+  it("identifies guest role correctly", () => {
+    expect(resolveOlympusRuntimeConfig({}, "guest", "sk-guest")).toEqual({
+      serverUrl: "http://127.0.0.1:8090",
+      gatewayUrl: "http://127.0.0.1:3100",
+      gatewayEnabled: true,
+      apiKey: "sk-guest",
+      activeModel: { provider: "gemini", model: "3.5" },
+      isAdmin: false,
+      isGuest: true,
+      role: "guest",
     });
   });
 });

@@ -18,12 +18,13 @@ export default function App() {
 
   useEffect(() => {
     const switchTab = (event: Event) => {
+      if (session.runtime.isGuest) return;
       const tab = (event as CustomEvent<string>).detail;
       if (tab) setActiveTab(tab);
     };
     window.addEventListener("switch-tab", switchTab);
     return () => window.removeEventListener("switch-tab", switchTab);
-  }, []);
+  }, [session.runtime.isGuest]);
 
   useEffect(() => {
     if (session.isInitializing || !session.isAuthenticated || !getStoredApiKey()) return;
@@ -41,7 +42,8 @@ export default function App() {
     return <LoginScreen onLogin={session.login} initialServerUrl={session.settings["server:config"]?.url} />;
   }
 
-  const { apiKey, activeModel, isAdmin, serverUrl } = session.runtime;
+  const { apiKey, activeModel, isAdmin, isGuest, serverUrl } = session.runtime;
+  const currentTab = isGuest ? "Knowledge" : activeTab;
   const logout = async () => {
     await session.logout();
     setSelectedProject(null);
@@ -52,13 +54,14 @@ export default function App() {
       <div className="fixed inset-0 pointer-events-none z-[999]" style={{ background: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px)" }} />
       <TopBar />
       <div className="flex flex-1 overflow-hidden relative">
-        <LeftSidebar onSettingsChanged={session.refreshSettings} onLogout={logout} activeTab={activeTab} onChangeTab={setActiveTab} isAdmin={isAdmin} />
+        <LeftSidebar onSettingsChanged={session.refreshSettings} onLogout={logout} activeTab={currentTab} onChangeTab={(tab) => { if (!isGuest) setActiveTab(tab); }} isAdmin={isAdmin} isGuest={isGuest} />
         <OlympusViewport
-          activeTab={activeTab}
+          activeTab={currentTab}
           serverUrl={serverUrl}
           apiKey={apiKey}
           activeModel={activeModel}
           isAdmin={isAdmin}
+          isGuest={isGuest}
           activeUserId={session.settings["user:id"] || ""}
           selectedProject={selectedProject}
           onSelectProject={setSelectedProject}
