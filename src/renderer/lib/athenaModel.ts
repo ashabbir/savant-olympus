@@ -49,7 +49,7 @@ async function loadProviderCatalog(settings: Record<string, any>): Promise<Athen
     providers = Array.isArray(result?.providers) ? result.providers : [];
     if (providers.length) catalogCache = { at: Date.now(), url, providers };
   }
-  const enabledProviders = settings?.["gateway:enabledProviders"] ?? settings?.["agents:enabledProviders"];
+  const enabledProviders = settings?.["gateway:enabledProviders"];
   if (Array.isArray(enabledProviders)) {
     return providers.filter((p) => enabledProviders.includes(p.id));
   }

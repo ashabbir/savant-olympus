@@ -352,9 +352,9 @@ describe('AgentSetupView Component', () => {
     })
   })
 
-  it('hides disabled agents and only shows enabled agents based on gateway:enabledProviders', async () => {
+  it('hides disabled agents and only shows enabled agents based on agents:enabledList', async () => {
     (window as any).system.getSettings = vi.fn().mockResolvedValue({
-      'gateway:enabledProviders': ['claude', 'codex'],
+      'agents:enabledList': ['claude', 'codex'],
     })
 
     render(<AgentSetupView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
@@ -367,7 +367,7 @@ describe('AgentSetupView Component', () => {
 
   it('shows empty state when all external agent providers are disabled', async () => {
     (window as any).system.getSettings = vi.fn().mockResolvedValue({
-      'gateway:enabledProviders': [],
+      'agents:enabledList': [],
     })
 
     render(<AgentSetupView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)

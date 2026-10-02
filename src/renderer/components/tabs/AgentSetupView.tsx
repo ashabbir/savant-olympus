@@ -40,9 +40,9 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
   const [setupScope, setSetupScope] = useState<"global" | "workspace">("global");
   const [mcpTransport, setMcpTransport] = useState<AgentMcpTransport>("streamable-http");
   const [knowledgeMcpUrl, setKnowledgeMcpUrl] = useState<string | null>(null);
-  const [enabledProviders, setEnabledProviders] = useState<string[] | null>(null);
+  const [enabledAgents, setEnabledAgents] = useState<string[] | null>(null);
 
-  // Prefer the user's configured MCP endpoint (Settings > Server) and gateway enabled providers
+  // Prefer the user's configured MCP endpoint (Settings > Server) and agents enabled list
   useEffect(() => {
     let active = true;
     const loadSettings = async () => {
@@ -51,8 +51,8 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
         if (active && settings) {
           const configured = settings?.["mcp:endpoints"]?.knowledge;
           if (configured) setKnowledgeMcpUrl(configured);
-          const ep = settings?.["gateway:enabledProviders"] ?? settings?.["agents:enabledProviders"];
-          setEnabledProviders(Array.isArray(ep) ? ep : null);
+          const ea = settings?.["agents:enabledList"] ?? settings?.["agents:enabled"] ?? settings?.["agents:enabledProviders"];
+          setEnabledAgents(Array.isArray(ea) ? ea : null);
         }
       } catch {
         // fall back to the derived default below
@@ -113,7 +113,7 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
 
   const allAgents: AgentSetupInfo[] = report ? Object.values(report.agents) : [];
   const agentsList: AgentSetupInfo[] = allAgents.filter(
-    (agent) => enabledProviders === null || enabledProviders.includes(agent.provider)
+    (agent) => enabledAgents === null || enabledAgents.includes(agent.provider)
   );
   const totalCount = agentsList.length;
   const configuredCount = agentsList.filter(a => a.status === "configured").length;
@@ -129,7 +129,7 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
     setIsTriggeringAll(true);
     try {
       toast.info(`Triggering setup for enabled agents (${targets.map(p => p.toUpperCase()).join(", ")})...`);
-      if (enabledProviders === null) {
+      if (enabledAgents === null) {
         const result = await agentService.triggerSetup("all", undefined, mcpTransport);
         if (result.success && result.report) {
           setReport(result.report);
@@ -274,7 +274,7 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
             <Bot size={44} className="opacity-30 text-[var(--cp-cyan)] mb-3" />
             <h3 className="text-sm font-bold tracking-wider uppercase mb-1">No Agents Enabled</h3>
             <p className="text-xs text-muted-foreground mb-4">
-              All external agent integrations (Hermes, Codex, Copilot, Claude) are currently disabled in Gateway Settings.
+              All external agent integrations (Hermes, Codex, Copilot, Claude) are currently disabled in Settings &gt; Agents.
             </p>
           </div>
         ) : (

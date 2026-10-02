@@ -395,6 +395,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
   ]);
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
   const [enabledProviders, setEnabledProviders] = useState<string[] | null>(null);
+  const [enabledAgents, setEnabledAgents] = useState<string[] | null>(null);
   const [providerSource, setProviderSource] = useState<"gateway" | "terminal">("terminal");
   const [providersLoading, setProvidersLoading] = useState(false);
   const [providersError, setProvidersError] = useState("");
@@ -447,8 +448,11 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
         })));
       }
 
-      const savedEnabled = settings["gateway:enabledProviders"] ?? settings["agents:enabledProviders"];
-      setEnabledProviders(Array.isArray(savedEnabled) ? savedEnabled : null);
+      const savedProviders = settings["gateway:enabledProviders"];
+      setEnabledProviders(Array.isArray(savedProviders) ? savedProviders : null);
+
+      const savedAgents = settings["agents:enabledList"] ?? settings["agents:enabled"];
+      setEnabledAgents(Array.isArray(savedAgents) ? savedAgents : null);
 
       const nextGateway = toLiveServiceConfig(settings["gateway:config"], {
         url: "http://localhost:3100",
@@ -476,8 +480,8 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
         "provider:chain": settings["provider:chain"] || "",
         "agents:list": settings["agents:list"] || [],
         "gateway:config": settings["gateway:config"] || { url: "http://localhost:3100", enabled: true },
-        "gateway:enabledProviders": Array.isArray(savedEnabled) ? savedEnabled : null,
-        "agents:enabledProviders": Array.isArray(savedEnabled) ? savedEnabled : null,
+        "gateway:enabledProviders": Array.isArray(savedProviders) ? savedProviders : null,
+        "agents:enabledList": Array.isArray(savedAgents) ? savedAgents : null,
         "server:config": settings["server:config"] || { url: "http://127.0.0.1:8090", enabled: true },
         "mcp:endpoints": settings["mcp:endpoints"] || {},
       };
@@ -516,7 +520,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
       await window.system.saveSetting("agents:list", agents);
       await window.system.saveSetting("gateway:config", { ...gateway, status: "idle", url: normalizeServiceUrl(gateway.url) });
       await window.system.saveSetting("gateway:enabledProviders", enabledProviders);
-      await window.system.saveSetting("agents:enabledProviders", enabledProviders);
+      await window.system.saveSetting("agents:enabledList", enabledAgents);
       await window.system.saveSetting("server:config", { ...server, status: "idle", url: normalizeServiceUrl(server.url) });
       await window.system.saveSetting("mcp:endpoints", mcpEndpoints);
       window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
@@ -524,7 +528,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
     }, 500);
 
     return () => clearTimeout(saveTimer);
-  }, [defaultDirectory, moderatorPrompt, providerChain, agents, gateway, server, mcpEndpoints, enabledProviders]);
+  }, [defaultDirectory, moderatorPrompt, providerChain, agents, gateway, server, mcpEndpoints, enabledProviders, enabledAgents]);
 
   async function detectMcpEndpoints(serverConfig: ServiceConfig = server, currentEndpoints: Record<McpServiceName, string> = mcpEndpoints) {
     setMcpDetectLoading(true);
@@ -569,7 +573,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
     await window.system.saveSetting("agents:list", agents);
     await window.system.saveSetting("gateway:config", { ...gateway, status: "idle", url: normalizeServiceUrl(gateway.url) });
     await window.system.saveSetting("gateway:enabledProviders", enabledProviders);
-    await window.system.saveSetting("agents:enabledProviders", enabledProviders);
+    await window.system.saveSetting("agents:enabledList", enabledAgents);
     await window.system.saveSetting("server:config", { ...server, status: "idle", url: normalizeServiceUrl(server.url) });
     await window.system.saveSetting("mcp:endpoints", mcpEndpoints);
     invalidateCatalogCache();
@@ -589,7 +593,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
     await window.system.saveSetting("agents:list", backupRef.current["agents:list"]);
     await window.system.saveSetting("gateway:config", backupRef.current["gateway:config"]);
     await window.system.saveSetting("gateway:enabledProviders", backupRef.current["gateway:enabledProviders"]);
-    await window.system.saveSetting("agents:enabledProviders", backupRef.current["agents:enabledProviders"]);
+    await window.system.saveSetting("agents:enabledList", backupRef.current["agents:enabledList"]);
     await window.system.saveSetting("server:config", backupRef.current["server:config"]);
     await window.system.saveSetting("mcp:endpoints", backupRef.current["mcp:endpoints"]);
     invalidateCatalogCache();
@@ -646,30 +650,26 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
     { id: "claude", label: "Claude Code / Desktop", description: "Anthropic Claude Code CLI & Desktop Agent integration", icon: Terminal },
     { id: "hermes", label: "Hermes Agent", description: "Hermes autonomous agent execution runtime", icon: Code2 },
     { id: "codex", label: "Codex Agent", description: "Codex CLI & OpenAI developer environment", icon: FileText },
-    ...(allDiscoveredProviders.some(p => p.id === "agy")
-      ? [{ id: "agy", label: "AGY Agent", description: "Antigravity AGY workspace integration", icon: Bot }]
-      : []),
   ];
 
+  function toggleAgentEnabled(agentId: string) {
+    const current = enabledAgents !== null
+      ? [...enabledAgents]
+      : displayAgents.map(a => a.id);
+    const next = current.includes(agentId)
+      ? current.filter(id => id !== agentId)
+      : [...current, agentId];
+    setEnabledAgents(next);
+    window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
+  }
+
   function enableAllAgents() {
-    const current = enabledProviders !== null
-      ? [...enabledProviders]
-      : allDiscoveredProviders.map(p => p.id);
-    const agentIds = displayAgents.map(a => a.id);
-    const next = Array.from(new Set([...current, ...agentIds]));
-    setEnabledProviders(next);
-    invalidateCatalogCache();
+    setEnabledAgents(displayAgents.map(a => a.id));
     window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
   }
 
   function disableAllAgents() {
-    const current = enabledProviders !== null
-      ? [...enabledProviders]
-      : allDiscoveredProviders.map(p => p.id);
-    const agentIds = new Set(displayAgents.map(a => a.id));
-    const next = current.filter(id => !agentIds.has(id));
-    setEnabledProviders(next);
-    invalidateCatalogCache();
+    setEnabledAgents([]);
     window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
   }
 
@@ -922,10 +922,10 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
                       <h4 style={{ color: "var(--cp-cyan)", fontFamily: "'Orbitron', sans-serif" }} className="text-xs uppercase tracking-wider font-semibold">
-                        Enabled Providers Override
+                        Enabled Providers Override (Athena / Chat)
                       </h4>
                       <p className="text-[11px] opacity-60 mt-0.5" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
-                        Enable or disable specific gateway providers (e.g. Hermes, Codex, Copilot, Claude). Disabled providers will not appear in Athena mental mode or Agent Setup.
+                        Enable or disable specific gateway providers (e.g. Hermes, Codex, Copilot, Claude). Controls what providers and models are available for Athena mental mode and chat.
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -1072,12 +1072,12 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                     {displayAgents.map(agent => {
-                      const isEnabled = enabledProviders === null || enabledProviders.includes(agent.id);
+                      const isEnabled = enabledAgents === null || enabledAgents.includes(agent.id);
                       const Icon = agent.icon;
                       return (
                         <div
                           key={agent.id}
-                          onClick={() => toggleProviderEnabled(agent.id)}
+                          onClick={() => toggleAgentEnabled(agent.id)}
                           style={{
                             background: isEnabled ? "var(--cp-bg-2)" : "var(--cp-bg-3)",
                             borderColor: isEnabled ? "var(--cp-cyan)" : "var(--cp-border)",
