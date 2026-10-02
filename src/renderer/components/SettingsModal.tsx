@@ -6,6 +6,7 @@ import { runtimeService } from "../services/runtimeService";
 import { createAbilitiesService } from "../services/abilitiesService";
 import { TagInput } from "./ui/tag-input";
 import { ATHENA_MODEL_CHANGED_EVENT, athenaModelFromSettings, reconcileAthenaModel, thinkingLevelsFor } from "../lib/athenaModel";
+import { suggestMcpEndpoints, McpDeploymentMode, McpServiceName } from "../services/agentSetupService";
 
 interface ProviderChainItem {
   id: string;
@@ -233,6 +234,79 @@ function ServicePanel({
   );
 }
 
+const MCP_SERVICES: Array<{ name: McpServiceName; label: string }> = [
+  { name: "workspace", label: "Workspace" },
+  { name: "abilities", label: "Abilities" },
+  { name: "context", label: "Context" },
+  { name: "knowledge", label: "Knowledge" },
+  { name: "reminders", label: "Reminders" },
+];
+
+function McpEndpointsPanel({
+  endpoints,
+  autoFilled,
+  deployment,
+  detecting,
+  detectError,
+  onChange,
+  onRedetect,
+}: {
+  endpoints: Record<McpServiceName, string>;
+  autoFilled: Set<McpServiceName>;
+  deployment: McpDeploymentMode | null;
+  detecting: boolean;
+  detectError: string;
+  onChange: (name: McpServiceName, url: string) => void;
+  onRedetect: () => void;
+}) {
+  return (
+    <div className="space-y-3 pt-2 border-t" style={{ borderColor: "var(--cp-border)" }}>
+      <div className="flex items-center justify-between">
+        <div>
+          <label style={labelStyle} className="block text-xs opacity-70">MCP Endpoints</label>
+          <p style={{ color: "var(--foreground)" }} className="text-[11px] opacity-50 mt-0.5">
+            {deployment
+              ? deployment === "kubernetes"
+                ? "Server looks like it's running in Kubernetes/Okteto — URLs below are a best guess. Please confirm or edit."
+                : `Server looks like it's running ${deployment === "docker" ? "in Docker" : "locally"} — URLs below were auto-filled.`
+              : "Where each MCP tool (Workspace, Abilities, Context, Knowledge, Reminders) is reachable. Auto-detected from the server, always editable."}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onRedetect}
+          disabled={detecting}
+          style={{ background: "var(--cp-bg-3)", border: "1px solid var(--cp-cyan)", color: "var(--cp-cyan)", fontFamily: "'Share Tech Mono', monospace" }}
+          className="px-3 py-1.5 text-xs flex items-center gap-1.5 hover:opacity-80 transition-opacity disabled:opacity-30 shrink-0"
+        >
+          <RefreshCw size={12} className={detecting ? "animate-spin" : ""} />
+          Re-detect
+        </button>
+      </div>
+
+      {detectError && (
+        <p style={{ color: "var(--cp-magenta)" }} className="text-[11px]">{detectError}</p>
+      )}
+
+      <div className="space-y-2">
+        {MCP_SERVICES.map(({ name, label }) => (
+          <div key={name} className="flex items-center gap-2">
+            <span style={labelStyle} className="text-xs w-20 shrink-0 opacity-70">{label}</span>
+            <CyberpunkInput
+              value={endpoints[name] || ""}
+              onChange={url => onChange(name, url)}
+              placeholder="http://127.0.0.1:819x/mcp"
+            />
+            {autoFilled.has(name) && endpoints[name] && (
+              <span className="text-[9px] uppercase opacity-40 shrink-0" style={labelStyle}>guessed</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AthenaMentalMode({ value, options, loading, onRefresh, onChange, labelStyle, inputStyle }: {
   value: { provider: string; model: string; thinkingLevel: string };
   options: ProviderOption[];
@@ -339,6 +413,13 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
     enabled: true,
     status: "idle",
   });
+  const [mcpEndpoints, setMcpEndpoints] = useState<Record<McpServiceName, string>>({
+    workspace: "", abilities: "", context: "", knowledge: "", reminders: "",
+  });
+  const [mcpAutoFilled, setMcpAutoFilled] = useState<Set<McpServiceName>>(new Set());
+  const [mcpDeployment, setMcpDeployment] = useState<McpDeploymentMode | null>(null);
+  const [mcpDetectLoading, setMcpDetectLoading] = useState(false);
+  const [mcpDetectError, setMcpDetectError] = useState("");
   const directoryInputRef = useRef<HTMLInputElement>(null);
   const backupRef = useRef<Record<string, any>>({});
   const initializedRef = useRef(false);
@@ -377,6 +458,12 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
       setGateway(nextGateway);
       setServer(nextServer);
 
+      const nextMcpEndpoints = {
+        workspace: "", abilities: "", context: "", knowledge: "", reminders: "",
+        ...(settings["mcp:endpoints"] || {}),
+      };
+      setMcpEndpoints(nextMcpEndpoints);
+
       backupRef.current = {
         "system:defaultDirectory": settings["system:defaultDirectory"] || "",
         "moderator:prompt": settings["moderator:prompt"] || "",
@@ -384,11 +471,17 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
         "agents:list": settings["agents:list"] || [],
         "gateway:config": settings["gateway:config"] || { url: "http://localhost:3100", enabled: true },
         "server:config": settings["server:config"] || { url: "http://127.0.0.1:8090", enabled: true },
+        "mcp:endpoints": settings["mcp:endpoints"] || {},
       };
       initializedRef.current = true;
 
       await refreshProviders(nextGateway);
       await refreshAbilities(nextServer);
+
+      // First time setup: nothing saved yet, so auto-detect and prefill (still fully editable/overridable).
+      if (!settings["mcp:endpoints"] && nextServer.enabled) {
+        await detectMcpEndpoints(nextServer, nextMcpEndpoints);
+      }
     }
 
     loadSettings();
@@ -415,12 +508,49 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
       await window.system.saveSetting("agents:list", agents);
       await window.system.saveSetting("gateway:config", { ...gateway, status: "idle", url: normalizeServiceUrl(gateway.url) });
       await window.system.saveSetting("server:config", { ...server, status: "idle", url: normalizeServiceUrl(server.url) });
+      await window.system.saveSetting("mcp:endpoints", mcpEndpoints);
       window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
       if (onSettingsChanged) onSettingsChanged();
     }, 500);
 
     return () => clearTimeout(saveTimer);
-  }, [defaultDirectory, moderatorPrompt, providerChain, agents, gateway, server]);
+  }, [defaultDirectory, moderatorPrompt, providerChain, agents, gateway, server, mcpEndpoints]);
+
+  async function detectMcpEndpoints(serverConfig: ServiceConfig = server, currentEndpoints: Record<McpServiceName, string> = mcpEndpoints) {
+    setMcpDetectLoading(true);
+    setMcpDetectError("");
+    try {
+      const suggestion = await suggestMcpEndpoints(serverConfig.url, userApiKey || getStoredApiKey() || "");
+      setMcpDeployment(suggestion.deployment);
+      setMcpEndpoints(prev => {
+        const next = { ...prev };
+        const nowAutoFilled = new Set(mcpAutoFilled);
+        for (const [name, url] of Object.entries(suggestion.endpoints)) {
+          const serviceName = name as McpServiceName;
+          const current = currentEndpoints[serviceName] ?? prev[serviceName];
+          if (!current || mcpAutoFilled.has(serviceName)) {
+            next[serviceName] = url as string;
+            nowAutoFilled.add(serviceName);
+          }
+        }
+        setMcpAutoFilled(nowAutoFilled);
+        return next;
+      });
+    } catch (error: any) {
+      setMcpDetectError(error?.message || "Failed to detect MCP endpoints from server.");
+    } finally {
+      setMcpDetectLoading(false);
+    }
+  }
+
+  function handleMcpEndpointChange(name: McpServiceName, url: string) {
+    setMcpAutoFilled(prev => {
+      const next = new Set(prev);
+      next.delete(name);
+      return next;
+    });
+    setMcpEndpoints(prev => ({ ...prev, [name]: url }));
+  }
 
   async function handleSave() {
     await window.system.saveSetting("system:defaultDirectory", defaultDirectory);
@@ -429,6 +559,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
     await window.system.saveSetting("agents:list", agents);
     await window.system.saveSetting("gateway:config", { ...gateway, status: "idle", url: normalizeServiceUrl(gateway.url) });
     await window.system.saveSetting("server:config", { ...server, status: "idle", url: normalizeServiceUrl(server.url) });
+    await window.system.saveSetting("mcp:endpoints", mcpEndpoints);
     window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
     if (onSettingsChanged) onSettingsChanged();
     onClose();
@@ -445,6 +576,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
     await window.system.saveSetting("agents:list", backupRef.current["agents:list"]);
     await window.system.saveSetting("gateway:config", backupRef.current["gateway:config"]);
     await window.system.saveSetting("server:config", backupRef.current["server:config"]);
+    await window.system.saveSetting("mcp:endpoints", backupRef.current["mcp:endpoints"]);
     window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
     if (onSettingsChanged) onSettingsChanged();
     onClose();
@@ -696,14 +828,25 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
 
             {/* ── SERVER ── */}
             {activeTab === "server" && (
-              <ServicePanel
-                description="Backend server connection settings"
-                config={server}
-                onChange={patch => setServer(prev => ({ ...prev, ...patch }))}
-                healthPath="/health/ready"
-                apiKey={userApiKey}
-                includeApiKey
-              />
+              <div className="space-y-4">
+                <ServicePanel
+                  description="Backend server connection settings"
+                  config={server}
+                  onChange={patch => setServer(prev => ({ ...prev, ...patch }))}
+                  healthPath="/health/ready"
+                  apiKey={userApiKey}
+                  includeApiKey
+                />
+                <McpEndpointsPanel
+                  endpoints={mcpEndpoints}
+                  autoFilled={mcpAutoFilled}
+                  deployment={mcpDeployment}
+                  detecting={mcpDetectLoading}
+                  detectError={mcpDetectError}
+                  onChange={handleMcpEndpointChange}
+                  onRedetect={() => detectMcpEndpoints()}
+                />
+              </div>
             )}
 
             {/* ── AGENTS ── */}

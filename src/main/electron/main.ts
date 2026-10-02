@@ -802,9 +802,38 @@ function normalizeAgentMcpTransport(value: unknown): AgentMcpTransport {
   return value === 'sse' ? 'sse' : 'streamable-http'
 }
 
-function mcpEntryUrl(transport: AgentMcpTransport, port: number): string {
+function getUserApiKeyAndServerUrl(): { apiKey: string; serverUrl: string } {
+  let apiKey = ''
+  let serverUrl = 'http://127.0.0.1:8090'
+  if (db) {
+    try {
+      const akRow = db.prepare("SELECT value FROM settings WHERE key = 'user:apiKey'").get() as any
+      if (akRow?.value) apiKey = akRow.value
+      const scRow = db.prepare("SELECT value FROM settings WHERE key = 'server:config'").get() as any
+      if (scRow?.value) {
+        const parsed = JSON.parse(scRow.value)
+        if (parsed?.url) serverUrl = parsed.url
+      }
+    } catch {}
+  }
+  return { apiKey, serverUrl }
+}
+
+function mcpEntryUrl(transport: AgentMcpTransport, service: string, port: number): string {
   const suffix = transport === 'sse' ? 'sse' : 'mcp'
-  return `http://127.0.0.1:${port}/${suffix}?api_key=sk-ahmed-savant-001&app_name=savant-mcp`
+  const { apiKey, serverUrl } = getUserApiKeyAndServerUrl()
+
+  try {
+    const parsed = new URL(serverUrl)
+    const host = parsed.hostname
+    const match = host.match(/^savant-server-([^.]+)\.(.+)$/)
+    if (match) {
+      const [, user, domain] = match
+      return `${parsed.protocol}//savant-mcp-${service}-${user}.${domain}/${suffix}?api_key=${apiKey}&app_name=savant-mcp`
+    }
+  } catch {}
+
+  return `http://127.0.0.1:${port}/${suffix}?api_key=${apiKey}&app_name=savant-mcp`
 }
 
 const LEARNING_PROTOCOL_TEXT = `
@@ -829,12 +858,13 @@ Whenever you:
 <!-- SAVANT KNOWLEDGE PROTOCOL END -->
 `
 
-const HOOK_SCRIPT_CONTENT = `#!/usr/bin/env bash
+function buildHookScriptContent(apiKey: string, serverUrl: string): string {
+  return `#!/usr/bin/env bash
 # Savant Knowledge Auto-Recorder Hook
 set -e
 
-SAVANT_SERVER_URL="\${SAVANT_SERVER_URL:-http://127.0.0.1:8090}"
-API_KEY="\${SAVANT_API_KEY:-sk-ahmed-savant-001}"
+SAVANT_SERVER_URL="\${SAVANT_SERVER_URL:-${serverUrl}}"
+API_KEY="\${SAVANT_API_KEY:-${apiKey}}"
 APP_NAME="savant-client"
 
 TYPE="insight"
@@ -885,6 +915,7 @@ fi
 
 echo "Posted learning to Savant Knowledge: $TITLE"
 `
+}
 
 async function checkAgentSetupInternal() {
   const result: Record<string, any> = {}
@@ -1021,15 +1052,15 @@ async function triggerAgentSetupInternal(providerName: string, requestedTranspor
 
       currentMcp.mcpServers['savant-knowledge'] = {
         type: config.type,
-        url: mcpEntryUrl(transport, config.ports[0]),
+        url: mcpEntryUrl(transport, 'knowledge', config.ports[0]),
       }
       currentMcp.mcpServers['savant-context'] = {
         type: config.type,
-        url: mcpEntryUrl(transport, config.ports[1]),
+        url: mcpEntryUrl(transport, 'context', config.ports[1]),
       }
       currentMcp.mcpServers['savant-workspace'] = {
         type: config.type,
-        url: mcpEntryUrl(transport, config.ports[2]),
+        url: mcpEntryUrl(transport, 'workspace', config.ports[2]),
       }
       await fs.writeFile(profile.mcpPath, JSON.stringify(currentMcp, null, 2), 'utf8')
       configuredParts.push(`${p}:mcp`)
@@ -1082,7 +1113,8 @@ Whenever an architectural decision or bug root cause is identified:
     // 4. Setup Hook Script
     try {
       await fs.mkdir(path.dirname(profile.hookPath), { recursive: true })
-      await fs.writeFile(profile.hookPath, HOOK_SCRIPT_CONTENT, 'utf8')
+      const { apiKey, serverUrl } = getUserApiKeyAndServerUrl()
+      await fs.writeFile(profile.hookPath, buildHookScriptContent(apiKey, serverUrl), 'utf8')
       await fs.chmod(profile.hookPath, 0o755)
       configuredParts.push(`${p}:hook`)
     } catch (e) {

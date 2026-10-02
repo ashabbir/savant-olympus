@@ -38,6 +38,21 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [setupScope, setSetupScope] = useState<"global" | "workspace">("global");
   const [mcpTransport, setMcpTransport] = useState<AgentMcpTransport>("streamable-http");
+  const [knowledgeMcpUrl, setKnowledgeMcpUrl] = useState<string | null>(null);
+
+  // Prefer the user's configured MCP endpoint (Settings > Server) over a hardcoded localhost guess —
+  // it's the one place that knows whether this server is Docker, Okteto, or local.
+  useEffect(() => {
+    (async () => {
+      try {
+        const settings = await (window as any).system?.getSettings?.();
+        const configured = settings?.["mcp:endpoints"]?.knowledge;
+        if (configured) setKnowledgeMcpUrl(configured);
+      } catch {
+        // fall back to the derived default below
+      }
+    })();
+  }, []);
 
   // Test learning ingestion state
   const [isTestingPost, setIsTestingPost] = useState(false);
@@ -359,7 +374,7 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
                         <pre className="text-slate-300">
 {`"savant-knowledge": {
   "type": "${mcpTransport}",
-  "url": "http://127.0.0.1:${mcpTransport === "streamable-http" ? "8194/mcp" : "8094/sse"}?api_key=sk-ahmed-savant-001&app_name=savant-mcp"
+  "url": "${knowledgeMcpUrl || `http://127.0.0.1:${mcpTransport === "streamable-http" ? "8194/mcp" : "8094/sse"}`}?api_key=${apiKey}&app_name=savant-mcp"
 }`}
                         </pre>
                       </div>

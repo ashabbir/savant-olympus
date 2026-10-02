@@ -11,6 +11,15 @@ const formatTimestamp = (value?: string | null) => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 };
 
+const ACTIVE_WITHIN_MS = 24 * 60 * 60 * 1000;
+
+const isRecentlyActive = (value?: string | null) => {
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  return Date.now() - date.getTime() <= ACTIVE_WITHIN_MS;
+};
+
 function UsageCard({ title, testId, children }: { title: string; testId: string; children: React.ReactNode }) {
   return (
     <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] p-4 space-y-3" data-testid={testId}>
@@ -77,13 +86,15 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
   const [selectedDomainToAdd, setSelectedDomainToAdd] = useState("");
   const [copySource, setCopySource] = useState<User | null>(null);
   const [copyUsername, setCopyUsername] = useState("");
+  const [copyName, setCopyName] = useState("");
+  const [copyEmail, setCopyEmail] = useState("");
   const [copyError, setCopyError] = useState("");
   const [isCopying, setIsCopying] = useState(false);
   const [userUsage, setUserUsage] = useState<UserUsage | null>(null);
   const [usageError, setUsageError] = useState("");
   const [isAddingAllDomains, setIsAddingAllDomains] = useState(false);
   const [domainBulkNote, setDomainBulkNote] = useState("");
-  const [detailTab, setDetailTab] = useState<"profile" | "usage">("profile");
+  const [detailTab, setDetailTab] = useState<"profile" | "access" | "usage" | "contributions">("profile");
   const usersService = createUsersService(serverUrl, apiKey);
 
   const fetchUserDomains = async (uid: string) => {
@@ -217,11 +228,13 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
 
   const handleSaveEdit = async (e: React.FormEvent, userId: string) => {
     e.preventDefault();
+    const isSelf = !!activeUserId && userId.toLowerCase() === activeUserId.toLowerCase();
+    const currentUser = users.find((u) => (u.id || u.username) === userId);
     try {
       await usersService.updateUser(userId, {
         name: editName,
         email: editEmail,
-        role: editRole,
+        role: isSelf && currentUser ? currentUser.role : editRole,
         is_active: editActive,
       });
       await fetchUsers();
@@ -268,6 +281,8 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
   const openCopyDialog = (user: User) => {
     setCopySource(user);
     setCopyUsername("");
+    setCopyName(user.name || "");
+    setCopyEmail(user.email || "");
     setCopyError("");
   };
 
@@ -285,11 +300,13 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
     try {
       const sourceId = copySource.id || copySource.username;
       const sourceDomains = copySource.role === "admin" ? [] : await usersService.listUserDomains(sourceId);
+      const newName = copyName.trim() || copySource.name;
+      const newEmail = copyEmail.trim() || copySource.email;
       const data = await usersService.createUser({
         user_id: newUsername,
         username: newUsername,
-        name: copySource.name,
-        email: copySource.email,
+        name: newName,
+        email: newEmail,
         role: copySource.role,
         is_active: copySource.active,
       });
@@ -309,8 +326,8 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
       setCopySource(null);
       setShowCreateForm(false);
       setSelectedUserId(newUid);
-      setEditName(copySource.name);
-      setEditEmail(copySource.email || "");
+      setEditName(newName);
+      setEditEmail(newEmail || "");
       setEditRole(copySource.role);
       setEditActive(copySource.active);
       await fetchUsers();
@@ -404,6 +421,12 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
       >
         <div className="truncate pr-2 flex items-center gap-1.5 min-w-0">
           <Users size={12} className={isSelected ? "text-[var(--cp-cyan)] shrink-0" : "text-muted-foreground shrink-0"} />
+          {isRecentlyActive(user.last_login_at) && (
+            <span
+              title={`Active in the last 24h (last login: ${formatTimestamp(user.last_login_at)})`}
+              className="w-1.5 h-1.5 rounded-full bg-[var(--cp-green)] shrink-0 shadow-[0_0_4px_var(--cp-green)]"
+            />
+          )}
           <span className="font-semibold truncate">{user.name}</span>
           <span className="text-[10px] opacity-60 shrink-0">({user.username})</span>
         </div>
@@ -514,6 +537,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
 
   const renderEditPage = (user: User) => {
     const userId = user.id || user.username;
+    const isSelf = !!activeUserId && userId.toLowerCase() === activeUserId.toLowerCase();
     if (!isAdmin) {
       return (
         <div className="space-y-3 max-w-xl font-mono text-xs">
@@ -547,8 +571,31 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
           </div>
         </div>
 
+        <div className="flex flex-wrap gap-3" data-testid="user-quick-stats">
+          <div className="flex items-center gap-1.5 border border-[var(--cp-border)] bg-[var(--cp-bg-2)] px-2.5 py-1">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+              isRecentlyActive(userUsage?.last_login_at ?? user.last_login_at) ? "bg-[var(--cp-green)] shadow-[0_0_4px_var(--cp-green)]" : "bg-muted-foreground/40"
+            }`} />
+            <span className="text-[10px] uppercase text-muted-foreground">
+              {isRecentlyActive(userUsage?.last_login_at ?? user.last_login_at) ? "Active last 24h" : "Inactive 24h"}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 border border-[var(--cp-border)] bg-[var(--cp-bg-2)] px-2.5 py-1">
+            <span className="text-[10px] uppercase text-muted-foreground">Tool calls ({USAGE_WINDOW_DAYS}d):</span>
+            <span className="text-[10px] text-foreground">{userUsage ? userUsage.total_calls : "—"}</span>
+          </div>
+          <div className="flex items-center gap-1.5 border border-[var(--cp-border)] bg-[var(--cp-bg-2)] px-2.5 py-1">
+            <span className="text-[10px] uppercase text-muted-foreground">Logins ({USAGE_WINDOW_DAYS}d):</span>
+            <span className="text-[10px] text-foreground">{userUsage ? userUsage.logins_per_day.reduce((n, d) => n + d.logins, 0) : "—"}</span>
+          </div>
+          <div className="flex items-center gap-1.5 border border-[var(--cp-border)] bg-[var(--cp-bg-2)] px-2.5 py-1">
+            <span className="text-[10px] uppercase text-muted-foreground">Projects:</span>
+            <span className="text-[10px] text-foreground">{userUsage ? userUsage.projects.length : "—"}</span>
+          </div>
+        </div>
+
         <div className="flex gap-1 border-b border-[var(--cp-border)]" role="tablist">
-          {(["profile", "usage"] as const).map((tab) => (
+          {(["profile", "access", "usage", "contributions"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -561,7 +608,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              {tab === "profile" ? "Profile" : "Usage"}
+              {tab === "profile" ? "Profile" : tab === "access" ? "Access" : tab === "usage" ? "Usage" : "Contributions"}
             </button>
           ))}
         </div>
@@ -607,7 +654,8 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
                 id="edit-role"
                 value={editRole}
                 onChange={(e) => setEditRole(e.target.value)}
-                className="bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-3 py-2 focus:outline-none focus:border-[var(--cp-cyan)] font-mono cursor-pointer"
+                disabled={isSelf}
+                className="bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-3 py-2 focus:outline-none focus:border-[var(--cp-cyan)] font-mono cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <option value="admin">ADMIN</option>
                 <option value="operator">OPERATOR</option>
@@ -620,7 +668,8 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
                 id="edit-active"
                 value={editActive ? "true" : "false"}
                 onChange={(e) => setEditActive(e.target.value === "true")}
-                className="bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-3 py-2 focus:outline-none focus:border-[var(--cp-cyan)] font-mono cursor-pointer"
+                disabled={isSelf}
+                className="bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-3 py-2 focus:outline-none focus:border-[var(--cp-cyan)] font-mono cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <option value="true">ACTIVE</option>
                 <option value="false">INACTIVE</option>
@@ -669,11 +718,19 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
             >
               <Copy size={12} /> COPY_USER
             </button>
-            {user.active && (
+            {user.active && !isSelf && (
               <button
                 onClick={() => handleDeleteUser(userId)}
                 className="px-3 py-1.5 border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs font-mono flex items-center gap-1.5 cursor-pointer transition-all"
                 title="Deactivate user"
+              >
+                <X size={12} /> DEACTIVATE
+              </button>
+            )}
+            {user.active && isSelf && (
+              <button
+                disabled
+                className="px-3 py-1.5 border border-red-500/30 text-red-400 text-xs font-mono flex items-center gap-1.5 opacity-40 cursor-not-allowed"
               >
                 <X size={12} /> DEACTIVATE
               </button>
@@ -684,7 +741,9 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
           </p>
         </div>
 
-        {/* Domain Access Control Section */}
+        </>)}
+
+        {detailTab === "access" && (
         <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] p-4 space-y-4">
           <div className="text-[11px] font-bold text-[var(--cp-cyan)] tracking-wider uppercase flex items-center justify-between">
             <span className="flex items-center gap-2">
@@ -757,16 +816,17 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
                   onClick={() => handleAssignDomain(userId)}
                   disabled={!selectedDomainToAdd}
                   className="px-3 py-1.5 border border-[var(--cp-cyan)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] disabled:opacity-40 disabled:cursor-not-allowed text-xs font-mono flex items-center gap-1 cursor-pointer transition-all"
+                  title="Assign write access to the selected domain"
                 >
-                  <Plus size={12} /> ASSIGN
+                  <Plus size={12} />
                 </button>
                 <button
                   onClick={() => handleAssignAllMissingReadOnly(userId)}
                   disabled={missingDomains.length === 0 || isAddingAllDomains}
                   className="px-3 py-1.5 border border-amber-500/50 text-amber-400 hover:bg-[rgba(255,170,0,0.1)] disabled:opacity-40 disabled:cursor-not-allowed text-xs font-mono flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap"
-                  title="Assign every domain this user is missing, with read-only access"
+                  title={`Assign every domain this user is missing (${missingDomains.length}), with read-only access`}
                 >
-                  <Plus size={12} /> {isAddingAllDomains ? "ADDING..." : `ADD_ALL_MISSING_READ_ONLY (${missingDomains.length})`}
+                  <Plus size={12} /><Plus size={12} /> {isAddingAllDomains ? "..." : "RW"}
                 </button>
               </div>
               {domainBulkNote && (
@@ -775,8 +835,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
             </div>
           )}
         </div>
-
-        </>)}
+        )}
 
         {detailTab === "usage" && (
         <div className="space-y-4" data-testid="user-mcp-usage">
@@ -897,6 +956,18 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
             )}
           </UsageCard>
           </>)}
+        </div>
+        )}
+
+        {detailTab === "contributions" && (
+        <div className="space-y-4" data-testid="user-contributions">
+          <UsageCard title="Knowledge graph contributions" testId="contributions-summary">
+            <EmptyNote>
+              Contribution tracking is not available yet. The knowledge graph does not currently record which
+              user created, updated, or deleted a node or edge — this requires a backend change (audit columns
+              or an event log on kg_nodes/kg_edges) before this tab can show per-user node/edge/domain activity.
+            </EmptyNote>
+          </UsageCard>
         </div>
         )}
       </div>
@@ -1030,7 +1101,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
               <Copy size={16} /> Copy User: {copySource.username}
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Name, email, role, status and domain access are copied. A new API key is generated.
+              Role, status and domain access are copied. Name and email are pre-filled from the source user and can be edited. A new API key is generated.
             </p>
             <div className="flex flex-col space-y-1">
               <label htmlFor="copy-username" className="text-[10px] text-muted-foreground uppercase font-mono">New Username</label>
@@ -1043,6 +1114,28 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
                 onChange={(e) => setCopyUsername(e.target.value)}
                 className="bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-3 py-2 focus:outline-none focus:border-[var(--cp-cyan)] font-mono"
                 placeholder="e.g. john_doe_2"
+              />
+            </div>
+            <div className="flex flex-col space-y-1">
+              <label htmlFor="copy-name" className="text-[10px] text-muted-foreground uppercase font-mono">Full Name</label>
+              <input
+                id="copy-name"
+                type="text"
+                value={copyName}
+                onChange={(e) => setCopyName(e.target.value)}
+                className="bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-3 py-2 focus:outline-none focus:border-[var(--cp-cyan)] font-mono"
+                placeholder="e.g. John Doe"
+              />
+            </div>
+            <div className="flex flex-col space-y-1">
+              <label htmlFor="copy-email" className="text-[10px] text-muted-foreground uppercase font-mono">Email</label>
+              <input
+                id="copy-email"
+                type="email"
+                value={copyEmail}
+                onChange={(e) => setCopyEmail(e.target.value)}
+                className="bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-foreground text-xs px-3 py-2 focus:outline-none focus:border-[var(--cp-cyan)] font-mono"
+                placeholder="e.g. john.doe@example.com"
               />
             </div>
             {copyError && <div className="text-[10px] text-red-400">{copyError}</div>}

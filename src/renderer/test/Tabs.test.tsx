@@ -681,7 +681,10 @@ describe('UsersView Component', () => {
     })
     fireEvent.click(screen.getByText('Lex Friedman'))
 
-    const bulkBtn = await screen.findByRole('button', { name: /ADD_ALL_MISSING_READ_ONLY \(2\)/i })
+    const accessTab = await screen.findByRole('tab', { name: /access/i })
+    fireEvent.click(accessTab)
+
+    const bulkBtn = await screen.findByRole('button', { name: /RW/i })
     fireEvent.click(bulkBtn)
 
     expect(await screen.findByText('Added 2 domains as read-only.')).toBeInTheDocument()

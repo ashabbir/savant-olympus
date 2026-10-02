@@ -143,12 +143,20 @@ function normalizeBaseUrl(baseUrl: string) {
   return baseUrl.replace(/\/+$/, "")
 }
 
+/** Max characters kept per retrieved hit before the prompt gets flooded with full file/node dumps. */
+const MAX_HIT_CONTENT_CHARS = 500
+
+function topNotes(text: string, maxChars = MAX_HIT_CONTENT_CHARS) {
+  if (!text || text.length <= maxChars) return text
+  return `${text.slice(0, maxChars)}\n…[truncated ${text.length - maxChars} more chars; top notes only]`
+}
+
 export function formatAthenaContextHits(hits: AthenaContextHit[]) {
   if (!hits.length) return "No additional code context was retrieved."
   return hits
     .map((hit, index) => {
       const location = [hit.repo, hit.path].filter(Boolean).join(" / ")
-      return `[#${index + 1}] ${location}\n${hit.content || ""}`
+      return `[#${index + 1}] ${location}\n${topNotes(hit.content || "")}`
     })
     .join("\n\n")
 }
@@ -354,6 +362,16 @@ export async function fetchAthenaMcpTools(baseUrl: string, apiKey: string) {
   }))
 }
 
+/** Max tools listed in the full MCP catalog block before summarizing the rest as top notes. */
+const MAX_CATALOG_TOOLS = 40
+
+function formatToolCatalog(tools: Array<{ name: string; description: string }>) {
+  if (!tools.length) return "No MCP tools were returned by the catalog endpoint."
+  const shown = tools.slice(0, MAX_CATALOG_TOOLS).map((tool) => `- ${tool.name}: ${tool.description}`).join("\n")
+  const remaining = tools.length - MAX_CATALOG_TOOLS
+  return remaining > 0 ? `${shown}\n…and ${remaining} more tools (top notes only; full catalog available on request).` : shown
+}
+
 function formatConversationHistory(history: AthenaConversationMessage[]) {
   return history.length > 0
     ? history.map((message) => `${message.sender === "user" ? "USER" : "ATHENA"}: ${message.text}`).join("\n")
@@ -461,7 +479,7 @@ export async function buildAthenaAugmentedPrompt(
     ["SAVANT WORKSPACE MCP STATE & TASKS", formatAthenaWorkspaceTasks(workspaceContext.tasks)],
     ["SAVANT REMINDERS MCP STATE", formatAthenaReminders(remindersContext)],
     ["UPSTREAM AND DOWNSTREAM IMPACT SEARCH", impactSearched ? `Performed using research query: ${researchQuery}` : "Not required for this question."],
-    ["ADDITIONAL AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? tools.map((tool: any) => `- ${tool.name}: ${tool.description}`).join("\n") : "No additional catalogued tools; Savant Abilities, Knowledge, and Research results above are available MCP evidence."],
+    ["ADDITIONAL AVAILABLE SAVANT MCP TOOLS", tools.length > 0 ? formatToolCatalog(tools) : "No additional catalogued tools; Savant Abilities, Knowledge, and Research results above are available MCP evidence."],
     ["REQUIRED MCP EXECUTION AUDIT", auditMarkdown],
     ["REQUIRED MCP SUMMARY", `- Persona: ${ability.persona}\n- Savant Abilities: used\n- Savant Workspace: ${ATHENA_WORKSPACE.name} (${ATHENA_WORKSPACE.id})\n- Savant Knowledge MCP: ${knowledgeHits.length} references\n- Savant Research MCP: ${codeHits.length} references\n- Savant Workspace Tasks: ${workspaceContext.tasks.length} tracked\n- Savant Reminders: ${remindersContext.length} checked\n- Upstream/downstream impact search: ${impactSearched ? "performed" : "not required"}`],
   ])
@@ -632,7 +650,7 @@ export async function buildAthenaConversationPrompt(options: AthenaConversationP
     ["SAVANT REMINDERS MCP STATE", formatAthenaReminders(remindersContext)],
     ["UPSTREAM AND DOWNSTREAM IMPACT SEARCH", impactSearched ? `Performed using research query: ${researchQuery}` : "Not required for this question."],
     ["INFERRED MCP TOOLS FOR THIS CHAT", relevantTools.length > 0 ? relevantTools.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n") : "No external MCP matched explicitly; continue to prefer the mandatory Savant MCP tools."],
-    ["COMPLETE AVAILABLE MCP CATALOG — ALL TOOLS ACCESSIBLE", tools.length > 0 ? tools.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n") : "No MCP tools were returned by the catalog endpoint."],
+    ["COMPLETE AVAILABLE MCP CATALOG — ALL TOOLS ACCESSIBLE", formatToolCatalog(tools)],
     ["COMPLETE CONVERSATION HISTORY — UNTRUNCATED, OLDEST FIRST", historyText],
     ["LATEST USER MESSAGE — ANSWER THIS, USING THE HISTORY ABOVE", userMessage],
     ["REQUIRED MCP EXECUTION AUDIT", auditMarkdown],

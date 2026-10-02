@@ -97,6 +97,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const [searchQuery, setSearchQuery] = useState("");
   const [isRepoPaneOpen, setIsRepoPaneOpen] = useState(true);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const [projectPage, setProjectPage] = useState(1);
   const [lastFetchDetails, setLastFetchDetails] = useState<Record<string, any>>({});
 
   const toggleFilter = useCallback((filter: string) => {
@@ -807,18 +808,32 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       ? "done"
       : structuralFreshness;
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
-  const filteredRepos = repos.filter((repo) => {
-    if (normalizedSearchQuery) {
-      const matchText = JSON.stringify({ ...repo, live_status: indexingStatus[repo.name] || {} }).toLowerCase().includes(normalizedSearchQuery);
-      if (!matchText) return false;
-    }
-    for (const filter of activeFilters) {
-      if (!matchesFilter(repo, filter)) {
-        return false;
+  const filteredRepos = repos
+    .filter((repo) => {
+      if (normalizedSearchQuery) {
+        const matchText = JSON.stringify({ ...repo, live_status: indexingStatus[repo.name] || {} }).toLowerCase().includes(normalizedSearchQuery);
+        if (!matchText) return false;
       }
-    }
-    return true;
-  });
+      for (const filter of activeFilters) {
+        if (!matchesFilter(repo, filter)) {
+          return false;
+        }
+      }
+      return true;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const PROJECTS_PER_PAGE = 10;
+  const totalProjectPages = Math.max(1, Math.ceil(filteredRepos.length / PROJECTS_PER_PAGE));
+  const clampedProjectPage = Math.min(projectPage, totalProjectPages);
+  const pagedRepos = filteredRepos.slice(
+    (clampedProjectPage - 1) * PROJECTS_PER_PAGE,
+    clampedProjectPage * PROJECTS_PER_PAGE
+  );
+
+  useEffect(() => {
+    setProjectPage(1);
+  }, [normalizedSearchQuery, activeFilters.join(",")]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden p-4 space-y-4" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
@@ -976,7 +991,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     {normalizedSearchQuery ? "No matching projects." : "No projects registered."}
                   </div>
                 ) : (
-                  filteredRepos.map((repo) => {
+                  pagedRepos.map((repo) => {
                 const status = indexingStatus[repo.name] || {};
                 const isSelected = selectedProject === repo.name;
                 const graphJobStatus = String(status.structural_job?.status || "").toLowerCase();
@@ -1125,6 +1140,52 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   })
                 )}
               </div>
+              {!isLoading && !loadError && filteredRepos.length > 0 && (
+                <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground pt-1">
+                  <span>Total projects: {filteredRepos.length}</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setProjectPage(1)}
+                      disabled={clampedProjectPage <= 1}
+                      className="px-1.5 py-0.5 border border-[var(--cp-border)] disabled:opacity-30 disabled:cursor-not-allowed hover:border-[var(--cp-cyan)] hover:text-[var(--cp-cyan)] cursor-pointer"
+                      aria-label="First page"
+                    >
+                      «
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setProjectPage((p) => Math.max(1, p - 1))}
+                      disabled={clampedProjectPage <= 1}
+                      className="px-1.5 py-0.5 border border-[var(--cp-border)] disabled:opacity-30 disabled:cursor-not-allowed hover:border-[var(--cp-cyan)] hover:text-[var(--cp-cyan)] cursor-pointer"
+                      aria-label="Previous page"
+                    >
+                      ‹
+                    </button>
+                    <span className="px-1 text-foreground">
+                      {clampedProjectPage} of {totalProjectPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setProjectPage((p) => Math.min(totalProjectPages, p + 1))}
+                      disabled={clampedProjectPage >= totalProjectPages}
+                      className="px-1.5 py-0.5 border border-[var(--cp-border)] disabled:opacity-30 disabled:cursor-not-allowed hover:border-[var(--cp-cyan)] hover:text-[var(--cp-cyan)] cursor-pointer"
+                      aria-label="Next page"
+                    >
+                      ›
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setProjectPage(totalProjectPages)}
+                      disabled={clampedProjectPage >= totalProjectPages}
+                      className="px-1.5 py-0.5 border border-[var(--cp-border)] disabled:opacity-30 disabled:cursor-not-allowed hover:border-[var(--cp-cyan)] hover:text-[var(--cp-cyan)] cursor-pointer"
+                      aria-label="Last page"
+                    >
+                      »
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] flex items-center justify-center">

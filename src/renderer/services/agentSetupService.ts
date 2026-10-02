@@ -369,3 +369,50 @@ export class AgentSetupService {
 
 export const createAgentSetupService = (baseUrl?: string, apiKey?: string) =>
   new AgentSetupService(baseUrl, apiKey);
+
+export type McpServiceName = "workspace" | "abilities" | "context" | "knowledge" | "reminders";
+export type McpDeploymentMode = "docker" | "kubernetes" | "local";
+
+export interface McpEndpointSuggestion {
+  deployment: McpDeploymentMode;
+  endpoints: Partial<Record<McpServiceName, string>>;
+}
+
+/**
+ * Asks the server what deployment it thinks it's in and what ports each MCP tool is on,
+ * then builds a best-guess public URL per service. The guess is always editable/overridable
+ * by the caller — this never claims certainty, especially for "kubernetes".
+ */
+export async function suggestMcpEndpoints(serverUrl: string, apiKey: string): Promise<McpEndpointSuggestion> {
+  const base = normalizeBaseUrl(serverUrl);
+  const res = await fetch(`${base}/api/mcp/tools?_=${Date.now()}`, {
+    headers: buildAuthHeaders(apiKey, ""),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch MCP discovery info: ${res.status}`);
+  const data = await res.json();
+  const deployment: McpDeploymentMode = data.deployment === "kubernetes" || data.deployment === "docker" ? data.deployment : "local";
+  const servers: Array<{ name: McpServiceName; streamable_http?: { port: number } }> = data.servers || [];
+
+  let serverHost = "127.0.0.1";
+  try {
+    serverHost = new URL(base).hostname;
+  } catch {
+    // keep default
+  }
+
+  const endpoints: Partial<Record<McpServiceName, string>> = {};
+  for (const server of servers) {
+    const port = server.streamable_http?.port;
+    if (!port) continue;
+    if (deployment === "kubernetes") {
+      // Best guess only: Okteto/k8s commonly exposes each MCP server as its own ingress host,
+      // derived by swapping the server's own hostname prefix for a per-service one.
+      const guessedHost = serverHost.replace(/^savant-server/, `savant-mcp-${server.name}`);
+      endpoints[server.name] = `https://${guessedHost}/mcp`;
+    } else {
+      endpoints[server.name] = `http://${serverHost}:${port}/mcp`;
+    }
+  }
+
+  return { deployment, endpoints };
+}
