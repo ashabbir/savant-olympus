@@ -165,7 +165,7 @@ export function LeftSidebar({ onSettingsChanged, onLogout, activeTab, onChangeTa
       </div>
 
       <ProfileModal open={profileModalOpen} onClose={() => setProfileModalOpen(false)} onProfileChanged={onSettingsChanged} />
-      <SettingsModal open={settingsModalOpen} onClose={() => setSettingsModalOpen(false)} onSettingsChanged={onSettingsChanged} />
+      <SettingsModal open={settingsModalOpen} onClose={() => setSettingsModalOpen(false)} onSettingsChanged={onSettingsChanged} isAdmin={isAdmin} />
     </aside>
   );
 }

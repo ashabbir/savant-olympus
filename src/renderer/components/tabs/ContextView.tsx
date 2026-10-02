@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Search, Folder, RefreshCw, Download, Trash2, Cpu, FileCode, CheckCircle, Database, AlertTriangle, Layers, Play, Square, Trash, Zap, Clock, Upload, ChevronDown, ChevronLeft, ChevronRight, GitBranch } from "lucide-react";
+import { Search, Folder, RefreshCw, Download, Trash2, Cpu, FileCode, CheckCircle, Database, AlertTriangle, Layers, Play, Square, Trash, Zap, Clock, Upload, ChevronDown, ChevronLeft, ChevronRight, GitBranch, X } from "lucide-react";
 import { ContextVisualizations, analyzeProjectSource } from "./ContextVisualizations";
 import { GraphifyVisualizer } from "./GraphifyVisualizer";
 import { FileBrowserModal } from "../FileBrowserModal";
+import { AppVariablesManager } from "../shared/AppVariablesManager";
 import { toast } from "sonner";
 import { createContextService } from "@/services/contextService";
 
@@ -153,6 +154,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const contextService = React.useMemo(() => createContextService(serverUrl, apiKey), [serverUrl, apiKey]);
 
   const [jobsSummary, setJobsSummary] = useState<any>(null);
+  const [isRunningAll, setIsRunningAll] = useState(false);
 
   const fetchJobsSummary = useCallback(async () => {
     try {
@@ -499,6 +501,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isFileBrowserOpen, setIsFileBrowserOpen] = useState(false);
+  const [isAppVariablesModalOpen, setIsAppVariablesModalOpen] = useState(false);
   const [sources, setSources] = useState<any>(null);
   const [selectedSource, setSelectedSource] = useState("github");
   const [repoUrl, setRepoUrl] = useState("");
@@ -506,6 +509,23 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [addProgressStage, setAddProgressStage] = useState("PREPARING...");
+
+  const fetchSources = useCallback(async () => {
+    try {
+      const data: any = await contextService.getRepositorySources();
+      setSources(data.sources || null);
+      if (data.sources) {
+        const enabled = Object.entries(data.sources)
+          .filter(([_, cfg]: any) => cfg && cfg.enabled)
+          .map(([key]) => key);
+        if (enabled.length > 0) {
+          setSelectedSource((curr) => (enabled.includes(curr) ? curr : enabled[0]));
+        }
+      }
+    } catch (e: any) {
+      setAddError("Failed to load project sources: " + e.message);
+    }
+  }, [contextService]);
 
   useEffect(() => {
     if (!isSubmittingAdd) return;
@@ -538,21 +558,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     setAddError(null);
     setRepoUrl("");
     setDirPath("");
-    try {
-      const data: any = await contextService.getRepositorySources();
-      setSources(data.sources || null);
-      
-      if (data.sources) {
-        const enabled = Object.entries(data.sources)
-          .filter(([_, cfg]: any) => cfg && cfg.enabled)
-          .map(([key]) => key);
-        if (enabled.length > 0) {
-          setSelectedSource(enabled[0]);
-        }
-      }
-    } catch (e: any) {
-      setAddError("Failed to load project sources: " + e.message);
-    }
+    await fetchSources();
   };
 
   const handleBrowseDirectory = async () => {
@@ -705,6 +711,20 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     }
   };
 
+  const handleTriggerGitDiff = async (repoName: string) => {
+    try {
+      await contextService.triggerDifferentialSync(repoName);
+      toast.info(`Git diff job queued for "${repoName}"`, {
+        description: "You will be notified when the job completes.",
+        duration: 4000,
+      });
+      fetchIndexingStatus();
+      pollForJobCompletion(repoName, "Git diff refresh");
+    } catch (e: any) {
+      toast.error("Failed to queue Git diff job", { description: e.message });
+    }
+  };
+
   const handleStartIndexing = async (repoName: string) => {
     try {
       await contextService.startIndexing(repoName);
@@ -716,6 +736,34 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       pollForJobCompletion(repoName, "Index generation");
     } catch (e: any) {
       toast.error("Failed to queue indexing job", { description: e.message });
+    }
+  };
+
+  const handleGenerateAst = async (repoName: string) => {
+    try {
+      await contextService.generateAst(repoName);
+      toast.info(`AST generation queued for "${repoName}"`, {
+        description: "You will be notified when the job completes.",
+        duration: 4000,
+      });
+      fetchIndexingStatus();
+      pollForJobCompletion(repoName, "AST generation");
+    } catch (e: any) {
+      toast.error("Failed to queue AST job", { description: e.message });
+    }
+  };
+
+  const handleGenerateLst = async (repoName: string) => {
+    try {
+      await contextService.generateLst(repoName);
+      toast.info(`LST generation queued for "${repoName}"`, {
+        description: "You will be notified when the job completes.",
+        duration: 4000,
+      });
+      fetchIndexingStatus();
+      pollForJobCompletion(repoName, "LST generation");
+    } catch (e: any) {
+      toast.error("Failed to queue LST job", { description: e.message });
     }
   };
 
@@ -742,6 +790,34 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       pollForJobCompletion(repo.name, "Graph generation", "graph");
     } catch (e: any) {
       toast.error("Failed to queue code graph sync", { description: e.message });
+    }
+  };
+
+  const handleRunAll = async (repo: Repo) => {
+    setIsRunningAll(true);
+    const isGit = repo.source === "github" || repo.source === "gitlab" || repo.source === "git";
+    try {
+      if (isGit) {
+        try {
+          await contextService.triggerDifferentialSync(repo.name);
+        } catch (err: any) {
+          console.warn("Git diff step failed, continuing pipeline:", err);
+        }
+      }
+      await contextService.generateAst(repo.name);
+      await contextService.generateLst(repo.name);
+      await contextService.syncCodeGraph(repoIdentity(repo));
+      await contextService.startIndexing(repo.name);
+      toast.success(`Pipeline jobs queued for "${repo.name}"`, {
+        description: "Diff Sync, AST, LST, Code Graph, and Index jobs queued sequentially.",
+        duration: 5000,
+      });
+      fetchIndexingStatus();
+      pollForJobCompletion(repo.name, "Pipeline jobs");
+    } catch (e: any) {
+      toast.error("Failed to enqueue pipeline jobs", { description: e.message });
+    } finally {
+      setIsRunningAll(false);
     }
   };
 
@@ -907,6 +983,14 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   >
                     + REGISTER REPOSITORY
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsAppVariablesModalOpen(true)}
+                    className="w-full py-1.5 text-[10px] bg-[var(--cp-bg-2)] hover:bg-[var(--cp-bg-3)] text-foreground border border-[var(--cp-border)] cursor-pointer font-mono tracking-wider uppercase flex items-center justify-center gap-1.5"
+                  >
+                    <Database size={11} className="text-[var(--cp-cyan)]" />
+                    Configure App Variables
+                  </button>
                 </>
               )}
 
@@ -1035,12 +1119,12 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleStartIndexing(repo.name);
+                            handleRunAll(repo);
                           }}
-                          title="Trigger indexing"
+                          title="Run full pipeline (Git pull, Index, LST, AST, Graph)"
                           aria-label={`Index ${repo.name}`}
                           className="p-1 hover:text-[var(--cp-cyan)]"
-                          disabled={isBusy}
+                          disabled={isBusy || isRunningAll}
                         >
                           <RefreshCw size={10} className={isBusy ? "animate-spin text-amber-500" : ""} />
                         </button>
@@ -1276,7 +1360,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
               {detailsTab === "overview" ? (
                 <>
                   {/* Action Buttons */}
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {isAdmin ? <>
                     {isCurrentlyIndexing ? (
                       <button
@@ -1287,22 +1371,52 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                       </button>
                     ) : null}
                     <button
-                      onClick={() => handleStartIndexing(selectedRepo.name)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-teal-950 text-[var(--cp-cyan)] border border-teal-900 hover:bg-teal-900 cursor-pointer font-mono font-bold"
-                      disabled={isCurrentlyIndexing}
+                      onClick={() => handleTriggerGitDiff(selectedRepo.name)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-cyan-950 text-[var(--cp-cyan)] border border-cyan-900 hover:bg-cyan-900 cursor-pointer font-mono font-bold"
+                      disabled={isCurrentlyIndexing || isRunningAll || !(selectedRepo.source === "github" || selectedRepo.source === "gitlab" || selectedRepo.source === "git")}
+                      title={!(selectedRepo.source === "github" || selectedRepo.source === "gitlab" || selectedRepo.source === "git") ? "Git diff sync is only available for Git repositories" : "Pull latest remote changes and run git diff sync"}
                     >
-                      <Zap size={12} /> INDEX REPO
+                      <GitBranch size={12} /> REFRESH (GIT DIFF)
+                    </button>
+                    <button
+                      onClick={() => handleGenerateAst(selectedRepo.name)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-950 text-amber-400 border border-amber-900 hover:bg-amber-900 hover:text-amber-200 cursor-pointer font-mono font-bold"
+                      disabled={isCurrentlyIndexing || isRunningAll}
+                    >
+                      <Cpu size={12} /> GENERATE AST
+                    </button>
+                    <button
+                      onClick={() => handleGenerateLst(selectedRepo.name)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-purple-950 text-purple-400 border border-purple-900 hover:bg-purple-900 hover:text-purple-200 cursor-pointer font-mono font-bold"
+                      disabled={isCurrentlyIndexing || isRunningAll}
+                    >
+                      <Layers size={12} /> GENERATE LST
                     </button>
                     <button
                       onClick={() => handleSyncCodeGraph(selectedRepo)}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-950 text-indigo-400 border border-indigo-900 hover:bg-indigo-900 hover:text-indigo-200 cursor-pointer font-mono font-bold"
-                      disabled={isCurrentlyIndexing || isStructuralJobActive}
+                      disabled={isCurrentlyIndexing || isStructuralJobActive || isRunningAll}
                     >
                       <FileCode size={12} /> {isStructuralJobActive ? "GENERATING GRAPH..." : "GENERATE GRAPH"}
                     </button>
                     <button
+                      onClick={() => handleStartIndexing(selectedRepo.name)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-teal-950 text-teal-400 border border-teal-900 hover:bg-teal-900 cursor-pointer font-mono font-bold"
+                      disabled={isCurrentlyIndexing || isRunningAll}
+                    >
+                      <Zap size={12} /> INDEX REPO
+                    </button>
+                    <button
+                      onClick={() => handleRunAll(selectedRepo)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-950 text-emerald-400 border border-emerald-900 hover:bg-emerald-900 hover:text-emerald-200 cursor-pointer font-mono font-bold"
+                      disabled={isCurrentlyIndexing || isRunningAll}
+                      title="Run all pipeline jobs: Git Diff (if Git repo), then AST, LST, Code Graph, and Index one by one"
+                    >
+                      <Play size={12} /> {isRunningAll ? "QUEUEING ALL..." : "RUN ALL"}
+                    </button>
+                    <button
                       onClick={() => handleDeleteRepo(selectedRepo.name)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-950 text-red-500 border border-red-950 hover:bg-red-900 hover:text-red-400 cursor-pointer font-mono font-bold"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-950 text-red-500 border border-red-950 hover:bg-red-900 hover:text-red-400 cursor-pointer font-mono font-bold ml-auto"
                     >
                       <Trash2 size={12} /> DELETE PROJECT
                     </button>
@@ -1844,7 +1958,18 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
             <form onSubmit={handleConfirmAdd} className="space-y-4">
               <div>
-                <label htmlFor="source-select" className="block text-[10px] uppercase font-mono text-muted-foreground mb-1.5">Select Source</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label htmlFor="source-select" className="block text-[10px] uppercase font-mono text-muted-foreground">Select Source</label>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setIsAppVariablesModalOpen(true)}
+                      className="text-[10px] font-mono text-[var(--cp-cyan)] hover:underline cursor-pointer"
+                    >
+                      [ CONFIGURE TOKENS ]
+                    </button>
+                  )}
+                </div>
                 <select
                   id="source-select"
                   value={selectedSource}
@@ -1867,8 +1992,17 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
               </div>
 
               {sources && Object.values(sources).every((cfg: any) => !cfg?.enabled) ? (
-                <div className="p-3 bg-amber-950/20 border border-amber-900/50 text-amber-400 text-xs font-mono rounded">
-                  No project sources are configured on the Savant server. Configure BASE_CODE_DIR, GITHUB_TOKEN, or GITLAB_TOKEN and try again.
+                <div className="p-3 bg-amber-950/20 border border-amber-900/50 text-amber-400 text-xs font-mono rounded flex flex-col gap-2">
+                  <span>No project sources are configured on the Savant server. Configure BASE_CODE_DIR, GITHUB_TOKEN, or GITLAB_TOKEN and try again.</span>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setIsAppVariablesModalOpen(true)}
+                      className="self-start px-2 py-1 text-[10px] bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 uppercase tracking-wider font-mono cursor-pointer"
+                    >
+                      [ CONFIGURE APP VARIABLES / TOKENS ]
+                    </button>
+                  )}
                 </div>
               ) : selectedSource === "directory" ? (
                 <div className="space-y-3">
@@ -1952,6 +2086,41 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         serverUrl={serverUrl}
         apiKey={apiKey}
       />
+
+      {isAdmin && isAppVariablesModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4">
+          <div className="bg-[var(--cp-bg-1)] border border-[var(--cp-border)] max-w-2xl w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <button
+              type="button"
+              onClick={() => {
+                setIsAppVariablesModalOpen(false);
+                fetchSources();
+              }}
+              className="absolute top-4 right-4 text-muted-foreground hover:text-foreground cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+            <AppVariablesManager
+              serverUrl={serverUrl}
+              apiKey={apiKey}
+              onVariablesChanged={fetchSources}
+              compact
+            />
+            <div className="pt-4 mt-4 border-t border-[var(--cp-border)] flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAppVariablesModalOpen(false);
+                  fetchSources();
+                }}
+                className="px-4 py-1.5 text-xs bg-[var(--cp-cyan)] text-[var(--cp-bg-0)] font-bold hover:opacity-90 cursor-pointer uppercase font-mono tracking-wider"
+              >
+                DONE
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

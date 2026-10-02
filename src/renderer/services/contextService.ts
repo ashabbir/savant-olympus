@@ -39,6 +39,18 @@ export class ContextService {
     return this.client.request("/api/context/repos/index", { method: "POST", body: { name } });
   }
 
+  triggerDifferentialSync(name: string): Promise<any> {
+    return this.client.request(`/api/context/repos/${encodeURIComponent(name)}/differential-sync`, { method: "POST" });
+  }
+
+  generateAst(name: string): Promise<any> {
+    return this.client.request("/api/context/repos/ast/generate", { method: "POST", body: { name } });
+  }
+
+  generateLst(name: string): Promise<any> {
+    return this.client.request("/api/context/repos/lst/generate", { method: "POST", body: { name } });
+  }
+
   stopIndexing(name: string): Promise<any> {
     return this.client.request("/api/context/repos/stop", { method: "POST", body: { name } });
   }

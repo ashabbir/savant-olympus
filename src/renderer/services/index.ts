@@ -11,3 +11,4 @@ export * from "./usersService";
 export * from "./remindersService";
 export * from "./skillsService";
 export * from "./abilitiesService";
+export * from "./appVariablesService";

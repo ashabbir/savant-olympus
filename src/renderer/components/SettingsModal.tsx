@@ -7,6 +7,7 @@ import { createAbilitiesService } from "../services/abilitiesService";
 import { TagInput } from "./ui/tag-input";
 import { ATHENA_MODEL_CHANGED_EVENT, athenaModelFromSettings, reconcileAthenaModel, thinkingLevelsFor } from "../lib/athenaModel";
 import { suggestMcpEndpoints, McpDeploymentMode, McpServiceName } from "../services/agentSetupService";
+import { AppVariablesManager } from "./shared/AppVariablesManager";
 
 interface ProviderChainItem {
   id: string;
@@ -48,6 +49,7 @@ interface SettingsModalProps {
   open: boolean;
   onClose: () => void;
   onSettingsChanged?: () => void;
+  isAdmin?: boolean;
 }
 
 const TABS = [
@@ -383,7 +385,7 @@ function AthenaMentalMode({ value, options, loading, onRefresh, onChange, labelS
   );
 }
 
-export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModalProps) {
+export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>("system");
   const [defaultDirectory, setDefaultDirectory] = useState<string>("");
   const [moderatorPrompt, setModeratorPrompt] = useState<string>("");
@@ -846,6 +848,13 @@ export function SettingsModal({ open, onClose, onSettingsChanged }: SettingsModa
                   onChange={handleMcpEndpointChange}
                   onRedetect={() => detectMcpEndpoints()}
                 />
+                {isAdmin && (
+                  <AppVariablesManager
+                    serverUrl={server.url}
+                    apiKey={userApiKey || getStoredApiKey() || ""}
+                    onVariablesChanged={onSettingsChanged}
+                  />
+                )}
               </div>
             )}
 

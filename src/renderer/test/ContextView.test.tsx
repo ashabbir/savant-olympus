@@ -612,6 +612,87 @@ describe('ContextView - FileBrowserModal Integration', () => {
     expect(astSection).toBeInTheDocument()
     expect(astSection).toHaveTextContent(/NOT GENERATED/i)
   })
+
+  it('renders separate buttons for each job and executes RUN ALL pipeline sequentially', async () => {
+    const postUrls: string[] = []
+    vi.spyOn(window, 'fetch').mockImplementation((url, init) => {
+      const u = url.toString()
+      const method = (init?.method || 'GET').toUpperCase()
+      if (method === 'POST') {
+        postUrls.push(u)
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ job_id: 'job-123' }) } as Response)
+      }
+      if (u.endsWith('/api/context/repos')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            repos: [{
+              name: 'demo-pipeline',
+              path: '/base-code/demo-pipeline',
+              source: 'github',
+              ast_node_count: 5,
+              lst_node_count: 8,
+            }],
+          }),
+        } as Response)
+      }
+      if (u.includes('/health')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ provider: 'codegraph', freshness: 'fresh' }) } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response)
+    })
+
+    render(
+      <ContextView
+        serverUrl="http://127.0.0.1:8090"
+        apiKey="test-key"
+        onSelectProject={() => {}}
+        selectedProject="demo-pipeline"
+        isAdmin={true}
+      />
+    )
+
+    const gitDiffBtn = await screen.findByRole('button', { name: /REFRESH \(GIT DIFF\)/i })
+    const indexBtn = await screen.findByRole('button', { name: /INDEX REPO/i })
+    const astBtn = await screen.findByRole('button', { name: /GENERATE AST/i })
+    const lstBtn = await screen.findByRole('button', { name: /GENERATE LST/i })
+    const graphBtn = await screen.findByRole('button', { name: /GENERATE GRAPH/i })
+    const runAllBtn = await screen.findByRole('button', { name: /RUN ALL/i })
+
+    expect(gitDiffBtn).toBeInTheDocument()
+    expect(indexBtn).toBeInTheDocument()
+    expect(astBtn).toBeInTheDocument()
+    expect(lstBtn).toBeInTheDocument()
+    expect(graphBtn).toBeInTheDocument()
+    expect(runAllBtn).toBeInTheDocument()
+
+    // Trigger Run All
+    fireEvent.click(runAllBtn)
+
+    await waitFor(() => {
+      expect(postUrls.length).toBe(5)
+    })
+
+    // Verify sequential submission: git diff -> ast -> lst -> graph -> index
+    expect(postUrls[0]).toContain('/api/context/repos/demo-pipeline/differential-sync')
+    expect(postUrls[1]).toContain('/api/context/repos/ast/generate')
+    expect(postUrls[2]).toContain('/api/context/repos/lst/generate')
+    expect(postUrls[3]).toContain('/api/context/code-intelligence/repos/demo-pipeline/sync')
+    expect(postUrls[4]).toContain('/api/context/repos/index')
+
+    // Also verify tree refresh button triggers full pipeline
+    const treeRefreshBtn = screen.getByRole('button', { name: /Index demo-pipeline/i })
+    expect(treeRefreshBtn).toBeInTheDocument()
+    fireEvent.click(treeRefreshBtn)
+    await waitFor(() => {
+      expect(postUrls.length).toBe(10)
+    })
+    expect(postUrls[5]).toContain('/api/context/repos/demo-pipeline/differential-sync')
+    expect(postUrls[6]).toContain('/api/context/repos/ast/generate')
+    expect(postUrls[7]).toContain('/api/context/repos/lst/generate')
+    expect(postUrls[8]).toContain('/api/context/code-intelligence/repos/demo-pipeline/sync')
+    expect(postUrls[9]).toContain('/api/context/repos/index')
+  })
 })
 
 describe('parseFileStats helper', () => {
