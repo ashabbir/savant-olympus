@@ -13,8 +13,10 @@ describe("LeftSidebar activity navigation", () => {
   it("shows the activity log icon only to administrators", () => {
     const { rerender } = render(<LeftSidebar {...props} isAdmin={false} />);
     expect(screen.queryByTitle("Activity Log")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Jobs")).not.toBeInTheDocument();
 
     rerender(<LeftSidebar {...props} isAdmin />);
     expect(screen.getByTitle("Activity Log")).toBeInTheDocument();
+    expect(screen.getByTitle("Jobs")).toBeInTheDocument();
   });
 });

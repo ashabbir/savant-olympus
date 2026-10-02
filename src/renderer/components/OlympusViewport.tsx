@@ -10,6 +10,7 @@ const SkillsView = lazy(() => import("./tabs/SkillsView").then((m) => ({ default
 const ToolsView = lazy(() => import("./tabs/ToolsView").then((m) => ({ default: m.ToolsView })));
 const UsersView = lazy(() => import("./tabs/UsersView").then((m) => ({ default: m.UsersView })));
 const ActivityLogsView = lazy(() => import("./tabs/ActivityLogsView").then((m) => ({ default: m.ActivityLogsView })));
+const JobsView = lazy(() => import("./tabs/JobsView").then((m) => ({ default: m.JobsView })));
 const AgentSetupView = lazy(() => import("./tabs/AgentSetupView").then((m) => ({ default: m.AgentSetupView })));
 
 const ViewportFallback = (
@@ -60,6 +61,11 @@ export function OlympusViewport(props: OlympusViewportProps) {
       break;
     case "Reminders":
       view = <RemindersView serverUrl={serverUrl} apiKey={apiKey} />;
+      break;
+    case "Jobs":
+      view = isAdmin
+        ? <JobsView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} />
+        : <WorkspaceView serverUrl={serverUrl} apiKey={apiKey} sessionId={null} />;
       break;
     case "Activity":
       view = isAdmin

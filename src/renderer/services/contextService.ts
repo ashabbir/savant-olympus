@@ -47,6 +47,21 @@ export class ContextService {
     return this.client.request("/api/jobs/cancel", { method: "POST", body: { job_id: jobId } });
   }
 
+  deleteJob(jobId: string): Promise<any> {
+    return this.client.request(`/api/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" });
+  }
+
+  getJobStatus(jobId: string): Promise<any> {
+    return this.client.request(`/api/jobs/status?job_id=${encodeURIComponent(jobId)}`);
+  }
+
+  submitJob(jobType: string, target: string, payload?: any): Promise<any> {
+    return this.client.request("/api/jobs/submit", {
+      method: "POST",
+      body: { job_type: jobType, target, ...(payload ? { payload } : {}) },
+    });
+  }
+
   listJobs(status?: string): Promise<any> {
     const url = status ? `/api/jobs/list?status=${encodeURIComponent(status)}` : "/api/jobs/list";
     return this.client.request(url);
