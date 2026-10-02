@@ -14,6 +14,7 @@ import {
   AgentPartStatus,
   AgentMcpTransport
 } from "../../services/agentSetupService";
+import { ATHENA_MODEL_CHANGED_EVENT } from "../../lib/athenaModel";
 import { toast } from "sonner";
 
 interface AgentSetupViewProps {
@@ -39,19 +40,32 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
   const [setupScope, setSetupScope] = useState<"global" | "workspace">("global");
   const [mcpTransport, setMcpTransport] = useState<AgentMcpTransport>("streamable-http");
   const [knowledgeMcpUrl, setKnowledgeMcpUrl] = useState<string | null>(null);
+  const [enabledProviders, setEnabledProviders] = useState<string[] | null>(null);
 
-  // Prefer the user's configured MCP endpoint (Settings > Server) over a hardcoded localhost guess —
-  // it's the one place that knows whether this server is Docker, Okteto, or local.
+  // Prefer the user's configured MCP endpoint (Settings > Server) and gateway enabled providers
   useEffect(() => {
-    (async () => {
+    let active = true;
+    const loadSettings = async () => {
       try {
         const settings = await (window as any).system?.getSettings?.();
-        const configured = settings?.["mcp:endpoints"]?.knowledge;
-        if (configured) setKnowledgeMcpUrl(configured);
+        if (active && settings) {
+          const configured = settings?.["mcp:endpoints"]?.knowledge;
+          if (configured) setKnowledgeMcpUrl(configured);
+          const ep = settings?.["gateway:enabledProviders"];
+          setEnabledProviders(Array.isArray(ep) ? ep : null);
+        }
       } catch {
         // fall back to the derived default below
       }
-    })();
+    };
+    loadSettings();
+    window.addEventListener(ATHENA_MODEL_CHANGED_EVENT, loadSettings);
+    window.addEventListener("focus", loadSettings);
+    return () => {
+      active = false;
+      window.removeEventListener(ATHENA_MODEL_CHANGED_EVENT, loadSettings);
+      window.removeEventListener("focus", loadSettings);
+    };
   }, []);
 
   // Test learning ingestion state
@@ -97,16 +111,41 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
     }
   };
 
+  const allAgents: AgentSetupInfo[] = report ? Object.values(report.agents) : [];
+  const agentsList: AgentSetupInfo[] = allAgents.filter(
+    (agent) => enabledProviders === null || enabledProviders.includes(agent.provider)
+  );
+  const totalCount = agentsList.length;
+  const configuredCount = agentsList.filter(a => a.status === "configured").length;
+  const partialCount = agentsList.filter(a => a.status === "partial").length;
+  const notConfiguredCount = agentsList.filter(a => a.status === "not_configured").length;
+
   const handleTriggerAll = async () => {
+    const targets = agentsList.map(a => a.provider);
+    if (targets.length === 0) {
+      toast.info("No enabled agents to configure.");
+      return;
+    }
     setIsTriggeringAll(true);
     try {
-      toast.info("Triggering setup for all agents (Copilot, Claude, Hermes, Codex)...");
-      const result = await agentService.triggerSetup("all", undefined, mcpTransport);
-      if (result.success && result.report) {
-        setReport(result.report);
-        toast.success("All 4 agents successfully configured for Savant Knowledge!");
+      toast.info(`Triggering setup for enabled agents (${targets.map(p => p.toUpperCase()).join(", ")})...`);
+      if (enabledProviders === null) {
+        const result = await agentService.triggerSetup("all", undefined, mcpTransport);
+        if (result.success && result.report) {
+          setReport(result.report);
+          toast.success("All agents successfully configured for Savant Knowledge!");
+        } else {
+          toast.error(result.error || "Setup failed for some agents");
+        }
       } else {
-        toast.error(result.error || "Setup failed for some agents");
+        let lastReport = report;
+        for (const provider of targets) {
+          const result = await agentService.triggerSetup(provider, undefined, mcpTransport);
+          if (result.report) lastReport = result.report;
+        }
+        if (lastReport) setReport(lastReport);
+        await loadStatus();
+        toast.success(`Successfully configured ${targets.length} enabled agents!`);
       }
     } catch (err: any) {
       toast.error(`Error triggering all setups: ${err.message || String(err)}`);
@@ -141,18 +180,13 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
     }
   };
 
-  const agentsList: AgentSetupInfo[] = report ? Object.values(report.agents) : [];
-  const configuredCount = report?.summary.configured ?? 0;
-  const partialCount = report?.summary.partial ?? 0;
-  const notConfiguredCount = report?.summary.notConfigured ?? 0;
-
   return (
     <div className="size-full flex flex-col overflow-hidden bg-[var(--cp-bg-0)] text-foreground font-mono">
       {/* Top Header */}
       <ViewHeader
         title="AGENT SETUP"
         description="Configure Model Context Protocol, Learning Protocols, and Knowledge Commit Skills for External Coding Agents"
-        count={report?.summary.total ?? 4}
+        count={totalCount}
         countLabel="agents"
         onRefresh={loadStatus}
         isRefreshing={isLoading}
@@ -217,7 +251,7 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-3 bg-[var(--cp-bg-1)] border-b border-[var(--cp-border)] shrink-0 text-xs">
         <div className="flex items-center justify-between p-2 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)]">
           <span className="text-muted-foreground">TOTAL AGENTS</span>
-          <span className="font-bold text-[var(--cp-cyan)]">{report?.summary.total ?? 4}</span>
+          <span className="font-bold text-[var(--cp-cyan)]">{totalCount}</span>
         </div>
         <div className="flex items-center justify-between p-2 rounded bg-[var(--cp-bg-2)] border border-[var(--cp-border)]">
           <span className="text-muted-foreground">FULLY CONFIGURED</span>
@@ -235,7 +269,16 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
 
       {/* Main Content: Agent Cards */}
       <div className="flex-1 overflow-y-auto p-4">
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 max-w-7xl mx-auto">
+        {agentsList.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center max-w-md mx-auto">
+            <Bot size={44} className="opacity-30 text-[var(--cp-cyan)] mb-3" />
+            <h3 className="text-sm font-bold tracking-wider uppercase mb-1">No Agents Enabled</h3>
+            <p className="text-xs text-muted-foreground mb-4">
+              All external agent integrations (Hermes, Codex, Copilot, Claude) are currently disabled in Gateway Settings.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 max-w-7xl mx-auto">
           {agentsList.map((agent) => {
             const Icon = PROVIDER_ICONS[agent.provider] || Bot;
             const isConfiguring = triggeringProvider === agent.provider;
@@ -425,6 +468,7 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
             );
           })}
         </div>
+        )}
       </div>
 
       {/* Test Learning Modal Overlay */}

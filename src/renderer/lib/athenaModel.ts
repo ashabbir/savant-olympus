@@ -34,13 +34,25 @@ export function athenaModelFromSettings(settings: Record<string, any> | null | u
 const CATALOG_TTL_MS = 60_000;
 let catalogCache: { at: number; url: string; providers: AthenaProviderOption[] } | null = null;
 
+export function invalidateCatalogCache(): void {
+  catalogCache = null;
+}
+
 async function loadProviderCatalog(settings: Record<string, any>): Promise<AthenaProviderOption[]> {
   const gateway = settings?.["gateway:config"];
   const url = gateway?.enabled === false ? "" : String(gateway?.url || "");
-  if (catalogCache && catalogCache.url === url && Date.now() - catalogCache.at < CATALOG_TTL_MS) return catalogCache.providers;
-  const result = await window.system.listProviders(url || undefined);
-  const providers = Array.isArray(result?.providers) ? result.providers : [];
-  if (providers.length) catalogCache = { at: Date.now(), url, providers };
+  let providers: AthenaProviderOption[] = [];
+  if (catalogCache && catalogCache.url === url && Date.now() - catalogCache.at < CATALOG_TTL_MS) {
+    providers = catalogCache.providers;
+  } else {
+    const result = await window.system.listProviders(url || undefined);
+    providers = Array.isArray(result?.providers) ? result.providers : [];
+    if (providers.length) catalogCache = { at: Date.now(), url, providers };
+  }
+  const enabledProviders = settings?.["gateway:enabledProviders"];
+  if (Array.isArray(enabledProviders)) {
+    return providers.filter((p) => enabledProviders.includes(p.id));
+  }
   return providers;
 }
 

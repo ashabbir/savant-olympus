@@ -1993,7 +1993,9 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
               {sources && Object.values(sources).every((cfg: any) => !cfg?.enabled) ? (
                 <div className="p-3 bg-amber-950/20 border border-amber-900/50 text-amber-400 text-xs font-mono rounded flex flex-col gap-2">
-                  <span>No project sources are configured on the Savant server. Configure BASE_CODE_DIR, GITHUB_TOKEN, or GITLAB_TOKEN and try again.</span>
+                  <span>
+                    {sources?.directory?.disabled_reason || "No project sources are configured on the Savant server. Configure BASE_CODE_DIR, GITHUB_TOKEN, or GITLAB_TOKEN and try again."}
+                  </span>
                   {isAdmin && (
                     <button
                       type="button"
@@ -2004,9 +2006,28 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                     </button>
                   )}
                 </div>
-              ) : selectedSource === "directory" ? (
-                <div className="space-y-3">
-                  <div>
+              ) : (
+                <>
+                  {sources?.directory?.disabled_reason && (
+                    <div className="p-2 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-muted-foreground text-[11px] font-mono flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-amber-400/90">
+                        ℹ Local directory import is disabled on this server.
+                      </span>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => setIsAppVariablesModalOpen(true)}
+                          className="text-[10px] text-[var(--cp-cyan)] hover:underline cursor-pointer uppercase shrink-0"
+                        >
+                          [ Manage ]
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {selectedSource === "directory" ? (
+                    <div className="space-y-3">
+                      <div>
                     <label htmlFor="dir-path-input" className="block text-[10px] uppercase font-mono text-muted-foreground mb-1.5">
                       Directory (Relative to BASE_CODE_DIR)
                     </label>
@@ -2055,6 +2076,8 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   </div>
                 </div>
               )}
+            </>
+          )}
 
               <div className="pt-2 flex gap-3">
                 <button

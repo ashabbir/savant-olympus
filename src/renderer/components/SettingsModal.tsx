@@ -5,7 +5,7 @@ import { getStoredApiKey } from "../services/auth";
 import { runtimeService } from "../services/runtimeService";
 import { createAbilitiesService } from "../services/abilitiesService";
 import { TagInput } from "./ui/tag-input";
-import { ATHENA_MODEL_CHANGED_EVENT, athenaModelFromSettings, reconcileAthenaModel, thinkingLevelsFor } from "../lib/athenaModel";
+import { ATHENA_MODEL_CHANGED_EVENT, athenaModelFromSettings, reconcileAthenaModel, thinkingLevelsFor, invalidateCatalogCache } from "../lib/athenaModel";
 import { suggestMcpEndpoints, McpDeploymentMode, McpServiceName } from "../services/agentSetupService";
 import { AppVariablesManager } from "./shared/AppVariablesManager";
 
@@ -342,7 +342,7 @@ function AthenaMentalMode({ value, options, loading, onRefresh, onChange, labelS
             style={selectStyle}
             className="px-2 py-2 text-xs cursor-pointer"
           >
-            {!provider && <option value={value.provider}>{value.provider}</option>}
+            {options.length === 0 && <option value="">No providers enabled</option>}
             {options.map(option => (
               <option key={option.id} value={option.id} className="bg-[var(--cp-bg-3)]">{option.label || option.id}</option>
             ))}
@@ -394,6 +394,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
     { id: "p2", provider: "gemini", model: "3.5" },
   ]);
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
+  const [enabledProviders, setEnabledProviders] = useState<string[] | null>(null);
   const [providerSource, setProviderSource] = useState<"gateway" | "terminal">("terminal");
   const [providersLoading, setProvidersLoading] = useState(false);
   const [providersError, setProvidersError] = useState("");
@@ -446,6 +447,9 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
         })));
       }
 
+      const savedEnabled = settings["gateway:enabledProviders"];
+      setEnabledProviders(Array.isArray(savedEnabled) ? savedEnabled : null);
+
       const nextGateway = toLiveServiceConfig(settings["gateway:config"], {
         url: "http://localhost:3100",
         enabled: true,
@@ -472,6 +476,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
         "provider:chain": settings["provider:chain"] || "",
         "agents:list": settings["agents:list"] || [],
         "gateway:config": settings["gateway:config"] || { url: "http://localhost:3100", enabled: true },
+        "gateway:enabledProviders": Array.isArray(savedEnabled) ? savedEnabled : null,
         "server:config": settings["server:config"] || { url: "http://127.0.0.1:8090", enabled: true },
         "mcp:endpoints": settings["mcp:endpoints"] || {},
       };
@@ -509,6 +514,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
       await window.system.saveSetting("provider:chain", providerChain);
       await window.system.saveSetting("agents:list", agents);
       await window.system.saveSetting("gateway:config", { ...gateway, status: "idle", url: normalizeServiceUrl(gateway.url) });
+      await window.system.saveSetting("gateway:enabledProviders", enabledProviders);
       await window.system.saveSetting("server:config", { ...server, status: "idle", url: normalizeServiceUrl(server.url) });
       await window.system.saveSetting("mcp:endpoints", mcpEndpoints);
       window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
@@ -516,7 +522,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
     }, 500);
 
     return () => clearTimeout(saveTimer);
-  }, [defaultDirectory, moderatorPrompt, providerChain, agents, gateway, server, mcpEndpoints]);
+  }, [defaultDirectory, moderatorPrompt, providerChain, agents, gateway, server, mcpEndpoints, enabledProviders]);
 
   async function detectMcpEndpoints(serverConfig: ServiceConfig = server, currentEndpoints: Record<McpServiceName, string> = mcpEndpoints) {
     setMcpDetectLoading(true);
@@ -560,8 +566,10 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
     await window.system.saveSetting("provider:chain", providerChain);
     await window.system.saveSetting("agents:list", agents);
     await window.system.saveSetting("gateway:config", { ...gateway, status: "idle", url: normalizeServiceUrl(gateway.url) });
+    await window.system.saveSetting("gateway:enabledProviders", enabledProviders);
     await window.system.saveSetting("server:config", { ...server, status: "idle", url: normalizeServiceUrl(server.url) });
     await window.system.saveSetting("mcp:endpoints", mcpEndpoints);
+    invalidateCatalogCache();
     window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
     if (onSettingsChanged) onSettingsChanged();
     onClose();
@@ -577,14 +585,16 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
     await window.system.saveSetting("provider:chain", backupRef.current["provider:chain"]);
     await window.system.saveSetting("agents:list", backupRef.current["agents:list"]);
     await window.system.saveSetting("gateway:config", backupRef.current["gateway:config"]);
+    await window.system.saveSetting("gateway:enabledProviders", backupRef.current["gateway:enabledProviders"]);
     await window.system.saveSetting("server:config", backupRef.current["server:config"]);
     await window.system.saveSetting("mcp:endpoints", backupRef.current["mcp:endpoints"]);
+    invalidateCatalogCache();
     window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
     if (onSettingsChanged) onSettingsChanged();
     onClose();
   }
 
-  const selectedProviderOptions = providerOptions.length > 0
+  const allDiscoveredProviders = providerOptions.length > 0
     ? providerOptions
     : [
       { id: "codex", label: "Codex", defaultModel: "o4-mini", models: ["o4-mini", "gpt-5-mini", "gpt-5", "gpt-5-codex", "o3"] },
@@ -596,6 +606,46 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
       source: "terminal" as const,
       installed: true,
     }));
+
+  const selectedProviderOptions = allDiscoveredProviders.filter(
+    provider => enabledProviders === null || enabledProviders.includes(provider.id)
+  );
+
+  function toggleProviderEnabled(providerId: string) {
+    const currentEnabled = enabledProviders !== null
+      ? [...enabledProviders]
+      : allDiscoveredProviders.map(p => p.id);
+
+    const nextEnabled = currentEnabled.includes(providerId)
+      ? currentEnabled.filter(id => id !== providerId)
+      : [...currentEnabled, providerId];
+
+    setEnabledProviders(nextEnabled);
+    invalidateCatalogCache();
+    window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
+  }
+
+  function enableAllProviders() {
+    setEnabledProviders(allDiscoveredProviders.map(p => p.id));
+    invalidateCatalogCache();
+    window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
+  }
+
+  function disableAllProviders() {
+    setEnabledProviders([]);
+    invalidateCatalogCache();
+    window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
+  }
+
+  useEffect(() => {
+    if (selectedProviderOptions.length > 0) {
+      const current = athenaModelFromSettings({ "provider:chain": providerChain });
+      if (!selectedProviderOptions.some(p => p.id === current.provider)) {
+        const athena = reconcileAthenaModel(current, selectedProviderOptions);
+        setProviderChain(prev => [{ ...(prev[0] || { id: "p1" }), ...athena }, ...prev.slice(1)]);
+      }
+    }
+  }, [selectedProviderOptions]);
 
   async function refreshProviders(gatewayConfig: ServiceConfig = gateway) {
     setProvidersLoading(true);
@@ -613,8 +663,12 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
       }
       setProviderChain(prev => {
         if (result.providers.length === 0) return prev;
+        const activeProviders = enabledProviders === null
+          ? result.providers
+          : result.providers.filter((p: any) => enabledProviders.includes(p.id));
+        const effectiveProviders = activeProviders.length ? activeProviders : result.providers;
         // Keep the ATHENA mental mode valid against the live catalog (drops stale models/efforts)
-        const athena = reconcileAthenaModel(athenaModelFromSettings({ "provider:chain": prev }), result.providers);
+        const athena = reconcileAthenaModel(athenaModelFromSettings({ "provider:chain": prev }), effectiveProviders);
         return [{ ...(prev[0] || { id: "p1" }), ...athena }, ...prev.slice(1)];
       });
     } catch (error: any) {
@@ -819,13 +873,96 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
 
             {/* ── GATEWAY ── */}
             {activeTab === "gateway" && (
-              <ServicePanel
-                description="API gateway routing and connection settings"
-                config={gateway}
-                onChange={patch => setGateway(prev => ({ ...prev, ...patch }))}
-                healthPath="/health"
-                apiKey={userApiKey}
-              />
+              <div className="space-y-6">
+                <ServicePanel
+                  description="API gateway routing and connection settings"
+                  config={gateway}
+                  onChange={patch => setGateway(prev => ({ ...prev, ...patch }))}
+                  healthPath="/health"
+                  apiKey={userApiKey}
+                />
+
+                <div className="p-4 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h4 style={{ color: "var(--cp-cyan)", fontFamily: "'Orbitron', sans-serif" }} className="text-xs uppercase tracking-wider font-semibold">
+                        Enabled Providers Override
+                      </h4>
+                      <p className="text-[11px] opacity-60 mt-0.5" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
+                        Enable or disable specific gateway providers (e.g. Hermes, Codex, Copilot, Claude). Disabled providers will not appear in Athena mental mode or Agent Setup.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={enableAllProviders}
+                        style={{ border: "1px solid var(--cp-cyan)", color: "var(--cp-cyan)", fontFamily: "'Share Tech Mono', monospace" }}
+                        className="px-2.5 py-1 text-[10px] uppercase hover:bg-[var(--cp-cyan)] hover:text-[var(--cp-bg-0)] transition-all cursor-pointer"
+                      >
+                        Enable All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={disableAllProviders}
+                        style={{ border: "1px solid var(--cp-border)", color: "var(--foreground)", fontFamily: "'Share Tech Mono', monospace" }}
+                        className="px-2.5 py-1 text-[10px] uppercase hover:border-red-400 hover:text-red-400 transition-all opacity-80 cursor-pointer"
+                      >
+                        Disable All
+                      </button>
+                    </div>
+                  </div>
+
+                  {providersLoading ? (
+                    <div className="flex items-center gap-2 py-4 text-xs opacity-60">
+                      <RefreshCw size={13} className="animate-spin" />
+                      <span>Loading gateway providers...</span>
+                    </div>
+                  ) : allDiscoveredProviders.length === 0 ? (
+                    <div className="py-4 text-xs opacity-50 italic">
+                      No gateway providers discovered. Check gateway connection.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      {allDiscoveredProviders.map(provider => {
+                        const isEnabled = enabledProviders === null || enabledProviders.includes(provider.id);
+                        return (
+                          <div
+                            key={provider.id}
+                            onClick={() => toggleProviderEnabled(provider.id)}
+                            style={{
+                              background: isEnabled ? "var(--cp-bg-2)" : "var(--cp-bg-3)",
+                              borderColor: isEnabled ? "var(--cp-cyan)" : "var(--cp-border)",
+                            }}
+                            className={`p-3 border rounded cursor-pointer flex items-center justify-between transition-all select-none ${
+                              isEnabled ? "shadow-[0_0_8px_rgba(0,229,255,0.15)]" : "opacity-50"
+                            }`}
+                          >
+                            <div className="flex flex-col min-w-0 pr-2">
+                              <span style={{ fontFamily: "'Share Tech Mono', monospace" }} className="text-xs font-bold uppercase tracking-wider text-[var(--foreground)] truncate">
+                                {provider.label || provider.id}
+                              </span>
+                              <span className="text-[10px] opacity-60 truncate">
+                                ID: {provider.id} · {provider.models?.length || 0} models
+                              </span>
+                            </div>
+                            <span
+                              style={{
+                                background: isEnabled ? "var(--cp-cyan)" : "var(--cp-bg-0)",
+                                color: isEnabled ? "var(--cp-bg-0)" : "var(--foreground)",
+                                border: "1px solid var(--cp-border)",
+                                fontFamily: "'Share Tech Mono', monospace",
+                              }}
+                              className="px-2 py-0.5 text-[10px] font-bold uppercase rounded shrink-0"
+                            >
+                              {isEnabled ? "ENABLED" : "DISABLED"}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
 
             {/* ── SERVER ── */}

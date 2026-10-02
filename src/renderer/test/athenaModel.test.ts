@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { athenaModelFromSettings, extractAthenaModelTag, formatAthenaModel, reconcileAthenaModel, runAthenaAgent, thinkingLevelsFor } from "../lib/athenaModel";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { athenaModelFromSettings, extractAthenaModelTag, formatAthenaModel, reconcileAthenaModel, runAthenaAgent, thinkingLevelsFor, invalidateCatalogCache } from "../lib/athenaModel";
 
 const providers = [
   { id: "hermes", models: ["configured"], configuredModel: "copilot/gpt-5.6-luna", thinkingLevels: ["none", "medium", "ultra"], defaultThinkingLevel: "medium" },
@@ -7,6 +7,9 @@ const providers = [
 ];
 
 describe("athenaModel", () => {
+  beforeEach(() => {
+    invalidateCatalogCache();
+  });
   it("reads provider, model, and effort from the saved chain", () => {
     expect(athenaModelFromSettings({ "provider:chain": [{ provider: "copilot", model: "auto", thinkingLevel: "xhigh" }] }))
       .toEqual({ provider: "copilot", model: "auto", thinkingLevel: "xhigh" });
@@ -43,5 +46,22 @@ describe("athenaModel", () => {
     window.system.runAgentViaGateway = vi.fn().mockResolvedValue("ok");
     await runAthenaAgent({ prompt: "hi", tagModel: false });
     expect(window.system.runAgentViaGateway).toHaveBeenCalledWith({ provider: "copilot", model: "configured", thinkingLevel: "medium", prompt: "hi" });
+  });
+
+  it("reconciles to an enabled provider when current provider is disabled in gateway:enabledProviders", async () => {
+    window.system.getSettings = vi.fn().mockResolvedValue({
+      "gateway:config": { url: "http://gw.test" },
+      "gateway:enabledProviders": ["hermes"],
+      "provider:chain": [{ provider: "copilot", model: "auto", thinkingLevel: "xhigh" }],
+    });
+    window.system.listProviders = vi.fn().mockResolvedValue({ source: "gateway", providers });
+    window.system.runAgentViaGateway = vi.fn().mockResolvedValue("ok");
+    await runAthenaAgent({ prompt: "hi", tagModel: false });
+    expect(window.system.runAgentViaGateway).toHaveBeenCalledWith({
+      provider: "hermes",
+      model: "configured",
+      thinkingLevel: "medium",
+      prompt: "hi",
+    });
   });
 });

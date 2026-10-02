@@ -143,8 +143,8 @@ export function AppVariablesManager({
         </div>
       )}
 
-      {/* Standard Git Source Status Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+      {/* Standard Status Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
         {(["GITHUB_TOKEN", "GITLAB_TOKEN"] as const).map((tokenKey) => {
           const info = effective[tokenKey];
           const hasDb = info?.db_configured;
@@ -200,6 +200,62 @@ export function AppVariablesManager({
             </div>
           );
         })}
+
+        {/* Local Directory Status Card */}
+        {(() => {
+          const dirInfo = effective["DISABLE_LOCAL_DIRECTORY"];
+          const dbVal = String(variables["DISABLE_LOCAL_DIRECTORY"] || "").toLowerCase();
+          const isDbDisabled = ["true", "1", "yes", "disabled", "on"].includes(dbVal);
+          const isEffectiveDisabled = isDbDisabled || (dirInfo?.source === "env" && dirInfo?.is_set);
+
+          return (
+            <div className="p-2.5 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded-none flex items-center justify-between gap-2">
+              <div>
+                <div className="text-[11px] font-bold text-foreground flex items-center gap-1.5">
+                  <span>LOCAL DIRECTORY</span>
+                  {isEffectiveDisabled ? (
+                    <span className="text-[9px] px-1.5 py-0.2 bg-red-500/20 border border-red-500/40 text-red-300 uppercase">
+                      DISABLED
+                    </span>
+                  ) : (
+                    <span className="text-[9px] px-1.5 py-0.2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 uppercase">
+                      ENABLED
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] text-muted-foreground flex gap-2 mt-1">
+                  <span>DB Override: {isDbDisabled ? "Disabled" : dirInfo?.db_configured ? "Explicitly Enabled" : "Not Set"}</span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setSaving(true);
+                  try {
+                    const nextVal = isEffectiveDisabled ? "false" : "true";
+                    await service.set("DISABLE_LOCAL_DIRECTORY", nextVal);
+                    toast.success(nextVal === "true" ? "Local Directory disabled" : "Local Directory enabled");
+                    await fetchVariables();
+                    onVariablesChanged?.();
+                  } catch (e: any) {
+                    toast.error("Failed to update: " + (e?.message || e));
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+                disabled={saving}
+                className={`px-2 py-1 text-[10px] font-bold hover:opacity-90 cursor-pointer uppercase shrink-0 ${
+                  isEffectiveDisabled
+                    ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                    : "bg-red-600 text-white hover:bg-red-700"
+                }`}
+              >
+                {isEffectiveDisabled ? "ENABLE LOCAL" : "DISABLE LOCAL"}
+              </button>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Add New Variable Form */}
@@ -239,7 +295,7 @@ export function AppVariablesManager({
         {/* Quick presets */}
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground pt-1">
           <span>Presets:</span>
-          {["GITHUB_TOKEN", "GITLAB_TOKEN"].map((k) => (
+          {["GITHUB_TOKEN", "GITLAB_TOKEN", "DISABLE_LOCAL_DIRECTORY"].map((k) => (
             <button
               key={k}
               type="button"

@@ -351,4 +351,29 @@ describe('AgentSetupView Component', () => {
       )
     })
   })
+
+  it('hides disabled agents and only shows enabled agents based on gateway:enabledProviders', async () => {
+    (window as any).system.getSettings = vi.fn().mockResolvedValue({
+      'gateway:enabledProviders': ['claude', 'codex'],
+    })
+
+    render(<AgentSetupView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+
+    await screen.findByText('Claude Code / Desktop')
+    expect(screen.getByText('Codex Agent')).toBeInTheDocument()
+    expect(screen.queryByText('GitHub Copilot')).not.toBeInTheDocument()
+    expect(screen.queryByText('Hermes Agent')).not.toBeInTheDocument()
+  })
+
+  it('shows empty state when all external agent providers are disabled', async () => {
+    (window as any).system.getSettings = vi.fn().mockResolvedValue({
+      'gateway:enabledProviders': [],
+    })
+
+    render(<AgentSetupView serverUrl="http://127.0.0.1:8090" apiKey="test-key" />)
+
+    await screen.findByText('No Agents Enabled')
+    expect(screen.queryByText('Claude Code / Desktop')).not.toBeInTheDocument()
+    expect(screen.queryByText('GitHub Copilot')).not.toBeInTheDocument()
+  })
 })

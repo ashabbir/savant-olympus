@@ -201,6 +201,34 @@ describe('ContextView - FileBrowserModal Integration', () => {
     expect(screen.queryByText(/Branch \(Optional\)/i)).toBeNull()
   })
 
+  it('excludes directory from source select and renders notice when directory is disabled on server', async () => {
+    vi.mocked(window.fetch).mockImplementation((url) => {
+      const u = url.toString()
+      if (u.includes('/api/context/repos/sources')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            sources: {
+              directory: { enabled: false, disabled_reason: "Local directory source is disabled in server settings." },
+              github: { enabled: true },
+            },
+          }),
+        } as Response)
+      }
+      if (u.includes('/api/context/repos')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ repos: [] }) } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ status: {} }) } as Response)
+    })
+
+    render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject={null} isAdmin={true} />)
+    fireEvent.click(screen.getByText(/REGISTER REPOSITORY/i))
+
+    const select = await screen.findByLabelText(/Select Source/i) as HTMLSelectElement
+    expect(Array.from(select.options).map((option) => option.value)).toEqual(["github"])
+    expect(screen.getByText(/Local directory import is disabled on this server/i)).toBeInTheDocument()
+  })
+
   it('submits a single repository URL without exposing token fields', async () => {
     const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = []
     vi.mocked(window.fetch).mockImplementation((url, options) => {
