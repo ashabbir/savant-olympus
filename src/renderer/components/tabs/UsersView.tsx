@@ -1,9 +1,18 @@
 import React, { useState, useEffect } from "react";
-import { Users, Key, Shield, UserCheck, Eye, EyeOff, X, Save, Mail, Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Copy, Activity } from "lucide-react";
+import { Users, Key, Shield, UserCheck, Eye, EyeOff, X, Save, Mail, Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Copy, Activity, Bot, Terminal, Code2, FileText, Check, LucideIcon } from "lucide-react";
+import { toast } from "sonner";
 import { setStoredApiKey } from "../../services/auth";
 import { createUsersService, type UserUsage } from "../../services/usersService";
+import { ALL_CODING_AGENTS_META, buildUserMcpConfig, type AgentProvider, type AgentMcpTransport, type CodingAgentMeta } from "../../services/agentSetupService";
 
 const USAGE_WINDOW_DAYS = 30;
+
+const AGENT_ICONS: Record<AgentProvider, LucideIcon> = {
+  copilot: Bot,
+  claude: Terminal,
+  hermes: Code2,
+  codex: FileText,
+};
 
 const formatTimestamp = (value?: string | null) => {
   if (!value) return "Never";
@@ -67,7 +76,8 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
   const [loadError, setLoadError] = useState("");
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [generatedKeyDetails, setGeneratedKeyDetails] = useState<{ username: string; apiKey: string; note?: string } | null>(null);
+  const [generatedKeyDetails, setGeneratedKeyDetails] = useState<{ username: string; apiKey: string; role?: string; note?: string } | null>(null);
+  const [previewAgentId, setPreviewAgentId] = useState<string>("claude");
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -95,7 +105,72 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
   const [isAddingAllDomains, setIsAddingAllDomains] = useState(false);
   const [domainBulkNote, setDomainBulkNote] = useState("");
   const [detailTab, setDetailTab] = useState<"profile" | "access" | "usage" | "contributions">("profile");
+  const [enabledAgents, setEnabledAgents] = useState<string[] | null>(null);
+  const [mcpEndpoints, setMcpEndpoints] = useState<Record<string, string>>({});
+  const [mcpTransport, setMcpTransport] = useState<AgentMcpTransport>("streamable-http");
+  const [userApiKeysMap, setUserApiKeysMap] = useState<Record<string, string>>({});
+  const [copiedAgentId, setCopiedAgentId] = useState<string | null>(null);
+  const [showMcpPreview, setShowMcpPreview] = useState(false);
   const usersService = createUsersService(serverUrl, apiKey);
+
+  useEffect(() => {
+    let active = true;
+    const loadSettings = async () => {
+      try {
+        const settings = await (window as any).system?.getSettings?.();
+        if (active && settings) {
+          const ea = settings?.["agents:enabledList"] ?? settings?.["agents:enabled"];
+          setEnabledAgents(Array.isArray(ea) ? ea : null);
+          if (settings?.["mcp:endpoints"]) {
+            setMcpEndpoints(settings["mcp:endpoints"]);
+          }
+          if (settings?.["mcp:transport"]) {
+            setMcpTransport(settings["mcp:transport"]);
+          }
+        }
+      } catch {
+        // Fall back to defaults
+      }
+    };
+    loadSettings();
+    window.addEventListener("savant:settings-changed", loadSettings);
+    window.addEventListener("focus", loadSettings);
+    return () => {
+      active = false;
+      window.removeEventListener("savant:settings-changed", loadSettings);
+      window.removeEventListener("focus", loadSettings);
+    };
+  }, []);
+
+  const activeAgents = ALL_CODING_AGENTS_META.filter(
+    (agent) => enabledAgents === null || enabledAgents.includes(agent.id)
+  );
+
+  const getUserApiKey = (user?: User | null): string => {
+    if (!user) return apiKey || "";
+    const uid = user.id || user.username;
+    if (uid && userApiKeysMap[uid]) return userApiKeysMap[uid];
+    if (user.api_key) return user.api_key;
+    if (user.api_keys && user.api_keys.length > 0) return user.api_keys[0];
+    const isSelf = !!activeUserId && uid && uid.toLowerCase() === activeUserId.toLowerCase();
+    if (isSelf && apiKey) return apiKey;
+    return apiKey || "";
+  };
+
+  const handleCopyAgentMcp = (agent: CodingAgentMeta, user: User, buttonKey?: string) => {
+    const key = getUserApiKey(user);
+    const config = buildUserMcpConfig(agent.id, key, serverUrl, mcpEndpoints, mcpTransport, user.role);
+    if (navigator?.clipboard?.writeText) {
+      void navigator.clipboard.writeText(config);
+    }
+    const targetKey = buttonKey || agent.id;
+    setCopiedAgentId(targetKey);
+    setTimeout(() => {
+      setCopiedAgentId((current) => (current === targetKey ? null : current));
+    }, 2000);
+    toast.success(`Copied ${agent.shortLabel} MCP settings to clipboard!`);
+  };
+
 
   const fetchUserDomains = async (uid: string) => {
     try {
@@ -115,14 +190,19 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
     }
   };
 
+  const [isRefreshingUsage, setIsRefreshingUsage] = useState(false);
+
   const fetchUserUsage = async (uid: string) => {
     setUsageError("");
+    setIsRefreshingUsage(true);
     try {
       setUserUsage(await usersService.getUserUsage(uid, USAGE_WINDOW_DAYS));
     } catch (error: any) {
       console.error(error);
       setUserUsage(null);
       setUsageError(error?.message || "Failed to load usage.");
+    } finally {
+      setIsRefreshingUsage(false);
     }
   };
 
@@ -140,6 +220,12 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
     setUsageError("");
     if (selectedUserId && isAdmin) void fetchUserUsage(selectedUserId);
   }, [selectedUserId, serverUrl, apiKey, isAdmin]);
+
+  useEffect(() => {
+    if (selectedUserId && isAdmin && detailTab === "usage") {
+      void fetchUserUsage(selectedUserId);
+    }
+  }, [detailTab]);
 
   const missingDomains = availableDomains.filter((ad) => !userDomains.some((ud) => ud.domain_node_id === ad.node_id));
 
@@ -258,7 +344,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
       });
       const key = data.api_key || (data.api_keys && data.api_keys[0]);
       if (key) {
-        setGeneratedKeyDetails({ username: data.username || data.user_id || data.id || "", apiKey: key });
+        setGeneratedKeyDetails({ username: data.username || data.user_id || data.id || "", apiKey: key, role: data.role || createRole });
       }
       setCreateUsername("");
       setCreateName("");
@@ -268,6 +354,9 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
       setShowCreateForm(false);
       const newUid = data.id || data.username || data.user_id;
       if (newUid) {
+        if (key) {
+          setUserApiKeysMap((prev) => ({ ...prev, [newUid]: key }));
+        }
         setSelectedUserId(newUid);
         setEditName(data.name);
         setEditEmail(data.email || "");
@@ -322,8 +411,12 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
         setGeneratedKeyDetails({
           username: newUsername,
           apiKey: key,
+          role: copySource.role,
           note: failed ? `${failed} of ${sourceDomains.length} domain assignments failed to copy — review Domain Access.` : undefined,
         });
+        if (newUid) {
+          setUserApiKeysMap((prev) => ({ ...prev, [newUid]: key }));
+        }
       }
       setCopySource(null);
       setShowCreateForm(false);
@@ -353,6 +446,9 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
   const handleRegenerateKey = async (userId: string) => {
     try {
       const data = await usersService.rotateApiKey(userId);
+      if (data.api_key) {
+        setUserApiKeysMap((prev) => ({ ...prev, [userId]: data.api_key }));
+      }
         
         // If the rotated user key is the active user's key, update local settings and auth token
         const isSelf = activeUserId && (
@@ -365,9 +461,11 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
           setStoredApiKey(data.api_key);
         }
 
+        const targetUser = users.find((u) => (u.id || u.username) === userId) || selectedUser;
         setGeneratedKeyDetails({
           username: userId,
-          apiKey: data.api_key
+          apiKey: data.api_key,
+          role: targetUser?.role || "operator",
         });
         
         if (isSelf && onSettingsChanged) {
@@ -537,18 +635,121 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
     );
   };
 
+  const renderAgentMcpSettings = (user: User) => {
+    return (
+      <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] p-4 space-y-3" data-testid="user-mcp-settings">
+        <div className="flex items-center justify-between">
+          <div className="text-[11px] font-bold text-[var(--cp-cyan)] tracking-wider uppercase flex items-center gap-2">
+            <Bot size={14} /> Agent MCP Settings
+          </div>
+          <span className="text-[10px] text-muted-foreground font-mono">
+            {activeAgents.length} SYSTEM ENABLED
+          </span>
+        </div>
+
+        <p className="text-[10px] text-muted-foreground leading-relaxed">
+          Copy Model Context Protocol (MCP) configuration for this user to clipboard for system-enabled coding agents.
+        </p>
+
+        {activeAgents.length === 0 ? (
+          <div className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 p-2.5">
+            No external coding agents are currently enabled in Settings &gt; Agents.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2 pt-1" data-testid="agent-mcp-buttons">
+              {activeAgents.map((agent) => {
+                const Icon = AGENT_ICONS[agent.id] || Bot;
+                const isCopied = copiedAgentId === agent.id;
+                return (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    data-testid={`copy-mcp-${agent.id}`}
+                    onClick={() => handleCopyAgentMcp(agent, user)}
+                    className={`px-3 py-1.5 border text-xs font-mono flex items-center gap-1.5 cursor-pointer transition-all ${
+                      isCopied
+                        ? "border-[var(--cp-green)] text-[var(--cp-green)] bg-[rgba(0,255,136,0.1)]"
+                        : "border-[var(--cp-cyan)]/40 text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.08)] hover:border-[var(--cp-cyan)]"
+                    }`}
+                    title={`Copy MCP configuration for ${agent.label} (${agent.configPath})`}
+                  >
+                    {isCopied ? <Check size={12} className="text-[var(--cp-green)]" /> : <Icon size={12} />}
+                    <span>{isCopied ? "COPIED TO CLIPBOARD" : `COPY ${agent.shortLabel.toUpperCase()} MCP`}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Collapsible Format Preview */}
+            <div className="border-t border-[var(--cp-border)]/60 pt-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setShowMcpPreview((prev) => !prev)}
+                className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-[var(--cp-cyan)] transition-colors cursor-pointer"
+              >
+                {showMcpPreview ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                <span>{showMcpPreview ? "HIDE MCP CONFIG PREVIEW" : "VIEW MCP CONFIG PREVIEW"}</span>
+              </button>
+
+              {showMcpPreview && (
+                <div className="mt-2 p-2.5 rounded bg-[var(--cp-bg-3)] border border-[var(--cp-border)] overflow-x-auto text-[10px] font-mono">
+                  <div className="text-[9px] text-[var(--cp-cyan)] mb-2 uppercase font-bold flex flex-wrap justify-between items-center gap-2">
+                    <div className="flex items-center gap-2">
+                      <span>Preview ({user.username} - {user.role}):</span>
+                      <div className="flex gap-1">
+                        {activeAgents.map((ag) => (
+                          <button
+                            key={ag.id}
+                            type="button"
+                            onClick={() => setPreviewAgentId(ag.id)}
+                            className={`px-1.5 py-0.5 text-[9px] uppercase border cursor-pointer ${
+                              (previewAgentId || activeAgents[0]?.id) === ag.id
+                                ? "border-[var(--cp-cyan)] text-[var(--cp-cyan)] bg-[var(--cp-cyan)]/10"
+                                : "border-[var(--cp-border)] text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            {ag.shortLabel} ({ag.format.toUpperCase()})
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <span className="text-muted-foreground text-[8px] font-normal">{mcpTransport}</span>
+                  </div>
+                  <pre className="text-slate-300">
+                    {buildUserMcpConfig(
+                      previewAgentId || activeAgents[0]?.id || "claude",
+                      getUserApiKey(user),
+                      serverUrl,
+                      mcpEndpoints,
+                      mcpTransport,
+                      user.role
+                    )}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderEditPage = (user: User) => {
     const userId = user.id || user.username;
     const isSelf = !!activeUserId && userId.toLowerCase() === activeUserId.toLowerCase();
     if (!isAdmin) {
       return (
-        <div className="space-y-3 max-w-xl font-mono text-xs">
-          <h3 className="text-sm font-bold text-[var(--cp-cyan)]">USER_{user.username}</h3>
-          <p className="text-muted-foreground">Read-only user record. Administrator access is required to modify users.</p>
-          <div>Name: {user.name}</div>
-          <div>Email: {user.email || "—"}</div>
-          <div>Role: {user.role}</div>
-          <div>Status: {user.active ? "active" : "inactive"}</div>
+        <div className="space-y-4 max-w-xl font-mono text-xs">
+          <div className="space-y-3 p-4 border border-[var(--cp-border)] bg-[var(--cp-bg-2)]">
+            <h3 className="text-sm font-bold text-[var(--cp-cyan)]">USER_{user.username}</h3>
+            <p className="text-muted-foreground">Read-only user record. Administrator access is required to modify users.</p>
+            <div>Name: {user.name}</div>
+            <div>Email: {user.email || "—"}</div>
+            <div>Role: {user.role}</div>
+            <div>Status: {user.active ? "active" : "inactive"}</div>
+          </div>
+          {renderAgentMcpSettings(user)}
         </div>
       );
     }
@@ -743,6 +944,9 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
           </p>
         </div>
 
+        {/* Agent MCP Settings Section */}
+        {renderAgentMcpSettings(user)}
+
         </>)}
 
         {detailTab === "access" && (
@@ -914,15 +1118,26 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
 
         {detailTab === "usage" && (
         <div className="space-y-4" data-testid="user-mcp-usage">
-          <div className="flex flex-wrap gap-4 text-xs font-mono text-muted-foreground border border-[var(--cp-border)] bg-[var(--cp-bg-2)] p-3">
-            <span>Last login: <span className="text-foreground">{formatTimestamp(userUsage?.last_login_at ?? user.last_login_at)}</span></span>
-            {userUsage && (
-              <>
-                <span>Logins ({USAGE_WINDOW_DAYS}d): <span className="text-foreground">{userUsage.logins_per_day.reduce((n, d) => n + d.logins, 0)}</span></span>
-                <span>Tool calls ({USAGE_WINDOW_DAYS}d): <span className="text-foreground">{userUsage.total_calls}</span></span>
-                <span>Projects: <span className="text-foreground">{userUsage.projects.length}</span></span>
-              </>
-            )}
+          <div className="flex flex-wrap items-center justify-between gap-4 text-xs font-mono text-muted-foreground border border-[var(--cp-border)] bg-[var(--cp-bg-2)] p-3">
+            <div className="flex flex-wrap gap-4">
+              <span>Last login: <span className="text-foreground">{formatTimestamp(userUsage?.last_login_at ?? user.last_login_at)}</span></span>
+              {userUsage && (
+                <>
+                  <span>Logins ({USAGE_WINDOW_DAYS}d): <span className="text-foreground">{userUsage.logins_per_day.reduce((n, d) => n + d.logins, 0)}</span></span>
+                  <span>Tool calls ({USAGE_WINDOW_DAYS}d): <span className="text-foreground">{userUsage.total_calls}</span></span>
+                  <span>Projects: <span className="text-foreground">{userUsage.projects.length}</span></span>
+                </>
+              )}
+            </div>
+            <button
+              onClick={() => selectedUserId && void fetchUserUsage(selectedUserId)}
+              disabled={isRefreshingUsage}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] border border-[var(--cp-cyan)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] transition-colors cursor-pointer disabled:opacity-50"
+              title="Refresh usage statistics"
+            >
+              <RefreshCw size={12} className={isRefreshingUsage ? "animate-spin" : ""} />
+              <span>{isRefreshingUsage ? "REFRESHING..." : "REFRESH"}</span>
+            </button>
           </div>
 
           {usageError ? (
@@ -1269,6 +1484,43 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
                 <Copy size={10} /> Copy
               </button>
             </div>
+
+            {/* Quick copy MCP settings for newly generated key */}
+            {activeAgents.length > 0 && (
+              <div className="space-y-2 pt-2 border-t border-[var(--cp-border)]/50">
+                <div className="text-[10px] text-muted-foreground uppercase font-mono flex items-center gap-1.5">
+                  <Bot size={12} className="text-[var(--cp-cyan)]" /> Copy Agent MCP Settings:
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {activeAgents.map((agent) => {
+                    const Icon = AGENT_ICONS[agent.id] || Bot;
+                    const isCopied = copiedAgentId === `modal-${agent.id}`;
+                    return (
+                      <button
+                        key={agent.id}
+                        type="button"
+                        data-testid={`modal-copy-mcp-${agent.id}`}
+                        onClick={() =>
+                          handleCopyAgentMcp(
+                            agent,
+                            { username: generatedKeyDetails.username, api_key: generatedKeyDetails.apiKey, role: generatedKeyDetails.role || "operator" } as any,
+                            `modal-${agent.id}`
+                          )
+                        }
+                        className={`px-2.5 py-1 border text-[10px] font-mono flex items-center gap-1 cursor-pointer transition-all ${
+                          isCopied
+                            ? "border-[var(--cp-green)] text-[var(--cp-green)] bg-[rgba(0,255,136,0.1)]"
+                            : "border-[var(--cp-cyan)]/40 text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.08)]"
+                        }`}
+                      >
+                        {isCopied ? <Check size={10} className="text-[var(--cp-green)]" /> : <Icon size={10} />}
+                        <span>{isCopied ? "COPIED!" : `${agent.shortLabel.toUpperCase()} MCP`}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-end pt-2">
               <button

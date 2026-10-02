@@ -793,10 +793,11 @@ const AGENT_INTEGRATION_PROFILES = {
 
 type AgentMcpTransport = 'streamable-http' | 'sse'
 
-const MCP_TRANSPORT_CONFIG: Record<AgentMcpTransport, { type: string; ports: [number, number, number] }> = {
-  'streamable-http': { type: 'streamable-http', ports: [8194, 8193, 8191] },
-  sse: { type: 'sse', ports: [8094, 8093, 8091] },
+const MCP_TRANSPORT_CONFIG: Record<AgentMcpTransport, { type: string; ports: [number, number, number, number] }> = {
+  'streamable-http': { type: 'streamable-http', ports: [8194, 8193, 8192, 8191] },
+  sse: { type: 'sse', ports: [8094, 8093, 8092, 8091] },
 }
+
 
 function normalizeAgentMcpTransport(value: unknown): AgentMcpTransport {
   return value === 'sse' ? 'sse' : 'streamable-http'
@@ -1058,9 +1059,13 @@ async function triggerAgentSetupInternal(providerName: string, requestedTranspor
         type: config.type,
         url: mcpEntryUrl(transport, 'context', config.ports[1]),
       }
+      currentMcp.mcpServers['savant-abilities'] = {
+        type: config.type,
+        url: mcpEntryUrl(transport, 'abilities', config.ports[2]),
+      }
       currentMcp.mcpServers['savant-workspace'] = {
         type: config.type,
-        url: mcpEntryUrl(transport, 'workspace', config.ports[2]),
+        url: mcpEntryUrl(transport, 'workspace', config.ports[3]),
       }
       await fs.writeFile(profile.mcpPath, JSON.stringify(currentMcp, null, 2), 'utf8')
       configuredParts.push(`${p}:mcp`)

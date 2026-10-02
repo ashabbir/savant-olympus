@@ -376,4 +376,69 @@ describe('AgentSetupView Component', () => {
     expect(screen.queryByText('Claude Code / Desktop')).not.toBeInTheDocument()
     expect(screen.queryByText('GitHub Copilot')).not.toBeInTheDocument()
   })
+
+  it('buildUserMcpConfig formats valid JSON, TOML, and YAML with correct transport types and role restrictions', async () => {
+    const { buildUserMcpConfig } = await import('../services/agentSetupService')
+    
+    // 1. Claude (JSON format) with streamable-http -> uses client type "http", not "streamable-http"
+    const jsonHttp = buildUserMcpConfig('claude', 'sk-test-123', 'http://127.0.0.1:8090', undefined, 'streamable-http', 'operator')
+    const parsedHttp = JSON.parse(jsonHttp)
+    expect(parsedHttp.mcpServers['savant-knowledge'].url).toBe('http://127.0.0.1:8194/mcp?api_key=sk-test-123&app_name=savant-mcp')
+    expect(parsedHttp.mcpServers['savant-context'].url).toBe('http://127.0.0.1:8193/mcp?api_key=sk-test-123&app_name=savant-mcp')
+    expect(parsedHttp.mcpServers['savant-abilities'].url).toBe('http://127.0.0.1:8192/mcp?api_key=sk-test-123&app_name=savant-mcp')
+    expect(parsedHttp.mcpServers['savant-workspace'].url).toBe('http://127.0.0.1:8191/mcp?api_key=sk-test-123&app_name=savant-mcp')
+    expect(parsedHttp.mcpServers['savant-knowledge'].type).toBe('http')
+
+    // 2. Claude (JSON format) with SSE transport -> uses client type "sse"
+    const jsonSse = buildUserMcpConfig('claude', 'sk-test-456', 'http://127.0.0.1:8090', undefined, 'sse', 'admin')
+    const parsedSse = JSON.parse(jsonSse)
+    expect(parsedSse.mcpServers['savant-knowledge'].url).toBe('http://127.0.0.1:8094/sse?api_key=sk-test-456&app_name=savant-mcp')
+    expect(parsedSse.mcpServers['savant-abilities'].url).toBe('http://127.0.0.1:8092/sse?api_key=sk-test-456&app_name=savant-mcp')
+    expect(parsedSse.mcpServers['savant-knowledge'].type).toBe('sse')
+
+    // 3. Guest role restriction in JSON: ONLY savant-knowledge, no context, abilities, or workspace
+    const jsonGuest = buildUserMcpConfig('claude', 'sk-guest-001', 'http://127.0.0.1:8090', undefined, 'streamable-http', 'guest')
+    const parsedGuest = JSON.parse(jsonGuest)
+    expect(parsedGuest.mcpServers['savant-knowledge']).toBeDefined()
+    expect(parsedGuest.mcpServers['savant-context']).toBeUndefined()
+    expect(parsedGuest.mcpServers['savant-abilities']).toBeUndefined()
+    expect(parsedGuest.mcpServers['savant-workspace']).toBeUndefined()
+
+    // 4. Codex (TOML format)
+    const tomlConfig = buildUserMcpConfig('codex', 'sk-codex-123', 'http://127.0.0.1:8090', undefined, 'streamable-http', 'operator')
+    expect(tomlConfig).toContain('[mcp_servers.savant-knowledge]')
+    expect(tomlConfig).toContain('[mcp_servers.savant-abilities]')
+    expect(tomlConfig).toContain('url = "http://127.0.0.1:8194/mcp?api_key=sk-codex-123&app_name=savant-mcp"')
+    expect(tomlConfig).toContain('url = "http://127.0.0.1:8192/mcp?api_key=sk-codex-123&app_name=savant-mcp"')
+
+    // Guest role restriction in TOML: only savant-knowledge
+    const tomlGuest = buildUserMcpConfig('codex', 'sk-guest-001', 'http://127.0.0.1:8090', undefined, 'streamable-http', 'guest')
+    expect(tomlGuest).toContain('[mcp_servers.savant-knowledge]')
+    expect(tomlGuest).not.toContain('savant-abilities')
+    expect(tomlGuest).not.toContain('savant-context')
+    expect(tomlGuest).not.toContain('savant-workspace')
+
+    // 5. Hermes (YAML format)
+    const yamlConfig = buildUserMcpConfig('hermes', 'sk-hermes-123', 'http://127.0.0.1:8090', undefined, 'streamable-http', 'operator')
+    expect(yamlConfig).toContain('mcp_servers:')
+    expect(yamlConfig).toContain('  savant-knowledge:')
+    expect(yamlConfig).toContain('  savant-abilities:')
+    expect(yamlConfig).toContain('    url: "http://127.0.0.1:8192/mcp?api_key=sk-hermes-123&app_name=savant-mcp"')
+
+    // Guest role restriction in YAML: only savant-knowledge
+    const yamlGuest = buildUserMcpConfig('hermes', 'sk-guest-001', 'http://127.0.0.1:8090', undefined, 'streamable-http', 'guest')
+    expect(yamlGuest).toContain('  savant-knowledge:')
+    expect(yamlGuest).not.toContain('savant-abilities')
+    expect(yamlGuest).not.toContain('savant-context')
+
+    // 6. Custom endpoints override
+    const customEndpoints = {
+      knowledge: 'https://remote.savant.ai/mcp',
+      context: 'https://remote.savant.ai/context/mcp',
+      workspace: 'https://remote.savant.ai/ws/mcp',
+    }
+    const jsonCustom = buildUserMcpConfig('claude', 'sk-test-789', 'http://127.0.0.1:8090', customEndpoints)
+    const parsedCustom = JSON.parse(jsonCustom)
+    expect(parsedCustom.mcpServers['savant-knowledge'].url).toContain('https://remote.savant.ai/mcp?api_key=sk-test-789')
+  })
 })

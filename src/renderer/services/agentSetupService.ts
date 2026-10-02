@@ -416,3 +416,97 @@ export async function suggestMcpEndpoints(serverUrl: string, apiKey: string): Pr
 
   return { deployment, endpoints };
 }
+
+export interface CodingAgentMeta {
+  id: AgentProvider;
+  label: string;
+  shortLabel: string;
+  configPath: string;
+  format: "json" | "yaml" | "toml";
+}
+
+export const ALL_CODING_AGENTS_META: CodingAgentMeta[] = [
+  { id: "copilot", label: "GitHub Copilot", shortLabel: "Copilot", configPath: "~/.copilot/mcp.json", format: "json" },
+  { id: "claude", label: "Claude Code / Desktop", shortLabel: "Claude", configPath: "~/.claude/claude_desktop_config.json", format: "json" },
+  { id: "hermes", label: "Hermes Agent", shortLabel: "Hermes", configPath: "~/.hermes/config.yaml", format: "yaml" },
+  { id: "codex", label: "Codex Agent", shortLabel: "Codex", configPath: "~/.codex/config.toml", format: "toml" },
+];
+
+export function buildUserMcpConfig(
+  agentId: AgentProvider | string,
+  userApiKey: string,
+  serverUrl: string,
+  mcpEndpoints?: Record<string, string>,
+  transport: AgentMcpTransport = "streamable-http",
+  userRole?: string
+): string {
+  const isGuest = userRole?.toLowerCase() === "guest";
+  const services: Array<{ name: "knowledge" | "context" | "abilities" | "workspace"; port: number }> = isGuest
+    ? [{ name: "knowledge", port: transport === "sse" ? 8094 : 8194 }]
+    : [
+        { name: "knowledge", port: transport === "sse" ? 8094 : 8194 },
+        { name: "context", port: transport === "sse" ? 8093 : 8193 },
+        { name: "abilities", port: transport === "sse" ? 8092 : 8192 },
+        { name: "workspace", port: transport === "sse" ? 8091 : 8191 },
+      ];
+
+  const getUrl = (service: "knowledge" | "context" | "abilities" | "workspace", defaultPort: number) => {
+    const configured = mcpEndpoints?.[service];
+    if (configured && configured.trim()) {
+      try {
+        const urlObj = new URL(configured.trim());
+        if (userApiKey) urlObj.searchParams.set("api_key", userApiKey);
+        urlObj.searchParams.set("app_name", "savant-mcp");
+        return urlObj.toString();
+      } catch {
+        const sep = configured.includes("?") ? "&" : "?";
+        return `${configured}${sep}api_key=${userApiKey}&app_name=savant-mcp`;
+      }
+    }
+    const suffix = transport === "sse" ? "sse" : "mcp";
+    try {
+      const parsed = new URL(serverUrl);
+      const host = parsed.hostname;
+      const match = host.match(/^savant-server-([^.]+)\.(.+)$/);
+      if (match) {
+        const [, user, domain] = match;
+        return `${parsed.protocol}//savant-mcp-${service}-${user}.${domain}/${suffix}?api_key=${userApiKey}&app_name=savant-mcp`;
+      }
+    } catch {}
+    return `http://127.0.0.1:${defaultPort}/${suffix}?api_key=${userApiKey}&app_name=savant-mcp`;
+  };
+
+  if (agentId === "codex") {
+    // Generate TOML format for ~/.codex/config.toml
+    const lines: string[] = [];
+    for (const svc of services) {
+      lines.push(`[mcp_servers.savant-${svc.name}]`);
+      lines.push(`url = "${getUrl(svc.name, svc.port)}"`);
+      lines.push("");
+    }
+    return lines.join("\n").trim();
+  }
+
+  if (agentId === "hermes") {
+    // Generate YAML format for ~/.hermes/config.yaml
+    const lines: string[] = ["mcp_servers:"];
+    for (const svc of services) {
+      lines.push(`  savant-${svc.name}:`);
+      lines.push(`    url: "${getUrl(svc.name, svc.port)}"`);
+    }
+    return lines.join("\n");
+  }
+
+  // Generate JSON format for Claude / Copilot (using "http" or "sse" type, not streamable-http)
+  const clientType = transport === "sse" ? "sse" : "http";
+  const mcpServers: Record<string, { type: string; url: string }> = {};
+  for (const svc of services) {
+    mcpServers[`savant-${svc.name}`] = {
+      type: clientType,
+      url: getUrl(svc.name, svc.port),
+    };
+  }
+  return JSON.stringify({ mcpServers }, null, 2);
+}
+
+

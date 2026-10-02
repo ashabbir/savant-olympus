@@ -320,6 +320,15 @@ describe('UsersView Component', () => {
         role: "operator",
         active: false,
         api_keys: ["sk-inactive-user-001"]
+      },
+      {
+        id: "usr-guest",
+        username: "guest_bob",
+        name: "Guest Bob",
+        email: "bob@savant.ai",
+        role: "guest",
+        active: true,
+        api_keys: ["sk-guest-bob-001"]
       }
     ]
 
@@ -696,6 +705,90 @@ describe('UsersView Component', () => {
       { domain_node_id: 'domain-2', can_write: false },
       { domain_node_id: 'domain-3', can_write: false },
     ])
+  })
+
+  it('renders MCP copy buttons for system-enabled agents (e.g. claude and codex) and copies config to clipboard', async () => {
+    const writeTextMock = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: writeTextMock,
+      },
+    });
+
+    (window as any).system.getSettings = vi.fn().mockResolvedValue({
+      'agents:enabledList': ['claude', 'codex'],
+    })
+
+    const { UsersView } = await import('../components/tabs/UsersView')
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Lex Friedman')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('Lex Friedman'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('copy-mcp-claude')).toBeInTheDocument()
+      expect(screen.getByTestId('copy-mcp-codex')).toBeInTheDocument()
+    })
+
+    expect(screen.queryByTestId('copy-mcp-copilot')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('copy-mcp-hermes')).not.toBeInTheDocument()
+
+    // Click Claude MCP copy button
+    fireEvent.click(screen.getByTestId('copy-mcp-claude'))
+
+    expect(writeTextMock).toHaveBeenCalled()
+    const lastCopied = writeTextMock.mock.calls[writeTextMock.mock.calls.length - 1][0]
+    const parsed = JSON.parse(lastCopied)
+    expect(parsed.mcpServers).toBeDefined()
+    expect(parsed.mcpServers['savant-knowledge'].type).toBe('http')
+    expect(parsed.mcpServers['savant-knowledge'].url).toContain('sk-lex-savant-001')
+    expect(parsed.mcpServers['savant-context'].url).toContain('sk-lex-savant-001')
+    expect(parsed.mcpServers['savant-abilities'].url).toContain('sk-lex-savant-001')
+    expect(parsed.mcpServers['savant-workspace'].url).toContain('sk-lex-savant-001')
+
+    // Click Codex MCP copy button (TOML format)
+    fireEvent.click(screen.getByTestId('copy-mcp-codex'))
+    expect(writeTextMock).toHaveBeenCalledTimes(2)
+    const codexCopied = writeTextMock.mock.calls[1][0]
+    expect(codexCopied).toContain('[mcp_servers.savant-knowledge]')
+    expect(codexCopied).toContain('[mcp_servers.savant-abilities]')
+    expect(codexCopied).toContain('url = "http://127.0.0.1:8194/mcp?api_key=sk-lex-savant-001&app_name=savant-mcp"')
+    expect(codexCopied).toContain('url = "http://127.0.0.1:8192/mcp?api_key=sk-lex-savant-001&app_name=savant-mcp"')
+
+    // Select Guest Bob (guest role) and verify only savant-knowledge is generated
+    fireEvent.click(screen.getByText('Guest Bob'))
+    await waitFor(() => {
+      expect(screen.getByTestId('copy-mcp-claude')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId('copy-mcp-claude'))
+    expect(writeTextMock).toHaveBeenCalledTimes(3)
+    const guestCopied = JSON.parse(writeTextMock.mock.calls[2][0])
+    expect(guestCopied.mcpServers['savant-knowledge']).toBeDefined()
+    expect(guestCopied.mcpServers['savant-knowledge'].url).toContain('sk-guest-bob-001')
+    expect(guestCopied.mcpServers['savant-context']).toBeUndefined()
+    expect(guestCopied.mcpServers['savant-abilities']).toBeUndefined()
+    expect(guestCopied.mcpServers['savant-workspace']).toBeUndefined()
+  })
+
+  it('shows empty notice when all coding agents are disabled in settings', async () => {
+    (window as any).system.getSettings = vi.fn().mockResolvedValue({
+      'agents:enabledList': [],
+    })
+
+    const { UsersView } = await import('../components/tabs/UsersView')
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Ahmed Shabbir')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('Ahmed Shabbir'))
+
+    await waitFor(() => {
+      expect(screen.getByText(/No external coding agents are currently enabled in Settings > Agents/i)).toBeInTheDocument()
+    })
   })
 })
 
