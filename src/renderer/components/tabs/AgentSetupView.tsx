@@ -51,7 +51,7 @@ export function AgentSetupView({ serverUrl, apiKey }: AgentSetupViewProps) {
         if (active && settings) {
           const configured = settings?.["mcp:endpoints"]?.knowledge;
           if (configured) setKnowledgeMcpUrl(configured);
-          const ep = settings?.["gateway:enabledProviders"];
+          const ep = settings?.["gateway:enabledProviders"] ?? settings?.["agents:enabledProviders"];
           setEnabledProviders(Array.isArray(ep) ? ep : null);
         }
       } catch {

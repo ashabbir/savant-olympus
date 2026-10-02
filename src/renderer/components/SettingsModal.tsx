@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { X, Plus, Trash2, GripVertical, Folder, RefreshCw, CheckCircle, XCircle, WifiOff } from "lucide-react";
+import { X, Plus, Trash2, GripVertical, Folder, RefreshCw, CheckCircle, XCircle, WifiOff, Bot, Terminal, Code2, FileText } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { getStoredApiKey } from "../services/auth";
 import { runtimeService } from "../services/runtimeService";
@@ -447,7 +447,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
         })));
       }
 
-      const savedEnabled = settings["gateway:enabledProviders"];
+      const savedEnabled = settings["gateway:enabledProviders"] ?? settings["agents:enabledProviders"];
       setEnabledProviders(Array.isArray(savedEnabled) ? savedEnabled : null);
 
       const nextGateway = toLiveServiceConfig(settings["gateway:config"], {
@@ -477,6 +477,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
         "agents:list": settings["agents:list"] || [],
         "gateway:config": settings["gateway:config"] || { url: "http://localhost:3100", enabled: true },
         "gateway:enabledProviders": Array.isArray(savedEnabled) ? savedEnabled : null,
+        "agents:enabledProviders": Array.isArray(savedEnabled) ? savedEnabled : null,
         "server:config": settings["server:config"] || { url: "http://127.0.0.1:8090", enabled: true },
         "mcp:endpoints": settings["mcp:endpoints"] || {},
       };
@@ -515,6 +516,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
       await window.system.saveSetting("agents:list", agents);
       await window.system.saveSetting("gateway:config", { ...gateway, status: "idle", url: normalizeServiceUrl(gateway.url) });
       await window.system.saveSetting("gateway:enabledProviders", enabledProviders);
+      await window.system.saveSetting("agents:enabledProviders", enabledProviders);
       await window.system.saveSetting("server:config", { ...server, status: "idle", url: normalizeServiceUrl(server.url) });
       await window.system.saveSetting("mcp:endpoints", mcpEndpoints);
       window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
@@ -567,6 +569,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
     await window.system.saveSetting("agents:list", agents);
     await window.system.saveSetting("gateway:config", { ...gateway, status: "idle", url: normalizeServiceUrl(gateway.url) });
     await window.system.saveSetting("gateway:enabledProviders", enabledProviders);
+    await window.system.saveSetting("agents:enabledProviders", enabledProviders);
     await window.system.saveSetting("server:config", { ...server, status: "idle", url: normalizeServiceUrl(server.url) });
     await window.system.saveSetting("mcp:endpoints", mcpEndpoints);
     invalidateCatalogCache();
@@ -586,6 +589,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
     await window.system.saveSetting("agents:list", backupRef.current["agents:list"]);
     await window.system.saveSetting("gateway:config", backupRef.current["gateway:config"]);
     await window.system.saveSetting("gateway:enabledProviders", backupRef.current["gateway:enabledProviders"]);
+    await window.system.saveSetting("agents:enabledProviders", backupRef.current["agents:enabledProviders"]);
     await window.system.saveSetting("server:config", backupRef.current["server:config"]);
     await window.system.saveSetting("mcp:endpoints", backupRef.current["mcp:endpoints"]);
     invalidateCatalogCache();
@@ -633,6 +637,38 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
 
   function disableAllProviders() {
     setEnabledProviders([]);
+    invalidateCatalogCache();
+    window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
+  }
+
+  const displayAgents = [
+    { id: "copilot", label: "GitHub Copilot", description: "GitHub Copilot Chat, CLI, and Agent Mode integration", icon: Bot },
+    { id: "claude", label: "Claude Code / Desktop", description: "Anthropic Claude Code CLI & Desktop Agent integration", icon: Terminal },
+    { id: "hermes", label: "Hermes Agent", description: "Hermes autonomous agent execution runtime", icon: Code2 },
+    { id: "codex", label: "Codex Agent", description: "Codex CLI & OpenAI developer environment", icon: FileText },
+    ...(allDiscoveredProviders.some(p => p.id === "agy")
+      ? [{ id: "agy", label: "AGY Agent", description: "Antigravity AGY workspace integration", icon: Bot }]
+      : []),
+  ];
+
+  function enableAllAgents() {
+    const current = enabledProviders !== null
+      ? [...enabledProviders]
+      : allDiscoveredProviders.map(p => p.id);
+    const agentIds = displayAgents.map(a => a.id);
+    const next = Array.from(new Set([...current, ...agentIds]));
+    setEnabledProviders(next);
+    invalidateCatalogCache();
+    window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
+  }
+
+  function disableAllAgents() {
+    const current = enabledProviders !== null
+      ? [...enabledProviders]
+      : allDiscoveredProviders.map(p => p.id);
+    const agentIds = new Set(displayAgents.map(a => a.id));
+    const next = current.filter(id => !agentIds.has(id));
+    setEnabledProviders(next);
     invalidateCatalogCache();
     window.dispatchEvent(new Event(ATHENA_MODEL_CHANGED_EVENT));
   }
@@ -997,17 +1033,96 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true
 
             {/* ── AGENTS ── */}
             {activeTab === "agents" && (
-              <div className="space-y-4">
-                <p style={{ color: "var(--foreground)", fontFamily: "'Rajdhani', sans-serif" }} className="text-sm opacity-60">
-                  Configure MCP Bridge, Learning Instructions, and Knowledge Commit for external AI coding assistants.
-                </p>
+              <div className="space-y-6">
+                <div>
+                  <p style={{ color: "var(--foreground)", fontFamily: "'Rajdhani', sans-serif" }} className="text-sm opacity-60">
+                    Configure Model Context Protocol, Learning Instructions, and Knowledge Commit for external AI coding assistants.
+                  </p>
+                </div>
+
+                <div className="p-4 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h4 style={{ color: "var(--cp-cyan)", fontFamily: "'Orbitron', sans-serif" }} className="text-xs uppercase tracking-wider font-semibold">
+                        Enabled Coding Agents Override
+                      </h4>
+                      <p className="text-[11px] opacity-60 mt-0.5" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
+                        Enable or disable specific coding agents (Hermes, Codex, Copilot, Claude). Disabled agents are hidden from the Agent Setup view and cannot be triggered.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={enableAllAgents}
+                        style={{ border: "1px solid var(--cp-cyan)", color: "var(--cp-cyan)", fontFamily: "'Share Tech Mono', monospace" }}
+                        className="px-2.5 py-1 text-[10px] uppercase hover:bg-[var(--cp-cyan)] hover:text-[var(--cp-bg-0)] transition-all cursor-pointer"
+                      >
+                        Enable All
+                      </button>
+                      <button
+                        type="button"
+                        onClick={disableAllAgents}
+                        style={{ border: "1px solid var(--cp-border)", color: "var(--foreground)", fontFamily: "'Share Tech Mono', monospace" }}
+                        className="px-2.5 py-1 text-[10px] uppercase hover:border-red-400 hover:text-red-400 transition-all opacity-80 cursor-pointer"
+                      >
+                        Disable All
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    {displayAgents.map(agent => {
+                      const isEnabled = enabledProviders === null || enabledProviders.includes(agent.id);
+                      const Icon = agent.icon;
+                      return (
+                        <div
+                          key={agent.id}
+                          onClick={() => toggleProviderEnabled(agent.id)}
+                          style={{
+                            background: isEnabled ? "var(--cp-bg-2)" : "var(--cp-bg-3)",
+                            borderColor: isEnabled ? "var(--cp-cyan)" : "var(--cp-border)",
+                          }}
+                          className={`p-3 border rounded cursor-pointer flex items-center justify-between transition-all select-none ${
+                            isEnabled ? "shadow-[0_0_8px_rgba(0,229,255,0.15)]" : "opacity-50"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2.5 min-w-0 pr-2">
+                            <div className={`p-1.5 rounded mt-0.5 shrink-0 ${isEnabled ? "text-[var(--cp-cyan)] bg-[var(--cp-bg-0)]" : "text-muted-foreground bg-[var(--cp-bg-2)]"}`}>
+                              <Icon size={16} />
+                            </div>
+                            <div className="flex flex-col min-w-0">
+                              <span style={{ fontFamily: "'Share Tech Mono', monospace" }} className="text-xs font-bold uppercase tracking-wider text-[var(--foreground)] truncate">
+                                {agent.label}
+                              </span>
+                              <span className="text-[10px] opacity-60 line-clamp-1">
+                                {agent.description}
+                              </span>
+                            </div>
+                          </div>
+                          <span
+                            style={{
+                              background: isEnabled ? "var(--cp-cyan)" : "var(--cp-bg-0)",
+                              color: isEnabled ? "var(--cp-bg-0)" : "var(--foreground)",
+                              border: "1px solid var(--cp-border)",
+                              fontFamily: "'Share Tech Mono', monospace",
+                            }}
+                            className="px-2 py-0.5 text-[10px] font-bold uppercase rounded shrink-0"
+                          >
+                            {isEnabled ? "ENABLED" : "DISABLED"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <div className="p-3 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] rounded text-xs space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-[var(--cp-cyan)] uppercase">Supported Coding Agents</span>
-                    <span className="text-muted-foreground">Copilot • Claude • Hermes • Codex</span>
+                    <span className="font-bold text-[var(--cp-cyan)] uppercase">Knowledge Graph Integration</span>
+                    <span className="text-muted-foreground">Automated MCP Bridge</span>
                   </div>
                   <p className="text-muted-foreground font-sans text-[11px]">
-                    Every agent can be configured to automatically persist learnings, bug root causes, and architectural patterns into the Savant Knowledge Graph.
+                    Every enabled agent is wired to automatically persist durable insights, bug root causes, and architectural patterns directly to Savant Knowledge.
                   </p>
                   <button
                     type="button"
