@@ -26,6 +26,7 @@ describe('App Component', () => {
   it('renders correctly and shows the header', async () => {
     await waitForAppReady()
     expect(screen.getAllByText(/olympus/i)[0]).toBeInTheDocument()
+    expect(screen.queryByTitle('Tools')).not.toBeInTheDocument()
   })
 
   it('renders the Workspace view by default', async () => {
@@ -113,7 +114,7 @@ describe('App Component', () => {
     })
   })
 
-  it('uses the live server role instead of a stale persisted role', async () => {
+  it('uses the login-time server role instead of a stale persisted role', async () => {
     const originalFetch = vi.mocked(fetch).getMockImplementation()!
     let serverRole = 'operator'
     vi.mocked(fetch).mockImplementation((input, init) => {
@@ -136,16 +137,13 @@ describe('App Component', () => {
     fireEvent.click(screen.getByTitle('Knowledge'))
     expect(screen.queryByTitle('Add Node')).not.toBeInTheDocument()
 
-    serverRole = 'admin'
     fireEvent.focus(window)
-    await waitFor(() => {
-      expect(screen.getByTitle('Add Node')).toBeInTheDocument()
-    })
+    expect(screen.queryByTitle('Add Node')).not.toBeInTheDocument()
   })
 
-  it('hides the Users sidebar tab icon for non-admin users and shows it for admin users', async () => {
+  it('shows the Users sidebar tab icon for an admin role returned at login', async () => {
     const originalFetch = vi.mocked(fetch).getMockImplementation()!
-    let serverRole = 'operator'
+    const serverRole = 'admin'
     vi.mocked(fetch).mockImplementation((input, init) => {
       if (String(input).includes('/api/auth/validate')) {
         return Promise.resolve({
@@ -158,13 +156,7 @@ describe('App Component', () => {
     })
 
     await waitForAppReady()
-    expect(screen.queryByTitle('Users')).not.toBeInTheDocument()
-
-    serverRole = 'admin'
-    fireEvent.focus(window)
-    await waitFor(() => {
-      expect(screen.getByTitle('Users')).toBeInTheDocument()
-    })
+    expect(screen.getByTitle('Users')).toBeInTheDocument()
   })
 
   it('restricts guest users strictly to Knowledge tab with other tabs hidden', async () => {

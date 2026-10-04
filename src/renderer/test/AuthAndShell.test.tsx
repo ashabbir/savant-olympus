@@ -211,6 +211,7 @@ describe('SettingsModal and BottomBar', () => {
   })
 
   it('renders live bottom bar status from settings, health checks, and database status', async () => {
+    const listGatewayRuns = vi.spyOn(runtimeService, 'listGatewayRuns')
     vi.mocked(window.system.getSettings).mockResolvedValueOnce({
       'user:name': 'Control Operator',
       'system:defaultDirectory': '/ops',
@@ -227,5 +228,10 @@ describe('SettingsModal and BottomBar', () => {
     expect(screen.getByText('/ops')).toBeInTheDocument()
     await waitFor(() => expect(screen.getAllByText('online').length).toBeGreaterThanOrEqual(2))
     expect(screen.getByText('connected')).toBeInTheDocument()
+    expect(listGatewayRuns).not.toHaveBeenCalled()
+
+    fireEvent.focus(window)
+    expect(listGatewayRuns).not.toHaveBeenCalled()
+    listGatewayRuns.mockRestore()
   })
 })

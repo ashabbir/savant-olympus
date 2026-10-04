@@ -7,7 +7,6 @@ const KnowledgeView = lazy(() => import("./tabs/KnowledgeView").then((m) => ({ d
 const ContextView = lazy(() => import("./tabs/ContextView").then((m) => ({ default: m.ContextView })));
 const AbilitiesView = lazy(() => import("./tabs/AbilitiesView").then((m) => ({ default: m.AbilitiesView })));
 const SkillsView = lazy(() => import("./tabs/SkillsView").then((m) => ({ default: m.SkillsView })));
-const ToolsView = lazy(() => import("./tabs/ToolsView").then((m) => ({ default: m.ToolsView })));
 const UsersView = lazy(() => import("./tabs/UsersView").then((m) => ({ default: m.UsersView })));
 const ActivityLogsView = lazy(() => import("./tabs/ActivityLogsView").then((m) => ({ default: m.ActivityLogsView })));
 const JobsView = lazy(() => import("./tabs/JobsView").then((m) => ({ default: m.JobsView })));
@@ -53,9 +52,6 @@ export function OlympusViewport(props: OlympusViewportProps) {
       break;
     case "Context":
       view = <ContextView serverUrl={serverUrl} apiKey={apiKey} selectedProject={props.selectedProject} onSelectProject={props.onSelectProject} activeModel={activeModel} isAdmin={isAdmin} />;
-      break;
-    case "Tools":
-      view = <ToolsView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} />;
       break;
     case "Skills":
       view = <SkillsView serverUrl={serverUrl} apiKey={apiKey} activeModel={activeModel} isAdmin={isAdmin} />;

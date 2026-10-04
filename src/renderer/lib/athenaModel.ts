@@ -101,7 +101,7 @@ export async function runAthenaAgent({ prompt, tagModel = true }: { prompt: stri
 
 export const ATHENA_MODEL_CHANGED_EVENT = "athena-model-changed";
 
-/** Live ATHENA mental mode for labels; refreshes on Settings save and window focus. */
+/** Live ATHENA mental mode for labels; refreshes on startup and Settings save. */
 export function useAthenaModel(): AthenaModelSelection {
   const [selection, setSelection] = useState<AthenaModelSelection>(DEFAULT_ATHENA_MODEL);
   useEffect(() => {
@@ -109,11 +109,9 @@ export function useAthenaModel(): AthenaModelSelection {
     const load = () => { resolveAthenaModel().then((next) => { if (active) setSelection(next); }); };
     load();
     window.addEventListener(ATHENA_MODEL_CHANGED_EVENT, load);
-    window.addEventListener("focus", load);
     return () => {
       active = false;
       window.removeEventListener(ATHENA_MODEL_CHANGED_EVENT, load);
-      window.removeEventListener("focus", load);
     };
   }, []);
   return selection;

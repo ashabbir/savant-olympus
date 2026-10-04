@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Users, Key, Shield, UserCheck, Eye, EyeOff, X, Save, Mail, Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Copy, Activity, Bot, Terminal, Code2, FileText, Check, LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { setStoredApiKey } from "../../services/auth";
-import { createUsersService, type UserUsage } from "../../services/usersService";
+import { createUsersService, type UserContributions, type UserUsage } from "../../services/usersService";
 import { ALL_CODING_AGENTS_META, buildUserMcpConfig, type AgentProvider, type AgentMcpTransport, type CodingAgentMeta } from "../../services/agentSetupService";
 
 const USAGE_WINDOW_DAYS = 30;
@@ -102,6 +102,9 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
   const [isCopying, setIsCopying] = useState(false);
   const [userUsage, setUserUsage] = useState<UserUsage | null>(null);
   const [usageError, setUsageError] = useState("");
+  const [userContributions, setUserContributions] = useState<UserContributions | null>(null);
+  const [contributionsError, setContributionsError] = useState("");
+  const [isRefreshingContributions, setIsRefreshingContributions] = useState(false);
   const [isAddingAllDomains, setIsAddingAllDomains] = useState(false);
   const [domainBulkNote, setDomainBulkNote] = useState("");
   const [detailTab, setDetailTab] = useState<"profile" | "access" | "usage" | "contributions">("profile");
@@ -206,6 +209,20 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
     }
   };
 
+  const fetchUserContributions = async (uid: string) => {
+    setContributionsError("");
+    setIsRefreshingContributions(true);
+    try {
+      setUserContributions(await usersService.getUserContributions(uid));
+    } catch (error: any) {
+      console.error(error);
+      setUserContributions(null);
+      setContributionsError(error?.message || "Failed to load contributions.");
+    } finally {
+      setIsRefreshingContributions(false);
+    }
+  };
+
   useEffect(() => {
     if (selectedUserId) {
       void fetchUserDomains(selectedUserId);
@@ -218,6 +235,8 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
   useEffect(() => {
     setUserUsage(null);
     setUsageError("");
+    setUserContributions(null);
+    setContributionsError("");
     if (selectedUserId && isAdmin) void fetchUserUsage(selectedUserId);
   }, [selectedUserId, serverUrl, apiKey, isAdmin]);
 
@@ -226,6 +245,12 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
       void fetchUserUsage(selectedUserId);
     }
   }, [detailTab]);
+
+  useEffect(() => {
+    if (selectedUserId && isAdmin && detailTab === "contributions") {
+      void fetchUserContributions(selectedUserId);
+    }
+  }, [detailTab, selectedUserId, serverUrl, apiKey, isAdmin]);
 
   const missingDomains = availableDomains.filter((ad) => !userDomains.some((ud) => ud.domain_node_id === ad.node_id));
 
@@ -1252,11 +1277,39 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
         {detailTab === "contributions" && (
         <div className="space-y-4" data-testid="user-contributions">
           <UsageCard title="Knowledge graph contributions" testId="contributions-summary">
-            <EmptyNote>
-              Contribution tracking is not available yet. The knowledge graph does not currently record which
-              user created, updated, or deleted a node or edge — this requires a backend change (audit columns
-              or an event log on kg_nodes/kg_edges) before this tab can show per-user node/edge/domain activity.
-            </EmptyNote>
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
+                <span>Nodes created: <span className="text-foreground">{userContributions?.node_count ?? "—"}</span></span>
+                <span>Committed: <span className="text-foreground">{userContributions?.committed_count ?? "—"}</span></span>
+                <span>Staged: <span className="text-foreground">{userContributions?.staged_count ?? "—"}</span></span>
+                <span>Latest: <span className="text-foreground">{userContributions ? formatTimestamp(userContributions.latest_created_at) : "—"}</span></span>
+              </div>
+              <button
+                type="button"
+                onClick={() => selectedUserId && void fetchUserContributions(selectedUserId)}
+                disabled={isRefreshingContributions}
+                className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] border border-[var(--cp-cyan)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] transition-colors cursor-pointer disabled:opacity-50"
+                title="Refresh knowledge graph contributions"
+              >
+                <RefreshCw size={12} className={isRefreshingContributions ? "animate-spin" : ""} />
+                <span>{isRefreshingContributions ? "REFRESHING..." : "REFRESH"}</span>
+              </button>
+            </div>
+            {contributionsError ? (
+              <p className="text-xs text-red-400 font-mono">{contributionsError}</p>
+            ) : !userContributions ? (
+              <p className="text-xs text-muted-foreground font-mono">Loading creator-attributed nodes…</p>
+            ) : userContributions.by_type.length === 0 ? (
+              <EmptyNote>No knowledge graph nodes have been attributed to this user yet.</EmptyNote>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {userContributions.by_type.map(({ node_type, node_count }) => (
+                  <span key={node_type} className="border border-[var(--cp-border)] bg-[var(--cp-bg-3)] px-2 py-1 text-[11px] font-mono text-muted-foreground">
+                    {node_type}: <span className="text-foreground">{node_count}</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </UsageCard>
         </div>
         )}

@@ -15,9 +15,31 @@ describe("ContextService", () => {
     vi.stubGlobal("fetch", fetchMock);
     const service = new ContextService("http://localhost:8090/", "secret");
 
-    await expect(service.listRepositories()).resolves.toEqual([{ name: "olympus" }]);
+    await expect(service.listRepositories(2, 10)).resolves.toEqual([{ name: "olympus" }]);
     await expect(service.getIndexingStatus()).resolves.toEqual({ olympus: { status: "ready" } });
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "http://localhost:8090/api/context/repos", expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "http://localhost:8090/api/context/repos?page=2&page_size=10", expect.any(Object));
+  });
+
+  it("loads the repository count independently from repository pages", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ count: 23 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new ContextService("http://localhost:8090", "secret");
+
+    await expect(service.getRepositoryCount()).resolves.toBe(23);
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:8090/api/context/repos/count", expect.any(Object));
+  });
+
+  it("keeps search queries aligned between the count and paged requests", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ count: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ repos: [{ name: "olympus" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new ContextService("http://localhost:8090", "secret");
+
+    await expect(service.getRepositoryCount("Olympus API")).resolves.toBe(1);
+    await expect(service.listRepositories(1, 10, "Olympus API")).resolves.toEqual([{ name: "olympus" }]);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "http://localhost:8090/api/context/repos/count?q=Olympus%20API", expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://localhost:8090/api/context/repos?page=1&page_size=10&q=Olympus+API", expect.any(Object));
   });
 
   it("encodes repository identifiers and delegates lifecycle operations", async () => {

@@ -13,9 +13,20 @@ export class ContextService {
     this.client = new SavantHttpClient(baseUrl, apiKey);
   }
 
-  async listRepositories(): Promise<any[]> {
-    const data = await this.client.request<any>("/api/context/repos");
-    return data.repos || data || [];
+  async listRepositories(page = 1, pageSize = 10, search = ""): Promise<any[]> {
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    if (search.trim()) params.set("q", search.trim());
+    const path = page === 1 && pageSize === 10 && !search.trim()
+      ? "/api/context/repos"
+      : `/api/context/repos?${params.toString()}`;
+    const data = await this.client.request<any>(path);
+    return Array.isArray(data?.repos) ? data.repos : Array.isArray(data) ? data : [];
+  }
+
+  async getRepositoryCount(search = ""): Promise<number> {
+    const query = search.trim() ? `?q=${encodeURIComponent(search.trim())}` : "";
+    const data = await this.client.request<any>(`/api/context/repos/count${query}`);
+    return Number(data.count ?? data.repos?.length ?? 0);
   }
 
   async getIndexingStatus(): Promise<Record<string, any>> {

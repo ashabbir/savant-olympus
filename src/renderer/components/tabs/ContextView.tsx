@@ -55,6 +55,8 @@ interface ContextViewProps {
   isAdmin?: boolean;
 }
 
+const PROJECTS_PER_PAGE = 10;
+
 export const sortSyncLogsNewestFirst = (logs: any[]) =>
   [...logs].sort((a, b) => {
     const timeDifference = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -125,7 +127,14 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const [isRepoPaneOpen, setIsRepoPaneOpen] = useState(true);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [projectPage, setProjectPage] = useState(1);
+  const [projectCount, setProjectCount] = useState<number | null>(null);
   const [lastFetchDetails, setLastFetchDetails] = useState<Record<string, any>>({});
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const projectPageRef = useRef(projectPage);
+
+  useEffect(() => {
+    projectPageRef.current = projectPage;
+  }, [projectPage]);
 
   const toggleFilter = useCallback((filter: string) => {
     setActiveFilters((prev) => {
@@ -211,11 +220,6 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
   useEffect(() => {
     fetchPeriodicSyncData();
-    const interval = setInterval(() => {
-      if (typeof document !== "undefined" && document.hidden) return;
-      fetchPeriodicSyncData();
-    }, 15000);
-    return () => clearInterval(interval);
   }, [fetchPeriodicSyncData]);
 
   const handleManualPeriodicSyncRun = async () => {
@@ -227,7 +231,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       const res = await contextService.triggerPeriodicSyncProject(repoName);
       toast.success(`Periodic sync completed for "${repoName}"!`);
       await fetchPeriodicSyncData();
-      await fetchRepos();
+      await fetchRepos(projectPage);
     } catch (e: any) {
       toast.error(`Periodic sync failed: ${e.message}`);
     } finally {
@@ -235,11 +239,11 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     }
   };
 
-  const fetchRepos = useCallback(async () => {
+  const fetchRepos = useCallback(async (page: number) => {
     setIsLoading(true);
     setLoadError("");
     try {
-      setRepos(await contextService.listRepositories());
+      setRepos(await contextService.listRepositories(page, PROJECTS_PER_PAGE, normalizedSearchQuery));
     } catch (e: any) {
       console.error(e);
       setRepos([]);
@@ -247,7 +251,20 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     } finally {
       setIsLoading(false);
     }
-  }, [contextService]);
+  }, [contextService, normalizedSearchQuery]);
+
+  const fetchRepoCount = useCallback(async () => {
+    try {
+      const count = await contextService.getRepositoryCount(normalizedSearchQuery);
+      setProjectCount(count);
+      return count;
+    } catch (e: any) {
+      console.error(e);
+      setProjectCount(0);
+      setLoadError(e.message || "Unable to reach Savant server for project count.");
+      return 0;
+    }
+  }, [contextService, normalizedSearchQuery]);
 
   const fetchIndexingStatus = useCallback(async () => {
     try {
@@ -267,23 +284,24 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
 
         previousIndexingStatusRef.current = nextStatus;
         setIndexingStatus(nextStatus);
-        if (completedRepo) fetchRepos();
+        if (completedRepo) fetchRepos(projectPageRef.current);
     } catch (e) {
       console.error(e);
     }
   }, [contextService, fetchRepos]);
 
   useEffect(() => {
-    fetchRepos();
+    fetchRepoCount();
+  }, [fetchRepoCount]);
+
+  useEffect(() => {
     fetchIndexingStatus();
     fetchJobsSummary();
-    const interval = setInterval(() => {
-      if (typeof document !== "undefined" && document.hidden) return;
-      fetchIndexingStatus();
-      fetchJobsSummary();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [fetchRepos, fetchIndexingStatus, fetchJobsSummary]);
+  }, [fetchIndexingStatus, fetchJobsSummary]);
+
+  useEffect(() => {
+    if (projectCount !== null) fetchRepos(projectPage);
+  }, [fetchRepos, projectCount, projectPage]);
 
   const [astNodes, setAstNodes] = useState<any[]>([]);
   const [analysisResults, setAnalysisResults] = useState<any | null>(null);
@@ -617,9 +635,6 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       const registered = await contextService.addRepository(payload);
       setIsAddModalOpen(false);
       if (registered?.name) {
-        setRepos((current) => current.some((repo) => repo.name === registered.name)
-          ? current
-          : [...current, registered]);
         setIndexingStatus((current) => ({
           ...current,
           [registered.name]: {
@@ -629,7 +644,9 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
           },
         }));
       }
-      fetchRepos();
+      setProjectPage(1);
+      await fetchRepoCount();
+      await fetchRepos(1);
     } catch (e: any) {
       setAddError(e.message);
     } finally {
@@ -667,7 +684,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
             description: "Refreshing project data...",
             duration: 5000,
           });
-          fetchRepos();
+          fetchRepos(projectPage);
           if (selectedProject === repoName) {
             fetchAstAndAnalyze(repoName);
             const repo = repos.find((item) => item.name === repoName);
@@ -681,7 +698,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         // Silently continue polling
       }
     }, 3000);
-  }, [contextService, selectedProject, fetchAstAndAnalyze, fetchRepos, fetchStructuralHealth, repos]);
+  }, [contextService, selectedProject, fetchAstAndAnalyze, fetchRepos, fetchStructuralHealth, projectPage, repos]);
 
   // Cleanup poll on unmount
   useEffect(() => {
@@ -728,7 +745,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         ),
         duration: 8000,
       });
-      fetchRepos();
+      fetchRepos(projectPage);
       fetchPeriodicSyncData();
     } catch (e: any) {
       toast.error(`Failed to refresh "${repoName}"`, { description: e.message });
@@ -857,7 +874,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     try {
       await contextService.stopIndexing(repoName);
       fetchIndexingStatus();
-      setTimeout(fetchRepos, 1000);
+      setTimeout(() => fetchRepos(projectPage), 1000);
     } catch (e: any) {
       alert(e.message);
     }
@@ -883,7 +900,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     if (!confirm(`Purge all indexed data for "${repoName}"? The project will be kept but all vectors and chunks will be removed.`)) return;
     try {
       await contextService.purgeRepository(repoName);
-      fetchRepos();
+      fetchRepos(projectPage);
     } catch (e: any) {
       alert(e.message);
     }
@@ -894,7 +911,11 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     try {
       await contextService.deleteRepository(repoName);
       if (selectedProject === repoName) onSelectProject(null);
-      fetchRepos();
+      const count = await fetchRepoCount();
+      const lastPage = Math.max(1, Math.ceil(count / PROJECTS_PER_PAGE));
+      const nextPage = Math.min(projectPage, lastPage);
+      setProjectPage(nextPage);
+      await fetchRepos(nextPage);
     } catch (e: any) {
       alert(e.message);
     }
@@ -915,7 +936,6 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     : structuralFreshness === "fresh" || structuralJobStatus === "done"
       ? "done"
       : structuralFreshness;
-  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const filteredRepos = repos
     .filter((repo) => {
       if (normalizedSearchQuery) {
@@ -928,20 +948,15 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
         }
       }
       return true;
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
+    });
 
-  const PROJECTS_PER_PAGE = 10;
-  const totalProjectPages = Math.max(1, Math.ceil(filteredRepos.length / PROJECTS_PER_PAGE));
+  const totalProjectPages = Math.max(1, Math.ceil((projectCount || 0) / PROJECTS_PER_PAGE));
   const clampedProjectPage = Math.min(projectPage, totalProjectPages);
-  const pagedRepos = filteredRepos.slice(
-    (clampedProjectPage - 1) * PROJECTS_PER_PAGE,
-    clampedProjectPage * PROJECTS_PER_PAGE
-  );
+  const pagedRepos = filteredRepos;
 
   useEffect(() => {
     setProjectPage(1);
-  }, [normalizedSearchQuery, activeFilters.join(",")]);
+  }, [activeFilters.join(",")]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden p-4 space-y-4" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
@@ -1091,15 +1106,19 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                 <input
                   type="search"
                   value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
+                  onChange={(event) => {
+                    setSearchQuery(event.target.value);
+                    setProjectCount(null);
+                    setProjectPage(1);
+                  }}
                   placeholder="Search projects..."
                   aria-label="Search projects"
                   className="w-full h-7 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] pl-7 pr-2 text-[10px] text-foreground font-mono outline-none focus:border-[var(--cp-cyan)]"
                 />
               </div>
               <div className="flex-1 overflow-y-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-2 space-y-2">
-                {isLoading ? (
-                  <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse">LOADING_REPOS...</div>
+                {isLoading || projectCount === null ? (
+                  <div className="text-center py-6 text-xs text-[var(--cp-cyan)] animate-pulse" role="status">LOADING_REPOS...</div>
                 ) : loadError ? (
                   <div className="text-center py-6 text-xs text-red-400 font-mono">{loadError}</div>
                 ) : filteredRepos.length === 0 ? (
@@ -1256,9 +1275,9 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   })
                 )}
               </div>
-              {!isLoading && !loadError && filteredRepos.length > 0 && (
+              {!isLoading && !loadError && projectCount !== null && projectCount > 0 && (
                 <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground pt-1">
-                  <span>Total projects: {filteredRepos.length}</span>
+                  <span>Showing {repos.length} of {projectCount} projects</span>
                   <div className="flex items-center gap-1">
                     <button
                       type="button"

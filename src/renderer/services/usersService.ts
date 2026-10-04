@@ -37,6 +37,15 @@ export interface UserUsage {
   recent_queries: { mcp_server: string; tool_name: string; query: string; repo: string; created_at: string }[];
 }
 
+export interface UserContributions {
+  user_id: string;
+  node_count: number;
+  committed_count: number;
+  staged_count: number;
+  latest_created_at: string | null;
+  by_type: { node_type: string; node_count: number }[];
+}
+
 export class UsersService {
   private baseUrl: string;
   private apiKey: string;
@@ -132,6 +141,12 @@ export class UsersService {
   async getUserUsage(userId: string, days = 30): Promise<UserUsage> {
     const res = await fetch(`${this.baseUrl}/api/users/${userId}/usage?days=${days}`, { headers: this.headers });
     if (!res.ok) throw new Error(`Failed to load user usage: ${res.statusText}`);
+    return res.json();
+  }
+
+  async getUserContributions(userId: string): Promise<UserContributions> {
+    const res = await fetch(`${this.baseUrl}/api/users/${userId}/contributions`, { headers: this.headers });
+    if (!res.ok) throw new Error(`Failed to load user contributions: ${res.statusText}`);
     return res.json();
   }
 

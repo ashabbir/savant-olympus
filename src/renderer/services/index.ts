@@ -4,7 +4,6 @@ export * from "./runtimeService";
 export * from "./athenaService";
 export * from "./knowledgeService";
 export * from "./contextService";
-export * from "./toolsService";
 export * from "./workspaceService";
 export * from "./workspaceMcpService";
 export * from "./usersService";

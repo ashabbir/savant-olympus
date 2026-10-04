@@ -242,10 +242,9 @@ export function RightPanel({ thinking, statusText, activeTab, serverUrl, apiKey,
 
   const showContextView = activeRightTab === "search" || activeRightTab === "memory" || activeRightTab === "ast";
 
-  // Render empty sidebar for Workspace, Tools, Skills, Users
+  // Render empty sidebar for Workspace, Skills, Users
   if (
     activeTab === "Workspace" ||
-    activeTab === "Tools" ||
     activeTab === "Skills" ||
     activeTab === "Users"
   ) {

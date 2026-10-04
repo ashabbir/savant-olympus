@@ -50,6 +50,71 @@ describe('ContextView - Sync Audit Trail', () => {
       )).toBe(true)
     })
   })
+
+  it('loads ten name-ordered projects at a time when pagination changes', async () => {
+    const firstPage = Array.from({ length: 10 }, (_, index) => ({
+      name: `project-${String(index + 1).padStart(2, '0')}`,
+      path: `/repos/project-${index + 1}`,
+    }))
+    const secondPage = [{ name: 'project-11', path: '/repos/project-11' }]
+    vi.spyOn(window, 'fetch').mockImplementation((url) => {
+      const requestUrl = url.toString()
+      if (requestUrl.endsWith('/api/context/repos/count')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ count: 11 }) } as Response)
+      }
+      if (requestUrl.includes('/api/context/repos?page=2&page_size=10')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ repos: secondPage }) } as Response)
+      }
+      if (requestUrl.endsWith('/api/context/repos')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ repos: firstPage }) } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ logs: [], status: {} }) } as Response)
+    })
+
+    render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject={null} isAdmin={true} />)
+
+    expect(await screen.findByText('project-01')).toBeInTheDocument()
+    expect(screen.queryByText('project-11')).toBeNull()
+    fireEvent.click(screen.getByLabelText('Next page'))
+
+    expect(await screen.findByText('project-11')).toBeInTheDocument()
+    expect(vi.mocked(window.fetch).mock.calls.some(([url]) =>
+      url.toString().includes('/api/context/repos?page=2&page_size=10'),
+    )).toBe(true)
+  })
+
+  it('searches the full project registry before paginating its results', async () => {
+    const firstPage = Array.from({ length: 10 }, (_, index) => ({
+      name: `target-${String(index + 1).padStart(2, '0')}`,
+      path: `/repos/target-${index + 1}`,
+    }))
+    vi.spyOn(window, 'fetch').mockImplementation((url) => {
+      const requestUrl = url.toString()
+      if (requestUrl.endsWith('/api/context/repos/count')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ count: 0 }) } as Response)
+      }
+      if (requestUrl.includes('/api/context/repos/count?q=target')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ count: 11 }) } as Response)
+      }
+      if (requestUrl.includes('/api/context/repos?page=2&page_size=10&q=target')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ repos: [{ name: 'target-11', path: '/repos/target-11' }] }) } as Response)
+      }
+      if (requestUrl.includes('/api/context/repos?page=1&page_size=10&q=target')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ repos: firstPage }) } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ logs: [], status: {} }) } as Response)
+    })
+
+    render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject={null} isAdmin={true} />)
+    fireEvent.change(await screen.findByLabelText('Search projects'), { target: { value: 'target' } })
+
+    expect(await screen.findByText('target-01')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Next page'))
+    expect(await screen.findByText('target-11')).toBeInTheDocument()
+    expect(vi.mocked(window.fetch).mock.calls.some(([url]) =>
+      url.toString().includes('/api/context/repos/count?q=target'),
+    )).toBe(true)
+  })
 })
 
 describe('ContextView - FileBrowserModal Integration', () => {
@@ -312,14 +377,18 @@ describe('ContextView - FileBrowserModal Integration', () => {
   it('filters the project tree with full-text search as the user types', async () => {
     vi.mocked(window.fetch).mockImplementation((url) => {
       const u = url.toString()
-      if (u.endsWith('/api/context/repos')) {
+      const repos = [
+        { name: 'alpha-dashboard', path: '/base-code/alpha-dashboard', source: 'github', source_origin: 'https://github.com/acme/alpha-dashboard.git', status: 'ready' },
+        { name: 'beta-service', path: '/base-code/beta-service', source: 'directory', status: 'ready' },
+      ]
+      if (u.includes('/api/context/repos/count')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ count: 2 }) } as Response)
+      }
+      if (u.includes('/api/context/repos')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            repos: [
-              { name: 'alpha-dashboard', path: '/base-code/alpha-dashboard', source: 'github', source_origin: 'https://github.com/acme/alpha-dashboard.git', status: 'ready' },
-              { name: 'beta-service', path: '/base-code/beta-service', source: 'directory', status: 'ready' },
-            ],
+            repos: u.includes('q=github.com%2Facme%2Falpha') ? [repos[0]] : repos,
           }),
         } as Response)
       }
@@ -336,7 +405,7 @@ describe('ContextView - FileBrowserModal Integration', () => {
 
     fireEvent.change(screen.getByRole('searchbox', { name: /search projects/i }), { target: { value: 'GITHUB.COM/ACME/ALPHA' } })
 
-    expect(screen.getByText('alpha-dashboard')).toBeInTheDocument()
+    expect(await screen.findByText('alpha-dashboard')).toBeInTheDocument()
     expect(screen.queryByText('beta-service')).toBeNull()
   })
 

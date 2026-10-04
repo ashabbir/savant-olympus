@@ -6,7 +6,7 @@ import { runtimeService } from "@/services/runtimeService";
 
 const READY_DELAY_MS = 500;
 
-export function useOlympusSession(refreshKey?: string) {
+export function useOlympusSession() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [startupProgress, setStartupProgress] = useState("BOOTING_SYSTEM");
   const [startupSubtext, setStartupSubtext] = useState("Initializing Olympus control surface...");
@@ -114,25 +114,6 @@ export function useOlympusSession(refreshKey?: string) {
     };
     void boot();
   }, []);
-
-  useEffect(() => {
-    if (!isAuthenticated || !runtime.apiKey) return;
-    let isCurrent = true;
-    const refreshLiveRole = async () => {
-      try {
-        const auth = await runtimeService.validateApiKey(runtime.serverUrl, runtime.apiKey);
-        if (isCurrent) setLiveRole(auth?.role || "");
-      } catch {
-        if (isCurrent) setLiveRole("");
-      }
-    };
-    void refreshLiveRole();
-    window.addEventListener("focus", refreshLiveRole);
-    return () => {
-      isCurrent = false;
-      window.removeEventListener("focus", refreshLiveRole);
-    };
-  }, [isAuthenticated, refreshKey, runtime.apiKey, runtime.serverUrl]);
 
   const login = async (candidateApiKey: string, candidateServerUrl?: string) => {
     const trimmed = candidateApiKey.trim();

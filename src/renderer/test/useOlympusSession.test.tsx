@@ -35,4 +35,16 @@ describe("useOlympusSession", () => {
     expect(result.current.runtime.serverUrl).toBe("http://server.test");
     expect(result.current.runtime.isAdmin).toBe(true);
   });
+
+  it("does not revalidate an authenticated session on window focus", async () => {
+    const { result } = renderHook(() => useOlympusSession());
+    await waitFor(() => expect(result.current.isInitializing).toBe(false));
+
+    await act(() => result.current.login("sk-login", "http://server.test"));
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    const validationsAfterLogin = vi.mocked(runtimeService.validateApiKey).mock.calls.length;
+
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(runtimeService.validateApiKey).toHaveBeenCalledTimes(validationsAfterLogin);
+  });
 });

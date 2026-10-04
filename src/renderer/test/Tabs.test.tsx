@@ -1,105 +1,10 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ToolsView } from '../components/tabs/ToolsView'
 import { SkillsView } from '../components/tabs/SkillsView'
 import { WorkspaceView } from '../components/tabs/WorkspaceView'
 import { KnowledgeView } from '../components/tabs/KnowledgeView'
 import { RightPanel } from '../components/RightPanel'
 import { RemindersView } from '../components/tabs/RemindersView'
-
-describe('ToolsView Component', () => {
-  beforeEach(() => {
-    vi.spyOn(window, 'fetch').mockImplementation((url, init) => {
-      const u = url.toString()
-      const method = init?.method || 'GET'
-      if (u.includes('/api/tools') && method === 'POST') {
-        return Promise.resolve({
-          ok: true,
-          status: 201,
-          json: () => Promise.resolve({
-            tool: { name: 'custom_mcp_tool', description: 'Custom desc', source: 'postgresql' },
-          }),
-        } as Response)
-      }
-      if (u.includes('/api/tools/') && method === 'DELETE') {
-        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ deleted: true }) } as Response)
-      }
-      if (u.includes('/api/abilities/skills')) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve([
-            { id: "1", name: "automated_tests_auditor", description: "Audit codebase modifications with integration suites", status: "audited", rules_count: 5 },
-            { id: "2", name: "d3_force_generator", description: "Construct D3.js knowledge network nodes", status: "unlocked", rules_count: 2 },
-          ])
-        } as Response)
-      }
-      if (u.includes('/api/abilities/tools') || u.includes('/api/mcp/tools') || u.includes('/api/tools')) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({
-            tools: [
-              { name: "get_current_workspace", description: "Fetch the active workspace metadata and state" },
-              { name: "list_workspaces", description: "Retrieve all available workspaces in the registry" },
-            ]
-          })
-        } as Response)
-      }
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ valid: true })
-      } as Response)
-    })
-  })
-
-  it('allows searching, adding, and deleting tools', async () => {
-    render(<ToolsView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin />)
-    
-    // Check initial tools render (fallback tools)
-    await waitFor(() => {
-      expect(screen.getByText(/get_current_workspace/i)).toBeInTheDocument()
-    })
-
-    // Search for a tool
-    const searchInput = screen.getByPlaceholderText(/search tools.../i)
-    fireEvent.change(searchInput, { target: { value: 'list_workspaces' } })
-    expect(screen.getByText(/list_workspaces/i)).toBeInTheDocument()
-    expect(screen.queryByText(/get_current_workspace/i)).not.toBeInTheDocument()
-
-    // Clear search
-    fireEvent.change(searchInput, { target: { value: '' } })
-
-    // Add a tool
-    const addBtn = screen.getByText(/ADD_TOOL/i)
-    fireEvent.click(addBtn)
-    
-    const nameInput = screen.getByPlaceholderText(/tool name/i)
-    const descInput = screen.getByPlaceholderText(/description/i)
-    fireEvent.change(nameInput, { target: { value: 'custom_mcp_tool' } })
-    fireEvent.change(descInput, { target: { value: 'Custom desc' } })
-    
-    fireEvent.click(screen.getByText(/CREATE_TOOL/i))
-    
-    await waitFor(() => {
-      expect(screen.getAllByText(/custom_mcp_tool/i).length).toBeGreaterThan(0)
-    })
-
-    // Delete a tool
-    const customToolDiv = screen.getAllByText(/custom_mcp_tool/i)[0].closest('.group')
-    expect(customToolDiv).toBeInTheDocument()
-    const deleteBtn = customToolDiv?.querySelector('button[title="Delete tool"]')
-    expect(deleteBtn).toBeInTheDocument()
-    if (deleteBtn) {
-      fireEvent.click(deleteBtn)
-    }
-
-    await waitFor(() => {
-      expect(screen.queryAllByText(/custom_mcp_tool/i).length).toBe(0)
-    })
-  })
-})
 
 describe('SkillsView Component', () => {
   beforeEach(() => {
@@ -351,6 +256,23 @@ describe('UsersView Component', () => {
       }
 
       if (u.includes('/api/users')) {
+        if (u.includes('/contributions')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({
+              user_id: 'usr-2',
+              node_count: 7,
+              committed_count: 5,
+              staged_count: 2,
+              latest_created_at: '2026-09-30T21:15:00+00:00',
+              by_type: [
+                { node_type: 'insight', node_count: 4 },
+                { node_type: 'service', node_count: 3 },
+              ],
+            }),
+          } as Response)
+        }
         if (u.includes('/usage')) {
           return Promise.resolve({
             ok: true,
@@ -661,6 +583,24 @@ describe('UsersView Component', () => {
 
     const calls = (window.fetch as any).mock.calls as [string, RequestInit | undefined][]
     expect(calls.some(([url]) => url.toString().includes('/api/users/usr-2/usage?days=30'))).toBe(true)
+  })
+
+  it('loads creator-attributed knowledge node counts only when contributions are opened', async () => {
+    const { UsersView } = await import('../components/tabs/UsersView')
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+
+    await waitFor(() => expect(screen.getByText('Lex Friedman')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Lex Friedman'))
+    expect((window.fetch as any).mock.calls.some(([url]: [string]) => url.includes('/contributions'))).toBe(false)
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Contributions/i }))
+    const contributions = await screen.findByTestId('contributions-summary')
+    expect(contributions).toHaveTextContent('Nodes created: 7')
+    expect(contributions).toHaveTextContent('Committed: 5')
+    expect(contributions).toHaveTextContent('Staged: 2')
+    expect(contributions).toHaveTextContent('insight: 4')
+    expect(contributions).toHaveTextContent('service: 3')
+    expect((window.fetch as any).mock.calls.some(([url]: [string]) => url.includes('/api/users/usr-2/contributions'))).toBe(true)
   })
 
   it('hides usage and last login from non-admins and never requests usage', async () => {

@@ -14,7 +14,7 @@ import { createSkillsService } from "./services/skillsService";
 export default function App() {
   const [activeTab, setActiveTab] = useState("Workspace");
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
-  const session = useOlympusSession(activeTab);
+  const session = useOlympusSession();
 
   useEffect(() => {
     const switchTab = (event: Event) => {

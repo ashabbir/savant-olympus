@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Circle, Activity, X, Terminal, StopCircle, RefreshCcw, AlertTriangle, CheckCircle } from "lucide-react";
 import { isAbortError, runtimeService } from "@/services/runtimeService";
 
@@ -39,34 +39,19 @@ export function BottomBar() {
     }
   }, [selectedRunEvents]);
 
-  // Periodic check of system statuses & gateway runs
+  // Perform one status check at startup. Continuous checks here would run for the
+  // entire application lifetime, even when the user is not viewing a live panel.
   useEffect(() => {
-    let cachedSettings: any = null;
-    let lastSettingsFetch = 0;
-
     const checkStatuses = async () => {
-      if (typeof document !== "undefined" && document.hidden) return;
-
       let name = "operator";
       let dir = "~/code";
       let gUrl = "http://127.0.0.1:3100";
       let gEnabled = true;
       let sUrl = "http://127.0.0.1:8090";
 
-      const now = Date.now();
-      if (!cachedSettings || now - lastSettingsFetch > 30000) {
-        try {
-          const settings = await window.system.getSettings();
-          const osUser = await window.system.getUser().catch(() => "operator");
-          cachedSettings = { settings, osUser };
-          lastSettingsFetch = now;
-        } catch (e) {
-          console.error("Failed to load settings in BottomBar:", e);
-        }
-      }
-
-      if (cachedSettings) {
-        const { settings, osUser } = cachedSettings;
+      try {
+        const settings = await window.system.getSettings();
+        const osUser = await window.system.getUser().catch(() => "operator");
         name = settings["user:name"] || osUser || "operator";
         if (settings["system:defaultDirectory"]) dir = settings["system:defaultDirectory"];
         if (settings["gateway:config"]) {
@@ -74,32 +59,24 @@ export function BottomBar() {
           gEnabled = settings["gateway:config"].enabled !== false;
         }
         if (settings["server:config"]) sUrl = settings["server:config"].url || sUrl;
+      } catch (e) {
+        console.error("Failed to load settings in BottomBar:", e);
       }
 
       setUserName(name);
       setDefaultDir(dir);
       setGatewayUrl(gUrl);
 
-      const [gwResult, runsResult, savantResult, dbResult] = await Promise.allSettled([
+      const [gwResult, savantResult, dbResult] = await Promise.allSettled([
         gEnabled ? runtimeService.checkGateway(gUrl) : Promise.resolve(false),
-        gEnabled ? runtimeService.listGatewayRuns(gUrl, 4_000) : Promise.resolve([]),
         runtimeService.checkSavant(sUrl),
         window.system.getDbStatus(),
       ]);
 
       if (gEnabled) {
         setGatewayStatus(gwResult.status === "fulfilled" && gwResult.value ? "online" : "offline");
-        if (runsResult.status === "fulfilled" && Array.isArray(runsResult.value)) {
-          setRuns(runsResult.value);
-          setActiveRunsCount(runsResult.value.filter((r: any) => r.status === "running").length);
-        } else {
-          setRuns([]);
-          setActiveRunsCount(0);
-        }
       } else {
         setGatewayStatus("offline");
-        setRuns([]);
-        setActiveRunsCount(0);
       }
 
       setSavantStatus(savantResult.status === "fulfilled" && savantResult.value ? "online" : "offline");
@@ -107,16 +84,25 @@ export function BottomBar() {
     };
 
     checkStatuses();
-    const interval = setInterval(checkStatuses, 4000);
-    const onFocus = () => { cachedSettings = null; checkStatuses(); };
-    window.addEventListener("focus", onFocus);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-    };
   }, []);
 
-  // Poll selected run events
+  const loadRuns = useCallback(async () => {
+    setIsPollingEvents(true);
+    try {
+      const nextRuns = await runtimeService.listGatewayRuns(gatewayUrl, 4_000);
+      setRuns(nextRuns);
+      setActiveRunsCount(nextRuns.filter((run: any) => run.status === "running").length);
+      setSelectedRunId((current) => current || nextRuns[0]?.id || null);
+    } catch (error) {
+      console.error("Failed to load gateway runs:", error);
+      setRuns([]);
+      setActiveRunsCount(0);
+    } finally {
+      setIsPollingEvents(false);
+    }
+  }, [gatewayUrl]);
+
+  // Load events when the user opens a run. Further requests are explicit refreshes.
   useEffect(() => {
     if (!isMonitorOpen || !selectedRunId) {
       setSelectedRunEvents(null);
@@ -135,8 +121,6 @@ export function BottomBar() {
     };
 
     fetchEvents();
-    const interval = setInterval(fetchEvents, 2000);
-    return () => clearInterval(interval);
   }, [isMonitorOpen, selectedRunId, gatewayUrl]);
 
   // Handle killing/cancelling a run
@@ -207,9 +191,10 @@ export function BottomBar() {
         <div className="ml-auto px-3 flex items-center gap-3">
           <button
             onClick={() => {
-              setIsMonitorOpen(!isMonitorOpen);
-              if (!isMonitorOpen && Array.isArray(runs) && runs.length > 0 && !selectedRunId) {
-                setSelectedRunId(runs[0].id);
+              const nextIsOpen = !isMonitorOpen;
+              setIsMonitorOpen(nextIsOpen);
+              if (nextIsOpen) {
+                void loadRuns();
               }
             }}
             className={`flex items-center gap-1.5 px-2.5 py-0.5 border text-[11px] font-bold font-mono tracking-wider transition-all cursor-pointer rounded-sm ${
@@ -252,12 +237,21 @@ export function BottomBar() {
                 GATEWAY PROMPT TRACKER
               </span>
             </div>
-            <button
-              onClick={() => setIsMonitorOpen(false)}
-              className="text-muted-foreground hover:text-[var(--cp-magenta)] transition-colors cursor-pointer"
-            >
-              <X size={14} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                aria-label="Refresh gateway prompt tracker"
+                onClick={() => void loadRuns()}
+                className="text-muted-foreground hover:text-[var(--cp-cyan)] transition-colors cursor-pointer"
+              >
+                <RefreshCcw size={14} className={isPollingEvents ? "animate-spin" : ""} />
+              </button>
+              <button
+                onClick={() => setIsMonitorOpen(false)}
+                className="text-muted-foreground hover:text-[var(--cp-magenta)] transition-colors cursor-pointer"
+              >
+                <X size={14} />
+              </button>
+            </div>
           </div>
 
           {/* Grid Layout */}

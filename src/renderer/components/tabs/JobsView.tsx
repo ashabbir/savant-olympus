@@ -90,7 +90,7 @@ export function JobsView({
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
   const [actionNotice, setActionNotice] = useState<string>("");
-  const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
