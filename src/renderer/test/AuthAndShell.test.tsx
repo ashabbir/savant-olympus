@@ -5,6 +5,7 @@ import { ProfileModal } from '../components/ProfileModal'
 import { SettingsModal } from '../components/SettingsModal'
 import { BottomBar } from '../components/BottomBar'
 import { clearStoredApiKey, getStoredApiKey, SAVANT_API_KEY_STORAGE_KEY, setStoredApiKey } from '../services/auth'
+import { runtimeService } from '../services/runtimeService'
 
 describe('auth storage helpers', () => {
   beforeEach(() => {
@@ -29,6 +30,17 @@ describe('auth storage helpers', () => {
 })
 
 describe('LoginScreen', () => {
+  it('checks server readiness and shows its status and version', async () => {
+    const checkHealthInfo = vi.spyOn(runtimeService, 'checkHealthInfo').mockResolvedValue({ online: true, version: '20.0.0' })
+    render(<LoginScreen onLogin={vi.fn()} initialServerUrl="https://savant.example/" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /check connection/i }))
+
+    expect(checkHealthInfo).toHaveBeenCalledWith('https://savant.example/', '/health/ready', '')
+    expect(await screen.findByText('SERVER UP · v20.0.0')).toBeInTheDocument()
+    checkHealthInfo.mockRestore()
+  })
+
   it('requires a non-empty API key before calling onLogin', async () => {
     const onLogin = vi.fn()
     render(<LoginScreen onLogin={onLogin} />)
@@ -161,6 +173,21 @@ describe('SettingsModal and BottomBar', () => {
       expect(onSettingsChanged).toHaveBeenCalled()
       expect(onClose).toHaveBeenCalled()
     })
+  })
+
+  it('limits database app variables to admins in server settings', async () => {
+    vi.mocked(window.system.getSettings).mockResolvedValue({
+      'user:apiKey': 'sk-test-key',
+      'server:config': { url: 'http://server.local', enabled: true },
+    })
+    vi.mocked(window.system.listProviders).mockResolvedValue({ source: 'gateway', providers: [] })
+
+    const { rerender } = render(<SettingsModal open onClose={() => {}} isAdmin={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'server' }))
+    expect(screen.queryByText('App Variables (Database Key-Value Store)')).not.toBeInTheDocument()
+
+    rerender(<SettingsModal open onClose={() => {}} isAdmin />)
+    expect(await screen.findByText('App Variables (Database Key-Value Store)')).toBeInTheDocument()
   })
 
   it('shows the server version returned by the readiness health check', async () => {

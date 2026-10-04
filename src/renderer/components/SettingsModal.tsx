@@ -385,7 +385,7 @@ function AthenaMentalMode({ value, options, loading, onRefresh, onChange, labelS
   );
 }
 
-export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = true }: SettingsModalProps) {
+export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = false }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<TabId>("system");
   const [defaultDirectory, setDefaultDirectory] = useState<string>("");
   const [moderatorPrompt, setModeratorPrompt] = useState<string>("");

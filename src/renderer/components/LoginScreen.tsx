@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { KeyRound, Shield, LogIn, AlertTriangle, Server } from "lucide-react";
+import { KeyRound, Shield, LogIn, AlertTriangle, Server, RefreshCw, CheckCircle, XCircle } from "lucide-react";
+import { runtimeService } from "../services/runtimeService";
 
 interface LoginScreenProps {
   onLogin: (apiKey: string, serverUrl?: string) => Promise<void>;
@@ -11,6 +12,28 @@ export function LoginScreen({ onLogin, initialServerUrl }: LoginScreenProps) {
   const [serverUrl, setServerUrl] = useState(initialServerUrl || "http://127.0.0.1:8090");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<"idle" | "checking" | "connected" | "failed">("idle");
+  const [serverVersion, setServerVersion] = useState<string>();
+
+  async function handleCheckConnection() {
+    const trimmedUrl = serverUrl.trim();
+    if (!trimmedUrl) {
+      setConnectionStatus("failed");
+      setServerVersion(undefined);
+      return;
+    }
+
+    setConnectionStatus("checking");
+    setServerVersion(undefined);
+    try {
+      const result = await runtimeService.checkHealthInfo(trimmedUrl, "/health/ready", "");
+      setConnectionStatus(result.online ? "connected" : "failed");
+      setServerVersion(result.online ? result.version : undefined);
+    } catch {
+      setConnectionStatus("failed");
+      setServerVersion(undefined);
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -82,13 +105,17 @@ export function LoginScreen({ onLogin, initialServerUrl }: LoginScreenProps) {
         </label>
         <div
           style={{ background: "var(--cp-bg-3)", border: "1px solid var(--cp-border)" }}
-          className="flex items-center gap-2 px-3 py-2 mb-4"
+          className="flex items-center gap-2 px-3 py-2"
         >
           <Server size={14} style={{ color: "var(--cp-cyan)", opacity: 0.7 }} />
           <input
             type="text"
             value={serverUrl}
-            onChange={e => setServerUrl(e.target.value)}
+            onChange={e => {
+              setServerUrl(e.target.value);
+              setConnectionStatus("idle");
+              setServerVersion(undefined);
+            }}
             placeholder="http://127.0.0.1:8090"
             style={{
               background: "transparent",
@@ -99,6 +126,41 @@ export function LoginScreen({ onLogin, initialServerUrl }: LoginScreenProps) {
             }}
             className="flex-1 text-xs placeholder:opacity-30"
           />
+        </div>
+        <div className="flex items-center justify-between gap-2 mt-2 mb-4">
+          <button
+            type="button"
+            onClick={handleCheckConnection}
+            disabled={connectionStatus === "checking" || !serverUrl.trim()}
+            style={{
+              background: "var(--cp-bg-3)",
+              border: "1px solid var(--cp-cyan)",
+              color: "var(--cp-cyan)",
+              fontFamily: "'Share Tech Mono', monospace",
+            }}
+            className="px-2.5 py-1.5 text-[10px] flex items-center gap-1.5 disabled:opacity-40"
+          >
+            <RefreshCw size={12} className={connectionStatus === "checking" ? "animate-spin" : ""} />
+            {connectionStatus === "checking" ? "CHECKING..." : "CHECK CONNECTION"}
+          </button>
+          {connectionStatus !== "idle" && (
+            <div
+              role="status"
+              className="flex items-center gap-1.5 text-[10px]"
+              style={{
+                color: connectionStatus === "connected" ? "var(--cp-cyan)" : connectionStatus === "failed" ? "var(--cp-magenta)" : "var(--foreground)",
+                fontFamily: "'Share Tech Mono', monospace",
+              }}
+            >
+              {connectionStatus === "checking" ? (
+                <span>CHECKING SERVER...</span>
+              ) : connectionStatus === "connected" ? (
+                <><CheckCircle size={13} /><span>SERVER UP{serverVersion ? ` · v${serverVersion}` : ""}</span></>
+              ) : (
+                <><XCircle size={13} /><span>SERVER UNAVAILABLE</span></>
+              )}
+            </div>
+          )}
         </div>
 
         <label
