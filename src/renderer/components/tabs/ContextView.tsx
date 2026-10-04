@@ -61,19 +61,45 @@ export const sortSyncLogsNewestFirst = (logs: any[]) =>
     return timeDifference || Number(b.id || 0) - Number(a.id || 0);
   });
 
-export const parseFileStats = (details: string) => {
+export const parseFileStats = (details: string, changeStats?: any) => {
+  if (changeStats && typeof changeStats === "object") {
+    const indexed = changeStats.files_indexed ?? changeStats.index_summary?.files_indexed;
+    const skipped = changeStats.files_skipped ?? changeStats.index_summary?.files_skipped ?? 0;
+    const removed = changeStats.files_removed ?? changeStats.index_summary?.files_removed ?? 0;
+    if (indexed !== undefined) {
+      return {
+        indexed: Number(indexed),
+        skipped: Number(skipped),
+        removed: Number(removed),
+        total: Number(indexed) + Number(skipped),
+      };
+    }
+  }
   if (!details) return null;
-  const match = details.match(/indexed=(\d+),\s*skipped=(\d+),\s*removed=(\d+)/);
-  if (!match) return null;
-  const indexed = parseInt(match[1], 10);
-  const skipped = parseInt(match[2], 10);
-  const removed = parseInt(match[3], 10);
-  return {
-    indexed,
-    skipped,
-    removed,
-    total: indexed + skipped,
-  };
+  const match = details.match(/indexed=(\d+),\s*skipped=(\d+),\s*removed=(\d+)/i);
+  if (match) {
+    const indexed = parseInt(match[1], 10);
+    const skipped = parseInt(match[2], 10);
+    const removed = parseInt(match[3], 10);
+    return {
+      indexed,
+      skipped,
+      removed,
+      total: indexed + skipped,
+    };
+  }
+  const diffMatch = details.match(/Indexed:\s*(\d+)\s*files(?:[^\d]+(\d+)\s*removed)?/i);
+  if (diffMatch) {
+    const indexed = parseInt(diffMatch[1], 10);
+    const removed = diffMatch[2] ? parseInt(diffMatch[2], 10) : 0;
+    return {
+      indexed,
+      skipped: 0,
+      removed,
+      total: indexed,
+    };
+  }
+  return null;
 };
 
 export const formatSyncLogDateTime = (timestamp: string) =>
@@ -798,11 +824,17 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     const isGit = repo.source === "github" || repo.source === "gitlab" || repo.source === "git";
     try {
       if (isGit) {
-        try {
-          await contextService.triggerDifferentialSync(repo.name);
-        } catch (err: any) {
-          console.warn("Git diff step failed, continuing pipeline:", err);
-        }
+        // The server job owns this complete ordered pipeline. Enqueuing the
+        // individual jobs here would reprocess the whole repo after a no-op
+        // Git check and races the differential cleanup of generated artifacts.
+        await contextService.triggerDifferentialSync(repo.name);
+        toast.success(`Differential pipeline queued for "${repo.name}"`, {
+          description: "It checks Git first, then indexes only changed files and updates AST, LST, and Code Graph.",
+          duration: 5000,
+        });
+        fetchIndexingStatus();
+        pollForJobCompletion(repo.name, "Differential pipeline");
+        return;
       }
       await contextService.generateAst(repo.name);
       await contextService.generateLst(repo.name);
@@ -1121,7 +1153,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                             e.stopPropagation();
                             handleRunAll(repo);
                           }}
-                          title="Run full pipeline (Git pull, Index, LST, AST, Graph)"
+                          title="Run Git-aware differential pipeline"
                           aria-label={`Index ${repo.name}`}
                           className="p-1 hover:text-[var(--cp-cyan)]"
                           disabled={isBusy || isRunningAll}
@@ -1410,7 +1442,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                       onClick={() => handleRunAll(selectedRepo)}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-950 text-emerald-400 border border-emerald-900 hover:bg-emerald-900 hover:text-emerald-200 cursor-pointer font-mono font-bold"
                       disabled={isCurrentlyIndexing || isRunningAll}
-                      title="Run all pipeline jobs: Git Diff (if Git repo), then AST, LST, Code Graph, and Index one by one"
+                      title="For Git repositories, run one Git-aware differential pipeline"
                     >
                       <Play size={12} /> {isRunningAll ? "QUEUEING ALL..." : "RUN ALL"}
                     </button>
@@ -1830,7 +1862,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                       return (
                         <div className="relative pl-6 border-l border-[var(--cp-border)] ml-3 space-y-4 pt-1">
                           {filteredLogs.map((log: any) => {
-                            const stats = parseFileStats(log.details);
+                            const stats = parseFileStats(log.details, log.change_stats ?? log.changeStats);
                           const isSuccess = log.status === "success";
                           const isSkipped = log.status === "skipped";
                           const statusColor = isSuccess ? "bg-emerald-500" : isSkipped ? "bg-zinc-500" : "bg-red-500";

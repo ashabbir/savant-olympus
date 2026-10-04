@@ -698,28 +698,20 @@ describe('ContextView - FileBrowserModal Integration', () => {
     fireEvent.click(runAllBtn)
 
     await waitFor(() => {
-      expect(postUrls.length).toBe(5)
+      expect(postUrls.length).toBe(1)
     })
 
-    // Verify sequential submission: git diff -> ast -> lst -> graph -> index
+    // A Git repository is handled by one server-side differential pipeline.
     expect(postUrls[0]).toContain('/api/context/repos/demo-pipeline/differential-sync')
-    expect(postUrls[1]).toContain('/api/context/repos/ast/generate')
-    expect(postUrls[2]).toContain('/api/context/repos/lst/generate')
-    expect(postUrls[3]).toContain('/api/context/code-intelligence/repos/demo-pipeline/sync')
-    expect(postUrls[4]).toContain('/api/context/repos/index')
 
-    // Also verify tree refresh button triggers full pipeline
+    // The repository-tree refresh follows the same no-duplicate pipeline.
     const treeRefreshBtn = screen.getByRole('button', { name: /Index demo-pipeline/i })
     expect(treeRefreshBtn).toBeInTheDocument()
     fireEvent.click(treeRefreshBtn)
     await waitFor(() => {
-      expect(postUrls.length).toBe(10)
+      expect(postUrls.length).toBe(2)
     })
-    expect(postUrls[5]).toContain('/api/context/repos/demo-pipeline/differential-sync')
-    expect(postUrls[6]).toContain('/api/context/repos/ast/generate')
-    expect(postUrls[7]).toContain('/api/context/repos/lst/generate')
-    expect(postUrls[8]).toContain('/api/context/code-intelligence/repos/demo-pipeline/sync')
-    expect(postUrls[9]).toContain('/api/context/repos/index')
+    expect(postUrls[1]).toContain('/api/context/repos/demo-pipeline/differential-sync')
   })
 })
 
@@ -743,5 +735,11 @@ describe('parseFileStats helper', () => {
 
   it('returns null on empty string', () => {
     expect(parseFileStats('')).toBeNull()
+  })
+
+  it('uses the structured differential job summary when available', () => {
+    expect(parseFileStats('Differential sync completed', {
+      index_summary: { files_indexed: 2, files_skipped: 1, files_removed: 1 },
+    })).toEqual({ indexed: 2, skipped: 1, removed: 1, total: 3 })
   })
 })
