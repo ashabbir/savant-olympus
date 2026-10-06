@@ -16,8 +16,9 @@ describe("ContextService", () => {
     const service = new ContextService("http://localhost:8090/", "secret");
 
     await expect(service.listRepositories(2, 10)).resolves.toEqual([{ name: "olympus" }]);
-    await expect(service.getIndexingStatus()).resolves.toEqual({ olympus: { status: "ready" } });
+    await expect(service.getIndexingStatus(["olympus"])).resolves.toEqual({ olympus: { status: "ready" } });
     expect(fetchMock).toHaveBeenNthCalledWith(1, "http://localhost:8090/api/context/repos?page=2&page_size=10", expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://localhost:8090/api/context/repos/indexing-status?repo=olympus", expect.any(Object));
   });
 
   it("loads the repository count independently from repository pages", async () => {

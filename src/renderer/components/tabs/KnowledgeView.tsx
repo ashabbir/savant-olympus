@@ -260,6 +260,9 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false, isGuest = fa
   const graphIndexRef = useRef(graphIndex);
   graphIndexRef.current = graphIndex;
   const graphLoadIdRef = useRef(0);
+  const initialGraphLoadKeyRef = useRef<string | null>(null);
+  const graphCleanupTimerRef = useRef<number | null>(null);
+  const workspaceLoadKeyRef = useRef<string | null>(null);
   const simulationRef = useRef<d3.Simulation<Node, Edge> | null>(null);
   const sortedNodesByType = useMemo(() => {
     const sorted = new Map<string, any[]>();
@@ -1822,6 +1825,9 @@ useEffect(() => {
 }, [exploreDepth, isExploreActive, focalNodes, selectedNodes, selectedNodeId, searchQuery, searchTags, is3DMode, intelligentFiltering, typeFilter]);
 
 useEffect(() => {
+  const key = `${baseUrl}\u0000${apiKey}`;
+  if (workspaceLoadKeyRef.current === key) return;
+  workspaceLoadKeyRef.current = key;
   const fetchWorkspacesList = async () => {
     try {
       const data = await workspaceService.listWorkspaces();
@@ -1831,7 +1837,7 @@ useEffect(() => {
     }
   };
   fetchWorkspacesList();
-}, [workspaceService]);
+}, [apiKey, baseUrl, workspaceService]);
 
 const handleMergeSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
@@ -2666,13 +2672,23 @@ const confirmImport = async () => {
     }
   };
 
-  useEffect(() => {
+useEffect(() => {
+  if (graphCleanupTimerRef.current) {
+    window.clearTimeout(graphCleanupTimerRef.current);
+    graphCleanupTimerRef.current = null;
+  }
+  const key = `${baseUrl}\u0000${apiKey}\u0000${is3DMode}`;
+  if (initialGraphLoadKeyRef.current !== key) {
+    initialGraphLoadKeyRef.current = key;
     void loadGraph();
-    return () => {
-      graphLoadIdRef.current += 1;
-      simulationRef.current?.stop();
-    };
-  }, [baseUrl, apiKey, is3DMode]);
+  }
+  return () => {
+      graphCleanupTimerRef.current = window.setTimeout(() => {
+        graphLoadIdRef.current += 1;
+        simulationRef.current?.stop();
+      }, 0);
+  };
+}, [baseUrl, apiKey, is3DMode]);
 
 const hasInspectorContext = Boolean(activeFilteredContext || selectedNodes.size >= 2 || selectedNode);
 const showInspectorRail = hasInspectorContext;

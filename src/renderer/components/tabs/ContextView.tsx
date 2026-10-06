@@ -57,6 +57,12 @@ interface ContextViewProps {
 
 const PROJECTS_PER_PAGE = 10;
 
+function hasCompletedCodeGraph(status: Record<string, any>) {
+  const job = status.structural_job;
+  return ["done", "completed", "success"].includes(String(job?.status || "").toLowerCase())
+    && ["codegraph_sync", "codegraph_index"].includes(String(job?.job_type || "").toLowerCase());
+}
+
 export const sortSyncLogsNewestFirst = (logs: any[]) =>
   [...logs].sort((a, b) => {
     const timeDifference = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -124,13 +130,29 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   const [indexingStatus, setIndexingStatus] = useState<Record<string, any>>({});
   const previousIndexingStatusRef = useRef<Record<string, any>>({});
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [isRepoPaneOpen, setIsRepoPaneOpen] = useState(true);
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [projectPage, setProjectPage] = useState(1);
   const [projectCount, setProjectCount] = useState<number | null>(null);
   const [lastFetchDetails, setLastFetchDetails] = useState<Record<string, any>>({});
-  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const normalizedSearchQuery = debouncedSearchQuery.trim().toLowerCase();
   const projectPageRef = useRef(projectPage);
+  const periodicSyncLoadKeyRef = useRef<string | null>(null);
+  const repoCountLoadKeyRef = useRef<string | null>(null);
+  const indexingStatusLoadKeyRef = useRef<string | null>(null);
+  const jobsSummaryLoadKeyRef = useRef<string | null>(null);
+  const repoPageLoadKeyRef = useRef<string | null>(null);
+  const visibleRepoNamesRef = useRef<string[]>([]);
+  visibleRepoNamesRef.current = repos.map((repo) => repo.name);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+      setProjectPage(1);
+    }, 2000);
+    return () => window.clearTimeout(timeout);
+  }, [searchQuery]);
 
   useEffect(() => {
     projectPageRef.current = projectPage;
@@ -161,7 +183,8 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
       repo.code_intelligence?.indexed ||
       repo.graph_version ||
       (repo.freshness && repo.freshness !== "unavailable") ||
-      (repo.code_intelligence?.freshness && repo.code_intelligence?.freshness !== "unavailable")
+      (repo.code_intelligence?.freshness && repo.code_intelligence?.freshness !== "unavailable") ||
+      hasCompletedCodeGraph(status)
     );
 
     switch (filter) {
@@ -219,8 +242,11 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   }, [contextService, selectedProject]);
 
   useEffect(() => {
-    fetchPeriodicSyncData();
-  }, [fetchPeriodicSyncData]);
+    const key = `${serverUrl}\u0000${apiKey}\u0000${selectedProject || ""}`;
+    if (periodicSyncLoadKeyRef.current === key) return;
+    periodicSyncLoadKeyRef.current = key;
+    void fetchPeriodicSyncData();
+  }, [apiKey, fetchPeriodicSyncData, selectedProject, serverUrl]);
 
   const handleManualPeriodicSyncRun = async () => {
     if (!selectedRepo) return;
@@ -266,9 +292,10 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
     }
   }, [contextService, normalizedSearchQuery]);
 
-  const fetchIndexingStatus = useCallback(async () => {
+  const fetchIndexingStatus = useCallback(async (repoNames = visibleRepoNamesRef.current) => {
+    if (repoNames.length === 0) return;
     try {
-        const nextStatus = await contextService.getIndexingStatus();
+        const nextStatus = await contextService.getIndexingStatus(repoNames);
         const previousStatus = previousIndexingStatusRef.current;
         const changedRepos = Object.keys({ ...previousStatus, ...nextStatus }).filter((name) => {
           const previous = previousStatus[name] || {};
@@ -291,17 +318,36 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
   }, [contextService, fetchRepos]);
 
   useEffect(() => {
-    fetchRepoCount();
-  }, [fetchRepoCount]);
+    const key = `${serverUrl}\u0000${apiKey}\u0000${normalizedSearchQuery}`;
+    if (repoCountLoadKeyRef.current === key) return;
+    repoCountLoadKeyRef.current = key;
+    void fetchRepoCount();
+  }, [apiKey, fetchRepoCount, normalizedSearchQuery, serverUrl]);
 
   useEffect(() => {
-    fetchIndexingStatus();
-    fetchJobsSummary();
-  }, [fetchIndexingStatus, fetchJobsSummary]);
+    const key = `${serverUrl}\u0000${apiKey}`;
+    if (jobsSummaryLoadKeyRef.current !== key) {
+      jobsSummaryLoadKeyRef.current = key;
+      void fetchJobsSummary();
+    }
+  }, [apiKey, fetchJobsSummary, serverUrl]);
 
   useEffect(() => {
-    if (projectCount !== null) fetchRepos(projectPage);
-  }, [fetchRepos, projectCount, projectPage]);
+    if (projectCount === null) return;
+    const key = `${serverUrl}\u0000${apiKey}\u0000${normalizedSearchQuery}\u0000${projectPage}`;
+    if (repoPageLoadKeyRef.current === key) return;
+    repoPageLoadKeyRef.current = key;
+    void fetchRepos(projectPage);
+  }, [apiKey, fetchRepos, normalizedSearchQuery, projectCount, projectPage, serverUrl]);
+
+  useEffect(() => {
+    const repoNames = visibleRepoNamesRef.current;
+    if (repoNames.length === 0) return;
+    const key = `${serverUrl}\u0000${apiKey}\u0000${[...repoNames].sort().join("\u0000")}`;
+    if (indexingStatusLoadKeyRef.current === key) return;
+    indexingStatusLoadKeyRef.current = key;
+    void fetchIndexingStatus(repoNames);
+  }, [apiKey, fetchIndexingStatus, repos, serverUrl]);
 
   const [astNodes, setAstNodes] = useState<any[]>([]);
   const [analysisResults, setAnalysisResults] = useState<any | null>(null);
@@ -1108,8 +1154,6 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   value={searchQuery}
                   onChange={(event) => {
                     setSearchQuery(event.target.value);
-                    setProjectCount(null);
-                    setProjectPage(1);
                   }}
                   placeholder="Search projects..."
                   aria-label="Search projects"
@@ -1141,7 +1185,8 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
                   repo.code_intelligence?.indexed ||
                   repo.graph_version ||
                   (repo.freshness && repo.freshness !== "unavailable") ||
-                  (repo.code_intelligence?.freshness && repo.code_intelligence?.freshness !== "unavailable")
+                  (repo.code_intelligence?.freshness && repo.code_intelligence?.freshness !== "unavailable") ||
+                  hasCompletedCodeGraph(status)
                 );
 
                 let tone = "border-[var(--cp-border)]";
@@ -1277,7 +1322,7 @@ export function ContextView({ serverUrl, apiKey, onSelectProject, selectedProjec
               </div>
               {!isLoading && !loadError && projectCount !== null && projectCount > 0 && (
                 <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground pt-1">
-                  <span>Showing {repos.length} of {projectCount} projects</span>
+                  <span>{repos.length} of {projectCount}</span>
                   <div className="flex items-center gap-1">
                     <button
                       type="button"

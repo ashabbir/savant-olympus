@@ -29,8 +29,13 @@ export class ContextService {
     return Number(data.count ?? data.repos?.length ?? 0);
   }
 
-  async getIndexingStatus(): Promise<Record<string, any>> {
-    const data = await this.client.request<any>("/api/context/repos/indexing-status");
+  async getIndexingStatus(repoNames: string[] = []): Promise<Record<string, any>> {
+    const params = new URLSearchParams();
+    repoNames.forEach((name) => params.append("repo", name));
+    const path = params.size > 0
+      ? `/api/context/repos/indexing-status?${params.toString()}`
+      : "/api/context/repos/indexing-status";
+    const data = await this.client.request<any>(path);
     return data.status || data || {};
   }
 

@@ -108,7 +108,10 @@ describe('ContextView - Sync Audit Trail', () => {
     render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject={null} isAdmin={true} />)
     fireEvent.change(await screen.findByLabelText('Search projects'), { target: { value: 'target' } })
 
-    expect(await screen.findByText('target-01')).toBeInTheDocument()
+    expect(vi.mocked(window.fetch).mock.calls.some(([url]) =>
+      url.toString().includes('/api/context/repos/count?q=target'),
+    )).toBe(false)
+    expect(await screen.findByText('target-01', {}, { timeout: 3000 })).toBeInTheDocument()
     fireEvent.click(screen.getByLabelText('Next page'))
     expect(await screen.findByText('target-11')).toBeInTheDocument()
     expect(vi.mocked(window.fetch).mock.calls.some(([url]) =>
@@ -374,7 +377,7 @@ describe('ContextView - FileBrowserModal Integration', () => {
     expect(screen.getByText(/anonymous fallback for public repositories/i)).toBeInTheDocument()
   })
 
-  it('filters the project tree with full-text search as the user types', async () => {
+  it('filters the project tree with full-text search after the debounce delay', async () => {
     vi.mocked(window.fetch).mockImplementation((url) => {
       const u = url.toString()
       const repos = [
@@ -405,8 +408,10 @@ describe('ContextView - FileBrowserModal Integration', () => {
 
     fireEvent.change(screen.getByRole('searchbox', { name: /search projects/i }), { target: { value: 'GITHUB.COM/ACME/ALPHA' } })
 
-    expect(await screen.findByText('alpha-dashboard')).toBeInTheDocument()
-    expect(screen.queryByText('beta-service')).toBeNull()
+    await waitFor(() => {
+      expect(screen.getByText('alpha-dashboard')).toBeInTheDocument()
+      expect(screen.queryByText('beta-service')).toBeNull()
+    }, { timeout: 3000 })
   })
 
   it('filters the project tree with multiple status filters (AND logic)', async () => {
@@ -460,6 +465,38 @@ describe('ContextView - FileBrowserModal Integration', () => {
     expect(screen.getByText('beta-service')).toBeInTheDocument()
     expect(screen.queryByText('alpha-dashboard')).toBeNull()
     expect(screen.queryByText('gamma-service')).toBeNull()
+  })
+
+  it('marks ANA as complete when the visible project code graph job succeeds', async () => {
+    vi.mocked(window.fetch).mockImplementation((url) => {
+      const requestUrl = url.toString()
+      if (requestUrl.includes('/api/context/repos/indexing-status')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            'graph-project': {
+              status: 'ready',
+              structural_job: { job_type: 'codegraph_sync', status: 'done' },
+            },
+          }),
+        } as Response)
+      }
+      if (requestUrl.includes('/api/context/repos/count')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ count: 1 }) } as Response)
+      }
+      if (requestUrl.includes('/api/context/repos')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ repos: [{ name: 'graph-project', path: '/repos/graph-project' }] }),
+        } as Response)
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ logs: [], status: {} }) } as Response)
+    })
+
+    render(<ContextView serverUrl="http://127.0.0.1:8090" apiKey="test-key" onSelectProject={() => {}} selectedProject={null} isAdmin={true} />)
+
+    await screen.findByText('graph-project')
+    await waitFor(() => expect(screen.getByText('ANA')).toHaveClass('text-[var(--cp-green)]'))
   })
 
 
