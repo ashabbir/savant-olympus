@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Circle, Activity, X, Terminal, StopCircle, RefreshCcw, AlertTriangle, CheckCircle } from "lucide-react";
+import { Circle, Activity, X, Terminal, StopCircle, RefreshCcw, AlertTriangle, CheckCircle, HeartPulse } from "lucide-react";
 import { isAbortError, runtimeService } from "@/services/runtimeService";
+import { toast } from "sonner";
 
 interface StatusDot {
   label: string;
@@ -29,6 +30,51 @@ export function BottomBar() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedRunEvents, setSelectedRunEvents] = useState<any>(null);
   const [isPollingEvents, setIsPollingEvents] = useState(false);
+  // Server Health Check State
+  const [serverUrl, setServerUrl] = useState("http://127.0.0.1:8090");
+  const [isCheckingServerHealth, setIsCheckingServerHealth] = useState(false);
+
+  const handleCheckHealthReady = async (silent = false) => {
+    if (isCheckingServerHealth) return;
+    setIsCheckingServerHealth(true);
+    try {
+      const res = await fetch(`${serverUrl.replace(/\/+$/, "")}/health/ready`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.status === "ready") {
+        setSavantStatus("online");
+        if (!silent) {
+          toast.success(`Server Health Ready: v${data.version || "ok"} (${data.commit ? data.commit.slice(0, 7) : "ready"})`, {
+            description: `DB Postgres: ${data.dependencies?.postgres?.status || "ok"} · Worktree: ${data.worktree || "main"}`
+          });
+        }
+      } else {
+        setSavantStatus("offline");
+        if (!silent) {
+          toast.error(`Server not ready: HTTP ${res.status}`, {
+            description: data.error || data.status || "Unknown status"
+          });
+        }
+      }
+    } catch (err: any) {
+      setSavantStatus("offline");
+      if (!silent) {
+        toast.error("Failed to reach server /health/ready", {
+          description: err?.message || String(err)
+        });
+      }
+    } finally {
+      setIsCheckingServerHealth(false);
+    }
+  };
+
+  // Keep-alive timer: Ping server /health/ready every 30 minutes while Olympus is running and user is active
+  useEffect(() => {
+    const THIRTY_MINUTES_MS = 30 * 60 * 1000;
+    const interval = setInterval(() => {
+      void handleCheckHealthReady(true);
+    }, THIRTY_MINUTES_MS);
+    return () => clearInterval(interval);
+  }, [serverUrl]);
 
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -66,6 +112,7 @@ export function BottomBar() {
       setUserName(name);
       setDefaultDir(dir);
       setGatewayUrl(gUrl);
+      setServerUrl(sUrl);
 
       const [gwResult, savantResult, dbResult] = await Promise.allSettled([
         gEnabled ? runtimeService.checkGateway(gUrl) : Promise.resolve(false),
@@ -187,8 +234,19 @@ export function BottomBar() {
           </div>
         ))}
 
-        {/* center/right: runs monitor button */}
-        <div className="ml-auto px-3 flex items-center gap-3">
+        {/* center/right: runs monitor button & health check */}
+        <div className="ml-auto px-3 flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => void handleCheckHealthReady(false)}
+            disabled={isCheckingServerHealth}
+            title="Check Server /health/ready endpoint"
+            aria-label="Check Server Health Ready"
+            className="flex items-center gap-1.5 px-2 py-0.5 border border-[var(--cp-border)] hover:border-[var(--cp-cyan)] text-muted-foreground hover:text-[var(--cp-cyan)] text-[11px] font-bold font-mono tracking-wider transition-all cursor-pointer rounded-sm hover:bg-[rgba(0,229,255,0.08)] disabled:opacity-40"
+          >
+            <HeartPulse size={12} className={isCheckingServerHealth ? "animate-pulse text-[var(--cp-magenta)]" : savantStatus === "online" ? "text-emerald-400" : "text-red-400"} />
+            <span className="hidden sm:inline">HEALTH READY</span>
+          </button>
           <button
             onClick={() => {
               const nextIsOpen = !isMonitorOpen;
