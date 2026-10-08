@@ -110,6 +110,16 @@ export class KnowledgeService {
   pruneWorkspace(workspaceId: string): Promise<any> {
     return this.client.request("/api/knowledge/prune", { method: "POST", body: { workspace_id: workspaceId } });
   }
+
+  getKnowledgeInfo(workspaceId?: string, includeStaged = true): Promise<{
+    total_nodes: number;
+    total_edges: number;
+    nodes_by_type: Array<{ type: string; count: number; items: Array<{ node_id: string; title: string }> }>;
+    edges_by_type: Array<{ type: string; count: number; items: any[] }>;
+  }> {
+    const ws = workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : "";
+    return this.client.request(`/api/knowledge/info?include_staged=${includeStaged}${ws}&_=${Date.now()}`);
+  }
 }
 
 export const createKnowledgeService = (baseUrl?: string, apiKey?: string) => new KnowledgeService(baseUrl, apiKey);

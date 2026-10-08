@@ -89,6 +89,10 @@ export class AbilitiesService {
     return this.client.request("/api/abilities/validate");
   }
 
+  getStats(): Promise<{ personas: number; policies: number; repos: number; rules: number; styles: number }> {
+    return this.client.request(`/api/abilities/stats?_=${Date.now()}`);
+  }
+
   async exportArchive(format: "zip" | "tar"): Promise<{ blob: Blob; filename: string; count: number }> {
     const response = await fetch(`${this.client.baseUrl}/api/abilities/export?format=${format}`, {
       headers: buildAuthHeaders(this.apiKey, ""),

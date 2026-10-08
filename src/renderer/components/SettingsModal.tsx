@@ -1,9 +1,12 @@
 import { useEffect, useState, useRef } from "react";
-import { X, Plus, Trash2, GripVertical, Folder, RefreshCw, CheckCircle, XCircle, WifiOff, Bot, Terminal, Code2, FileText } from "lucide-react";
+import { X, Plus, Trash2, GripVertical, Folder, RefreshCw, CheckCircle, XCircle, WifiOff, Bot, Terminal, Code2, FileText, Database, Share2, Layers, ShieldCheck, Box, ChevronRight, ChevronDown, Users, Clock } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { getStoredApiKey } from "../services/auth";
 import { runtimeService } from "../services/runtimeService";
 import { createAbilitiesService } from "../services/abilitiesService";
+import { createKnowledgeService } from "../services/knowledgeService";
+import { createWorkspaceService } from "../services/workspaceService";
+import { UsersService } from "../services/usersService";
 import { TagInput } from "./ui/tag-input";
 import { ATHENA_MODEL_CHANGED_EVENT, athenaModelFromSettings, reconcileAthenaModel, thinkingLevelsFor, invalidateCatalogCache } from "../lib/athenaModel";
 import { suggestMcpEndpoints, McpDeploymentMode, McpServiceName } from "../services/agentSetupService";
@@ -56,6 +59,7 @@ const TABS = [
   { id: "system", label: "system" },
   { id: "gateway", label: "gateway" },
   { id: "server", label: "server" },
+  { id: "knowledge", label: "knowledge" },
   { id: "agents", label: "agents" },
 ] as const;
 
@@ -380,6 +384,335 @@ function AthenaMentalMode({ value, options, loading, onRefresh, onChange, labelS
             ))}
           </select>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function KnowledgeStatsPanel({ serverUrl, apiKey }: { serverUrl: string; apiKey: string }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [kgInfo, setKgInfo] = useState<{
+    total_nodes: number;
+    total_edges: number;
+    committed_nodes: number;
+    uncommitted_nodes: number;
+    nodes_by_type: Array<{ type: string; count: number; items: Array<{ node_id: string; title: string }> }>;
+    edges_by_type: Array<{ type: string; count: number; items: any[] }>;
+  } | null>(null);
+  const [abilitiesStats, setAbilitiesStats] = useState<{
+    personas: number;
+    policies: number;
+    repos: number;
+    rules: number;
+    styles: number;
+  } | null>(null);
+  const [workspaces, setWorkspaces] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const kgService = createKnowledgeService(serverUrl, apiKey);
+      const abService = createAbilitiesService(serverUrl, apiKey);
+      const wsService = createWorkspaceService(serverUrl, apiKey);
+      const uService = new UsersService(serverUrl, apiKey);
+
+      const [allInfoRes, committedInfoRes, abRes, wsRes, usersRes] = await Promise.allSettled([
+        kgService.getKnowledgeInfo(undefined, true),
+        kgService.getKnowledgeInfo(undefined, false),
+        abService.getStats(),
+        wsService.listWorkspaces(true),
+        uService.listUsers(true),
+      ]);
+
+      if (allInfoRes.status === "fulfilled") {
+        const allInfo = allInfoRes.value;
+        const committedCount = committedInfoRes.status === "fulfilled" ? committedInfoRes.value.total_nodes : allInfo.total_nodes;
+        const uncommittedCount = Math.max(0, allInfo.total_nodes - committedCount);
+        setKgInfo({
+          ...allInfo,
+          committed_nodes: committedCount,
+          uncommitted_nodes: uncommittedCount,
+        });
+      } else {
+        console.error("Failed to fetch knowledge info:", allInfoRes.reason);
+      }
+
+      if (abRes.status === "fulfilled") {
+        setAbilitiesStats(abRes.value);
+      } else {
+        console.error("Failed to fetch abilities stats:", abRes.reason);
+      }
+
+      if (wsRes.status === "fulfilled") {
+        setWorkspaces(wsRes.value);
+      } else {
+        console.error("Failed to fetch workspaces:", wsRes.reason);
+      }
+
+      if (usersRes.status === "fulfilled") {
+        setUsers(usersRes.value);
+      } else {
+        console.error("Failed to fetch users:", usersRes.reason);
+      }
+
+      if (allInfoRes.status === "rejected" && abRes.status === "rejected") {
+        throw new Error((allInfoRes.reason as any)?.message || "Failed to reach server");
+      }
+    } catch (err: any) {
+      setError(err?.message || "Failed to load knowledge statistics.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, [serverUrl, apiKey]);
+
+  const domainCount = kgInfo?.nodes_by_type.find(n => n.type === "domain")?.count ?? 0;
+  const projectNodeCount = kgInfo?.nodes_by_type.find(n => n.type === "project")?.count ?? 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 style={{ color: "var(--cp-cyan)", fontFamily: "'Orbitron', sans-serif" }} className="text-sm font-semibold uppercase tracking-wider">
+            Server Knowledge & Abilities Stats
+          </h4>
+          <p className="text-xs opacity-60 mt-0.5" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
+            Live entities, graph topology, workspace inventory, and personal rules from Savant backend
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={fetchData}
+          disabled={loading}
+          style={{ border: "1px solid var(--cp-cyan)", color: "var(--cp-cyan)", fontFamily: "'Share Tech Mono', monospace" }}
+          className="px-2.5 py-1 text-xs uppercase flex items-center gap-1.5 hover:bg-[var(--cp-cyan)] hover:text-[var(--cp-bg-0)] transition-all cursor-pointer disabled:opacity-40"
+        >
+          <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="p-3 border border-red-500/40 bg-red-950/20 text-red-400 text-xs font-mono">
+          {error}
+        </div>
+      )}
+
+      {/* Top Overview Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+        <div className="p-3 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded flex flex-col">
+          <span className="text-[10px] uppercase tracking-wider opacity-60 font-mono flex items-center gap-1">
+            <Users size={11} className="text-[var(--cp-cyan)]" /> Users
+          </span>
+          <span className="text-lg font-bold text-foreground font-mono mt-1">
+            {users.length}
+          </span>
+          <span className="text-[9px] opacity-50 font-mono">
+            {users.filter(u => u.is_active !== 0 && u.is_active !== false).length} active
+          </span>
+        </div>
+
+        <div className="p-3 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded flex flex-col">
+          <span className="text-[10px] uppercase tracking-wider opacity-60 font-mono flex items-center gap-1">
+            <Layers size={11} className="text-[var(--cp-cyan)]" /> Workspaces
+          </span>
+          <span className="text-lg font-bold text-foreground font-mono mt-1">
+            {workspaces.length}
+          </span>
+          <span className="text-[9px] opacity-50 font-mono">
+            {projectNodeCount} KG projects
+          </span>
+        </div>
+
+        <div className="p-3 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded flex flex-col">
+          <span className="text-[10px] uppercase tracking-wider opacity-60 font-mono flex items-center gap-1">
+            <Box size={11} className="text-[var(--cp-cyan)]" /> Domains
+          </span>
+          <span className="text-lg font-bold text-foreground font-mono mt-1">
+            {domainCount}
+          </span>
+          <span className="text-[9px] opacity-50 font-mono">
+            Functional domains
+          </span>
+        </div>
+
+        <div className="p-3 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded flex flex-col">
+          <span className="text-[10px] uppercase tracking-wider opacity-60 font-mono flex items-center gap-1">
+            <Database size={11} className="text-[var(--cp-cyan)]" /> Total Nodes
+          </span>
+          <span className="text-lg font-bold text-foreground font-mono mt-1">
+            {kgInfo?.total_nodes ?? "—"}
+          </span>
+          <div className="flex items-center gap-1.5 text-[9px] font-mono mt-0.5">
+            <span className="text-emerald-400 font-semibold">{kgInfo?.committed_nodes ?? 0} committed</span>
+            <span className="opacity-40">·</span>
+            <span className={kgInfo?.uncommitted_nodes ? "text-amber-400 font-semibold" : "opacity-50"}>
+              {kgInfo?.uncommitted_nodes ?? 0} uncommitted
+            </span>
+          </div>
+        </div>
+
+        <div className="p-3 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded flex flex-col col-span-2 sm:col-span-1">
+          <span className="text-[10px] uppercase tracking-wider opacity-60 font-mono flex items-center gap-1">
+            <Share2 size={11} className="text-[var(--cp-cyan)]" /> Total Edges
+          </span>
+          <span className="text-lg font-bold text-foreground font-mono mt-1">
+            {kgInfo?.total_edges ?? "—"}
+          </span>
+          <span className="text-[9px] opacity-50 font-mono">
+            {kgInfo?.edges_by_type.length ?? 0} edge relations
+          </span>
+        </div>
+      </div>
+
+      {/* Abilities & Personal Rules Card */}
+      <div className="p-3.5 bg-[var(--cp-bg-1)] border border-[var(--cp-border)] rounded space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span style={{ color: "var(--cp-cyan)", fontFamily: "'Orbitron', sans-serif" }} className="text-xs uppercase tracking-wider font-semibold flex items-center gap-1.5">
+            <ShieldCheck size={13} /> Abilities & Rules
+          </span>
+          <span className="text-[10px] font-mono opacity-50">/api/abilities/stats</span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 font-mono">
+          <div className="p-2 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded text-center">
+            <span className="block text-[9px] uppercase opacity-60">Rules</span>
+            <span className="text-base font-bold text-foreground">{abilitiesStats?.rules ?? 0}</span>
+          </div>
+          <div className="p-2 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded text-center">
+            <span className="block text-[9px] uppercase opacity-60">Personas</span>
+            <span className="text-base font-bold text-foreground">{abilitiesStats?.personas ?? 0}</span>
+          </div>
+          <div className="p-2 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded text-center">
+            <span className="block text-[9px] uppercase opacity-60">Policies</span>
+            <span className="text-base font-bold text-foreground">{abilitiesStats?.policies ?? 0}</span>
+          </div>
+          <div className="p-2 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded text-center">
+            <span className="block text-[9px] uppercase opacity-60">Styles</span>
+            <span className="text-base font-bold text-foreground">{abilitiesStats?.styles ?? 0}</span>
+          </div>
+          <div className="p-2 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded text-center col-span-2 sm:col-span-1">
+            <span className="block text-[9px] uppercase opacity-60">Repos</span>
+            <span className="text-base font-bold text-foreground">{abilitiesStats?.repos ?? 0}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Breakdown: Nodes by Type (Counts Only) */}
+      <div className="p-3.5 bg-[var(--cp-bg-1)] border border-[var(--cp-border)] rounded space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span style={{ color: "var(--cp-cyan)", fontFamily: "'Orbitron', sans-serif" }} className="text-xs uppercase tracking-wider font-semibold flex items-center gap-1.5">
+            <Database size={13} /> Nodes by Type ({kgInfo?.nodes_by_type.length ?? 0})
+          </span>
+          <span className="text-[10px] font-mono opacity-50">Distribution</span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {kgInfo?.nodes_by_type.map((group) => {
+            const pct = kgInfo.total_nodes > 0 ? Math.round((group.count / kgInfo.total_nodes) * 100) : 0;
+            return (
+              <div key={group.type} className="p-2.5 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded flex items-center justify-between font-mono">
+                <div className="min-w-0 pr-1">
+                  <span className="block text-xs font-bold uppercase text-foreground truncate">{group.type}</span>
+                  <span className="text-[9px] opacity-40">{pct}% of graph</span>
+                </div>
+                <span className="text-sm font-bold text-[var(--cp-cyan)] shrink-0">
+                  {group.count}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Breakdown: Edges by Relation Type */}
+      <div className="p-3.5 bg-[var(--cp-bg-1)] border border-[var(--cp-border)] rounded space-y-2.5">
+        <span style={{ color: "var(--cp-cyan)", fontFamily: "'Orbitron', sans-serif" }} className="text-xs uppercase tracking-wider font-semibold flex items-center gap-1.5">
+          <Share2 size={13} /> Edges by Relation ({kgInfo?.edges_by_type.length ?? 0})
+        </span>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {kgInfo?.edges_by_type.map((edge) => (
+            <div key={edge.type} className="p-2 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded flex items-center justify-between">
+              <span className="text-[11px] font-mono text-foreground/80 truncate pr-1">{edge.type}</span>
+              <span className="text-xs font-mono font-bold text-[var(--cp-cyan)] shrink-0">{edge.count}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Recent Active Workspaces (Last 10 with Workspace and User) */}
+      <div className="p-3.5 bg-[var(--cp-bg-1)] border border-[var(--cp-border)] rounded space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span style={{ color: "var(--cp-cyan)", fontFamily: "'Orbitron', sans-serif" }} className="text-xs uppercase tracking-wider font-semibold flex items-center gap-1.5">
+            <Clock size={13} /> Recent Active Workspaces (Last 10)
+          </span>
+          <span className="text-[10px] font-mono opacity-50">
+            {workspaces.filter((w: any) => w.status !== "archived" && w.status !== "closed").length} active total
+          </span>
+        </div>
+
+        {(() => {
+          const userMap = new Map<string, any>(users.map(u => [u.user_id, u]));
+          const activeWorkspaces = workspaces
+            .filter((w: any) => w.status !== "archived" && w.status !== "closed")
+            .sort((a: any, b: any) => {
+              const dateA = new Date(a.updated_at || a.created_at || 0).getTime();
+              const dateB = new Date(b.updated_at || b.created_at || 0).getTime();
+              return dateB - dateA;
+            })
+            .slice(0, 10);
+
+          if (activeWorkspaces.length === 0) {
+            return (
+              <div className="p-3 text-xs font-mono opacity-50 italic">
+                No active workspaces found.
+              </div>
+            );
+          }
+
+          return (
+            <div className="space-y-1.5">
+              {activeWorkspaces.map((ws: any) => {
+                const matchedUser = ws.user_id ? userMap.get(ws.user_id) : null;
+                const userName = matchedUser ? (matchedUser.name || matchedUser.user_id) : (ws.user_id || "Unassigned");
+                const userRole = matchedUser?.role ? ` (${matchedUser.role})` : "";
+                const updateDate = ws.updated_at || ws.created_at;
+                const formattedDate = updateDate ? new Date(updateDate).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+
+                return (
+                  <div
+                    key={ws.workspace_id || ws.id || ws.name}
+                    className="p-2.5 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] rounded flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs font-mono"
+                  >
+                    <div className="flex items-center gap-2 min-w-0 pr-2">
+                      <Layers size={13} className="text-[var(--cp-cyan)] shrink-0" />
+                      <span className="text-foreground font-bold truncate">{ws.name}</span>
+                      <span className="text-[9px] uppercase opacity-50 px-1 py-0.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] rounded shrink-0">
+                        {ws.status || "open"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0 text-[11px] opacity-75">
+                      <div className="flex items-center gap-1 text-foreground/90">
+                        <Users size={11} className="text-[var(--cp-cyan)]/70" />
+                        <span className="truncate max-w-[140px]">{userName}{userRole}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-[10px] opacity-60">
+                        <Clock size={10} />
+                        <span>{formattedDate}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
@@ -870,7 +1203,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
 
           {/* tabs */}
           <div style={{ borderBottom: "1px solid var(--cp-border)" }} className="flex gap-1 px-6 shrink-0 overflow-x-auto">
-            {TABS.map(tab => (
+            {TABS.filter(tab => tab.id !== "knowledge" || isAdmin).map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
@@ -1049,6 +1382,14 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
                   />
                 )}
               </div>
+            )}
+
+            {/* ── KNOWLEDGE (Admin Only) ── */}
+            {activeTab === "knowledge" && isAdmin && (
+              <KnowledgeStatsPanel
+                serverUrl={server.url}
+                apiKey={userApiKey || getStoredApiKey() || ""}
+              />
             )}
 
             {/* ── AGENTS ── */}
