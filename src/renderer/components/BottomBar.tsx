@@ -37,6 +37,7 @@ export function BottomBar() {
   const handleCheckHealthReady = async (silent = false) => {
     if (isCheckingServerHealth) return;
     setIsCheckingServerHealth(true);
+    const startTime = Date.now();
     try {
       const res = await fetch(`${serverUrl.replace(/\/+$/, "")}/health/ready`);
       const data = await res.json().catch(() => ({}));
@@ -63,7 +64,16 @@ export function BottomBar() {
         });
       }
     } finally {
-      setIsCheckingServerHealth(false);
+      // Ensure the button animates for at least 2 seconds so the 30-min keep-alive ping is clearly visible
+      const elapsed = Date.now() - startTime;
+      const minAnimationMs = 2000;
+      if (elapsed < minAnimationMs) {
+        setTimeout(() => {
+          setIsCheckingServerHealth(false);
+        }, minAnimationMs - elapsed);
+      } else {
+        setIsCheckingServerHealth(false);
+      }
     }
   };
 
@@ -242,9 +252,13 @@ export function BottomBar() {
             disabled={isCheckingServerHealth}
             title="Check Server /health/ready endpoint"
             aria-label="Check Server Health Ready"
-            className="flex items-center gap-1.5 px-2 py-0.5 border border-[var(--cp-border)] hover:border-[var(--cp-cyan)] text-muted-foreground hover:text-[var(--cp-cyan)] text-[11px] font-bold font-mono tracking-wider transition-all cursor-pointer rounded-sm hover:bg-[rgba(0,229,255,0.08)] disabled:opacity-40"
+            className={`flex items-center gap-1.5 px-2 py-0.5 border text-[11px] font-bold font-mono tracking-wider transition-all cursor-pointer rounded-sm ${
+              isCheckingServerHealth
+                ? "animate-pulse border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.18)] text-[var(--cp-cyan)] shadow-[0_0_8px_rgba(0,229,255,0.4)]"
+                : "border-[var(--cp-border)] hover:border-[var(--cp-cyan)] text-muted-foreground hover:text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.08)] disabled:opacity-40"
+            }`}
           >
-            <HeartPulse size={12} className={isCheckingServerHealth ? "animate-pulse text-[var(--cp-magenta)]" : savantStatus === "online" ? "text-emerald-400" : "text-red-400"} />
+            <HeartPulse size={12} className={isCheckingServerHealth ? "animate-spin text-[var(--cp-cyan)]" : savantStatus === "online" ? "text-emerald-400" : "text-red-400"} />
             <span className="hidden sm:inline">HEALTH READY</span>
           </button>
           <button
