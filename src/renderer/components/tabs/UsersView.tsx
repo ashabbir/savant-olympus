@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Users, Key, Shield, UserCheck, Eye, EyeOff, X, Save, Mail, Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Copy, Activity, Bot, Terminal, Code2, FileText, Check, LucideIcon } from "lucide-react";
+import { Users, Key, Shield, UserCheck, Eye, EyeOff, X, Save, Mail, Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Copy, Activity, Bot, Terminal, Code2, FileText, Check, Trophy, LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { setStoredApiKey } from "../../services/auth";
-import { createUsersService, type UserContributions, type UserUsage } from "../../services/usersService";
+import { createUsersService, type UserContributions, type UserUsage, type LeaderboardEntry } from "../../services/usersService";
 import { ALL_CODING_AGENTS_META, buildUserMcpConfig, type AgentProvider, type AgentMcpTransport, type CodingAgentMeta } from "../../services/agentSetupService";
+import { UsersLeaderboard } from "./UsersLeaderboard";
+
 
 const USAGE_WINDOW_DAYS = 30;
 
@@ -114,6 +116,11 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
   const [userApiKeysMap, setUserApiKeysMap] = useState<Record<string, string>>({});
   const [copiedAgentId, setCopiedAgentId] = useState<string | null>(null);
   const [showMcpPreview, setShowMcpPreview] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [leaderboardDays, setLeaderboardDays] = useState(7);
+  const [leaderboardEntries, setLeaderboardEntries] = useState<LeaderboardEntry[]>([]);
+  const [isLeaderboardLoading, setIsLeaderboardLoading] = useState(false);
+  const [leaderboardError, setLeaderboardError] = useState("");
   const usersService = createUsersService(serverUrl, apiKey);
 
   useEffect(() => {
@@ -251,6 +258,27 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
       void fetchUserContributions(selectedUserId);
     }
   }, [detailTab, selectedUserId, serverUrl, apiKey, isAdmin]);
+
+  const fetchLeaderboard = async (days = leaderboardDays) => {
+    setIsLeaderboardLoading(true);
+    setLeaderboardError("");
+    try {
+      const res = await usersService.getLeaderboard(days);
+      setLeaderboardEntries(res.leaderboard || []);
+    } catch (err: any) {
+      console.error(err);
+      setLeaderboardError(err?.message || "Failed to load leaderboard.");
+    } finally {
+      setIsLeaderboardLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showLeaderboard) {
+      void fetchLeaderboard(leaderboardDays);
+    }
+  }, [showLeaderboard, leaderboardDays, serverUrl, apiKey]);
+
 
   const missingDomains = availableDomains.filter((ad) => !userDomains.some((ud) => ud.domain_node_id === ad.node_id));
 
@@ -1327,20 +1355,44 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
           </h2>
           <p className="text-xs text-muted-foreground opacity-60">Provisioned identities and authorization keys</p>
         </div>
-        {isAdmin && <button
-          onClick={() => {
-            setShowCreateForm(true);
-            setSelectedUserId(null);
-          }}
-          className={`px-3 py-1.5 border text-xs font-mono flex items-center gap-1.5 cursor-pointer transition-all duration-200 ${
-            showCreateForm
-              ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.1)] text-[var(--cp-cyan)] shadow-[0_0_6px_rgba(0,229,255,0.2)]"
-              : "border-[var(--cp-cyan)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)]"
-          }`}
-        >
-          <Plus size={14} /> ADD_USER
-        </button>}
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowLeaderboard((prev) => !prev);
+                setShowCreateForm(false);
+              }}
+              data-testid="toggle-leaderboard-btn"
+              className={`px-3 py-1.5 border text-xs font-mono flex items-center gap-1.5 cursor-pointer transition-all duration-200 ${
+                showLeaderboard
+                  ? "border-amber-400 bg-amber-500/20 text-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.3)]"
+                  : "border-amber-400/60 text-amber-300 hover:bg-amber-400/10"
+              }`}
+            >
+              <Trophy size={14} className={showLeaderboard ? "text-amber-400 animate-bounce" : "text-amber-400"} />
+              LEADERBOARD
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => {
+                setShowCreateForm(true);
+                setShowLeaderboard(false);
+                setSelectedUserId(null);
+              }}
+              className={`px-3 py-1.5 border text-xs font-mono flex items-center gap-1.5 cursor-pointer transition-all duration-200 ${
+                showCreateForm
+                  ? "border-[var(--cp-cyan)] bg-[rgba(0,229,255,0.1)] text-[var(--cp-cyan)] shadow-[0_0_6px_rgba(0,229,255,0.2)]"
+                  : "border-[var(--cp-cyan)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)]"
+              }`}
+            >
+              <Plus size={14} /> ADD_USER
+            </button>
+          )}
+        </div>
       </div>
+
 
       {/* Main Two-Column Layout */}
       <div className="flex-1 flex flex-col md:flex-row gap-4 overflow-hidden">
@@ -1418,9 +1470,24 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
           )}
         </div>
 
-        {/* Right Column: User Edit Page or Create Form */}
+        {/* Right Column: User Edit Page, Leaderboard, or Create Form */}
         <div className="flex-1 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-4 overflow-y-auto">
-          {showCreateForm ? (
+          {showLeaderboard ? (
+            <UsersLeaderboard
+              entries={leaderboardEntries}
+              days={leaderboardDays}
+              onTimeframeChange={(d) => {
+                setLeaderboardDays(d);
+                void fetchLeaderboard(d);
+              }}
+              isLoading={isLeaderboardLoading}
+              onRefresh={() => fetchLeaderboard(leaderboardDays)}
+              onSelectUser={(uid) => {
+                setSelectedUserId(uid);
+                setShowLeaderboard(false);
+              }}
+            />
+          ) : showCreateForm ? (
             renderCreateForm()
           ) : selectedUser ? (
             renderEditPage(selectedUser)
@@ -1428,7 +1495,7 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
             <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
               <Users size={48} className="text-muted-foreground mb-3" />
               <p className="text-sm font-mono uppercase text-[var(--section-label)] tracking-wider">No user selected</p>
-              <p className="text-xs text-muted-foreground mt-1">Select a user from the sidebar index or add a new one.</p>
+              <p className="text-xs text-muted-foreground mt-1">Select a user from the sidebar index or view the leaderboard.</p>
             </div>
           )}
         </div>

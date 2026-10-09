@@ -46,6 +46,29 @@ export interface UserContributions {
   by_type: { node_type: string; node_count: number }[];
 }
 
+export interface LeaderboardEntry {
+  user_id: string;
+  name: string;
+  email?: string;
+  role: string;
+  is_active: boolean;
+  last_login_at: string | null;
+  has_logged_in: boolean;
+  points: number;
+  knowledge_additions: number;
+  knowledge_lookups: number;
+  research: number;
+  search: number;
+  other_tool_calls: number;
+  total_activity_count: number;
+  rank: number;
+}
+
+export interface LeaderboardResponse {
+  days: number;
+  leaderboard: LeaderboardEntry[];
+}
+
 export class UsersService {
   private baseUrl: string;
   private apiKey: string;
@@ -147,6 +170,12 @@ export class UsersService {
   async getUserContributions(userId: string): Promise<UserContributions> {
     const res = await fetch(`${this.baseUrl}/api/users/${userId}/contributions`, { headers: this.headers });
     if (!res.ok) throw new Error(`Failed to load user contributions: ${res.statusText}`);
+    return res.json();
+  }
+
+  async getLeaderboard(days = 7): Promise<LeaderboardResponse> {
+    const res = await fetch(`${this.baseUrl}/api/users/leaderboard?days=${days}`, { headers: this.headers });
+    if (!res.ok) throw new Error(`Failed to load leaderboard: ${res.statusText}`);
     return res.json();
   }
 

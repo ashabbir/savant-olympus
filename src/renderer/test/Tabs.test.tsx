@@ -256,7 +256,68 @@ describe('UsersView Component', () => {
       }
 
       if (u.includes('/api/users')) {
+        if (u.includes('/leaderboard')) {
+          const days = u.includes('days=30') ? 30 : 7;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({
+              days,
+              leaderboard: [
+                {
+                  user_id: 'usr-1',
+                  name: 'Ahmed Shabbir',
+                  role: 'admin',
+                  is_active: true,
+                  last_login_at: '2026-10-01T10:00:00+00:00',
+                  has_logged_in: true,
+                  points: 55,
+                  knowledge_additions: 3,
+                  knowledge_lookups: 3,
+                  research: 2,
+                  search: 5,
+                  other_tool_calls: 2,
+                  total_activity_count: 13,
+                  rank: 1,
+                },
+                {
+                  user_id: 'usr-2',
+                  name: 'Lex Friedman',
+                  role: 'operator',
+                  is_active: true,
+                  last_login_at: '2026-09-30T21:15:00+00:00',
+                  has_logged_in: true,
+                  points: 24,
+                  knowledge_additions: 1,
+                  knowledge_lookups: 1,
+                  research: 1,
+                  search: 2,
+                  other_tool_calls: 0,
+                  total_activity_count: 5,
+                  rank: 2,
+                },
+                {
+                  user_id: 'usr-3',
+                  name: 'Inactive User',
+                  role: 'guest',
+                  is_active: false,
+                  last_login_at: null,
+                  has_logged_in: false,
+                  points: 0,
+                  knowledge_additions: 0,
+                  knowledge_lookups: 0,
+                  research: 0,
+                  search: 0,
+                  other_tool_calls: 0,
+                  total_activity_count: 0,
+                  rank: 3,
+                },
+              ],
+            }),
+          } as Response);
+        }
         if (u.includes('/contributions')) {
+
           return Promise.resolve({
             ok: true,
             status: 200,
@@ -730,7 +791,63 @@ describe('UsersView Component', () => {
       expect(screen.getByText(/No external coding agents are currently enabled in Settings > Agents/i)).toBeInTheDocument()
     })
   })
+
+  it('renders the interactive fun leaderboard with weekly podium (1st, 2nd, 3rd), monthly view, points breakdown, and unactive users at bottom', async () => {
+    const { UsersView } = await import('../components/tabs/UsersView')
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+
+    // Verify LEADERBOARD button exists for admin
+    const leaderboardBtn = await screen.findByTestId('toggle-leaderboard-btn')
+    expect(leaderboardBtn).toHaveTextContent('LEADERBOARD')
+
+    // Open leaderboard
+    fireEvent.click(leaderboardBtn)
+
+    // Check leaderboard is rendered
+    const lbContainer = await screen.findByTestId('users-leaderboard')
+    expect(lbContainer).toBeInTheDocument()
+    expect(screen.getByText(/Activity Arena & Leaderboard/i)).toBeInTheDocument()
+
+    // Verify Weekly Podium (1st, 2nd, 3rd)
+    const p1 = screen.getByTestId('podium-1st')
+    const p2 = screen.getByTestId('podium-2nd')
+    const p3 = screen.getByTestId('podium-3rd')
+
+    expect(p1).toHaveTextContent('1ST MVP')
+    expect(p1).toHaveTextContent('Ahmed Shabbir')
+    expect(p1).toHaveTextContent('55') // 55 pts
+
+    expect(p2).toHaveTextContent('2ND PLACE')
+    expect(p2).toHaveTextContent('Lex Friedman')
+    expect(p2).toHaveTextContent('24') // 24 pts
+
+    expect(p3).toHaveTextContent('3RD PLACE')
+
+    // Check rankings table
+    const ahmedRow = screen.getByTestId('leaderboard-row-usr-1')
+    expect(ahmedRow).toHaveTextContent('1ST')
+    expect(ahmedRow).toHaveTextContent('Ahmed Shabbir')
+    expect(ahmedRow).toHaveTextContent('+3') // 3 additions
+    expect(ahmedRow).toHaveTextContent('5') // 2 research + 3 lookup
+
+    // Check inactive users placed at the bottom with fun label
+    expect(screen.getByText(/Users that don't login :\( Hall of Silence/i)).toBeInTheDocument()
+    const inactiveRow = screen.getByTestId('leaderboard-row-usr-3')
+    expect(inactiveRow).toHaveTextContent('Inactive User')
+    expect(inactiveRow).toHaveTextContent('NEVER LOGGED IN')
+    expect(inactiveRow).toHaveTextContent('Never :(')
+
+    // Switch to Monthly (30D)
+    const monthBtn = screen.getByTestId('timeframe-month')
+    fireEvent.click(monthBtn)
+
+    await waitFor(() => {
+      const calls = (window.fetch as any).mock.calls as [string, RequestInit | undefined][]
+      expect(calls.some(([url]) => url.toString().includes('/api/users/leaderboard?days=30'))).toBe(true)
+    })
+  })
 })
+
 
 describe('AbilitiesView Component', () => {
   beforeEach(() => {
