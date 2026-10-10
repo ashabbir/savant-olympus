@@ -845,7 +845,15 @@ describe('UsersView Component', () => {
       const calls = (window.fetch as any).mock.calls as [string, RequestInit | undefined][]
       expect(calls.some(([url]) => url.toString().includes('/api/users/leaderboard?days=30'))).toBe(true)
     })
+
+    // Click on a user node in the left tree: should dismiss leaderboard and show user page
+    const userNodes = screen.getAllByTitle('Edit user information')
+    fireEvent.click(userNodes[0])
+
+    expect(screen.queryByTestId('users-leaderboard')).not.toBeInTheDocument()
+    expect(screen.getByText(/USER_Ahmed Shabbir/i)).toBeInTheDocument()
   })
+
 })
 
 

@@ -553,13 +553,14 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
 
   const renderUserNode = (user: User) => {
     const userId = user.id || user.username;
-    const isSelected = selectedUserId === userId && !showCreateForm;
+    const isSelected = selectedUserId === userId && !showCreateForm && !showLeaderboard;
     return (
       <button
         key={userId}
         onClick={() => {
           setSelectedUserId(userId);
           setShowCreateForm(false);
+          setShowLeaderboard(false);
           setEditName(user.name);
           setEditEmail(user.email || "");
           setEditRole(user.role);
