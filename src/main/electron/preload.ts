@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
 contextBridge.exposeInMainWorld('system', {
   getUser: () => ipcRenderer.invoke('get-user'),
   listProviders: (gatewayUrl?: string) => ipcRenderer.invoke('list-providers', gatewayUrl),
+  listLocalAgents: () => ipcRenderer.invoke('list-local-agents'),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSetting: (key: string, value: any) => ipcRenderer.invoke('save-setting', { key, value }),
   getDbStatus: () => ipcRenderer.invoke('get-db-status'),
@@ -38,6 +39,7 @@ contextBridge.exposeInMainWorld('system', {
   clearAthenaThread: (target_id: string) => ipcRenderer.invoke('clear-athena-thread', target_id),
   readGraphifyJson: (repoPath: string) => ipcRenderer.invoke('read-graphify-json', repoPath),
   runAgentViaGateway: (args: { provider: string; model: string; thinkingLevel?: string; prompt: string }) => ipcRenderer.invoke('run-agent', args),
+  runAgentDirect: (args: { agentId: string; prompt: string }) => ipcRenderer.invoke('run-agent-direct', args),
   exportDocument: (args: { format: 'html' | 'pdf'; html: string; defaultFilename: string }) =>
     ipcRenderer.invoke('export-document', args),
   getSkillExportProfiles: () => ipcRenderer.invoke('get-skill-export-profiles'),

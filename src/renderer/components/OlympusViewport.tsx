@@ -8,7 +8,6 @@ const ContextView = lazy(() => import("./tabs/ContextView").then((m) => ({ defau
 const AbilitiesView = lazy(() => import("./tabs/AbilitiesView").then((m) => ({ default: m.AbilitiesView })));
 const SkillsView = lazy(() => import("./tabs/SkillsView").then((m) => ({ default: m.SkillsView })));
 const UsersView = lazy(() => import("./tabs/UsersView").then((m) => ({ default: m.UsersView })));
-const ActivityLogsView = lazy(() => import("./tabs/ActivityLogsView").then((m) => ({ default: m.ActivityLogsView })));
 const JobsView = lazy(() => import("./tabs/JobsView").then((m) => ({ default: m.JobsView })));
 const AgentSetupView = lazy(() => import("./tabs/AgentSetupView").then((m) => ({ default: m.AgentSetupView })));
 
@@ -71,13 +70,9 @@ export function OlympusViewport(props: OlympusViewportProps) {
       view = <RemindersView serverUrl={serverUrl} apiKey={apiKey} />;
       break;
     case "Jobs":
-      view = isAdmin
-        ? <JobsView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} />
-        : <WorkspaceView serverUrl={serverUrl} apiKey={apiKey} sessionId={null} />;
-      break;
     case "Activity":
       view = isAdmin
-        ? <ActivityLogsView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} />
+        ? <JobsView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} />
         : <WorkspaceView serverUrl={serverUrl} apiKey={apiKey} sessionId={null} />;
       break;
     default:

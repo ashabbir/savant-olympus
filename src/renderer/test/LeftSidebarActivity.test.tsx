@@ -9,14 +9,14 @@ const props = {
   onChangeTab: vi.fn(),
 };
 
-describe("LeftSidebar activity navigation", () => {
-  it("shows the activity log icon only to administrators", () => {
+describe("LeftSidebar jobs navigation", () => {
+  it("shows the jobs icon only to administrators and consolidates activity into jobs", () => {
     const { rerender } = render(<LeftSidebar {...props} isAdmin={false} />);
-    expect(screen.queryByTitle("Activity Log")).not.toBeInTheDocument();
     expect(screen.queryByTitle("Jobs")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Activity Log")).not.toBeInTheDocument();
 
     rerender(<LeftSidebar {...props} isAdmin />);
-    expect(screen.getByTitle("Activity Log")).toBeInTheDocument();
     expect(screen.getByTitle("Jobs")).toBeInTheDocument();
+    expect(screen.queryByTitle("Activity Log")).not.toBeInTheDocument();
   });
 });

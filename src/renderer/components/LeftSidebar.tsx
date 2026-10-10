@@ -1,6 +1,6 @@
 import {
   Settings, User, LogOut, UserCog,
-  Briefcase, Network, Search, Award, Cpu, Users, Bell, ScrollText, Bot, Layers
+  Briefcase, Network, Search, Award, Cpu, Users, Bell, Bot, Layers
 } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -71,7 +71,6 @@ const TAB_ITEMS = [
   { id: "Users", label: "Users", icon: <Users size={16} /> },
   { id: "Reminders", label: "Reminders", icon: <Bell size={16} /> },
   { id: "Jobs", label: "Jobs", icon: <Layers size={16} /> },
-  { id: "Activity", label: "Activity Log", icon: <ScrollText size={16} /> },
 ];
 
 export function LeftSidebar({ onSettingsChanged, onLogout, activeTab, onChangeTab, isAdmin, isGuest }: LeftSidebarProps) {
@@ -80,7 +79,7 @@ export function LeftSidebar({ onSettingsChanged, onLogout, activeTab, onChangeTa
 
   const visibleTabs = isGuest
     ? TAB_ITEMS.filter((tab) => tab.id === "Knowledge")
-    : TAB_ITEMS.filter((tab) => !["Users", "Jobs", "Activity"].includes(tab.id) || isAdmin);
+    : TAB_ITEMS.filter((tab) => !["Users", "Jobs"].includes(tab.id) || isAdmin);
 
   return (
     <aside

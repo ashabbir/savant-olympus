@@ -118,7 +118,7 @@ export class KnowledgeService {
     edges_by_type: Array<{ type: string; count: number; items: any[] }>;
   }> {
     const ws = workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : "";
-    return this.client.request(`/api/knowledge/info?include_staged=${includeStaged}${ws}&_=${Date.now()}`);
+    return this.client.request(`/api/knowledge/info?summary=true&include_staged=${includeStaged}${ws}&_=${Date.now()}`);
   }
 }
 

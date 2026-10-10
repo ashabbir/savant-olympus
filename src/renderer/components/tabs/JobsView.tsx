@@ -13,8 +13,10 @@ import {
   AlertTriangle,
   Play,
   RotateCw,
+  History,
 } from "lucide-react";
 import { createContextService } from "../../services/contextService";
+import { ActivityLogsView } from "./ActivityLogsView";
 
 export interface JobRecord {
   id: string;
@@ -81,6 +83,7 @@ export function JobsView({
   isAdmin: boolean;
 }) {
   const service = useMemo(() => createContextService(serverUrl, apiKey), [serverUrl, apiKey]);
+  const [activeTab, setActiveTab] = useState<"queue" | "history">("queue");
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [summary, setSummary] = useState<any>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -230,237 +233,273 @@ export function JobsView({
         <div>
           <div className="flex items-center gap-2 text-[var(--cp-cyan)]">
             <Layers size={18} />
-            <h1 className="font-bold tracking-[0.18em]">JOB QUEUE & WORKERS</h1>
+            <h1 className="font-bold tracking-[0.18em]">JOBS & ACTIVITY</h1>
           </div>
           <p className="text-xs opacity-55 mt-1">
-            Dedicated worker container queue: indexing, AST parsing, LST, and CodeGraph synchronization
+            Worker queue execution, pipeline jobs, and repository sync activity history
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-xs opacity-75 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="accent-[var(--cp-cyan)]"
-            />
-            Auto-refresh (3s)
-          </label>
-          <button
-            aria-label="Refresh job list"
-            onClick={() => void load()}
-            className="p-2 border border-[var(--cp-border)] text-[var(--cp-cyan)] hover:bg-cyan-500/10 transition-colors"
-            title="Refresh jobs"
-          >
-            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-          </button>
+          <div className="flex border border-[var(--cp-border)] bg-[var(--cp-bg-1)] p-0.5">
+            <button
+              onClick={() => setActiveTab("queue")}
+              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-mono transition-colors ${
+                activeTab === "queue"
+                  ? "bg-[var(--cp-cyan)] text-black font-semibold"
+                  : "text-muted-foreground hover:text-[var(--cp-text)]"
+              }`}
+            >
+              <Layers size={13} />
+              Job Queue
+            </button>
+            <button
+              onClick={() => setActiveTab("history")}
+              className={`flex items-center gap-1.5 px-3 py-1 text-xs font-mono transition-colors ${
+                activeTab === "history"
+                  ? "bg-[var(--cp-cyan)] text-black font-semibold"
+                  : "text-muted-foreground hover:text-[var(--cp-text)]"
+              }`}
+            >
+              <History size={13} />
+              Activity & History
+            </button>
+          </div>
+          {activeTab === "queue" && (
+            <>
+              <label className="flex items-center gap-2 text-xs opacity-75 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={autoRefresh}
+                  onChange={(e) => setAutoRefresh(e.target.checked)}
+                  className="accent-[var(--cp-cyan)]"
+                />
+                Auto-refresh (3s)
+              </label>
+              <button
+                aria-label="Refresh job list"
+                onClick={() => void load()}
+                className="p-2 border border-[var(--cp-border)] text-[var(--cp-cyan)] hover:bg-cyan-500/10 transition-colors"
+                title="Refresh jobs"
+              >
+                <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+              </button>
+            </>
+          )}
         </div>
       </header>
 
-      {/* Summary KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-        <KpiCard label="Total Jobs" value={counts.total} color="var(--cp-cyan)" active={statusFilter === "all"} onClick={() => setStatusFilter("all")} />
-        <KpiCard label="Running" value={counts.running} color="#7dd3fc" active={statusFilter === "running"} onClick={() => setStatusFilter("running")} pulse={counts.running > 0} />
-        <KpiCard label="Queued" value={counts.queued} color="#ffbd59" active={statusFilter === "queued"} onClick={() => setStatusFilter("queued")} />
-        <KpiCard label="Completed" value={counts.done} color="#27f2a4" active={statusFilter === "done"} onClick={() => setStatusFilter("done")} />
-        <KpiCard label="Failed" value={counts.failed} color="#ff4d78" active={statusFilter === "failed"} onClick={() => setStatusFilter("failed")} />
-        <KpiCard label="Cancelled" value={counts.cancelled} color="#a1a1aa" active={statusFilter === "cancelled"} onClick={() => setStatusFilter("cancelled")} />
-      </div>
-
-      {/* Filters Bar */}
-      <div className="flex flex-wrap gap-3 items-center text-xs">
-        <div className="flex items-center gap-2 border border-[var(--cp-border)] bg-[var(--cp-bg-2)] px-2.5 py-1.5 flex-1 min-w-[200px] max-w-sm">
-          <Search size={14} className="opacity-50 text-[var(--cp-cyan)]" />
-          <input
-            type="text"
-            placeholder="Search by repo, type, or ID..."
-            value={targetSearch}
-            onChange={(e) => setTargetSearch(e.target.value)}
-            className="bg-transparent border-none outline-none w-full text-xs text-[var(--cp-text)]"
-          />
-          {targetSearch && (
-            <button onClick={() => setTargetSearch("")} className="opacity-50 hover:opacity-100">
-              <X size={12} />
-            </button>
-          )}
+      {activeTab === "history" ? (
+        <div className="flex-1 overflow-hidden">
+          <ActivityLogsView serverUrl={serverUrl} apiKey={apiKey} isAdmin={isAdmin} embedded />
         </div>
+      ) : (
+        <>
+          {/* Summary KPI Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+            <KpiCard label="Total Jobs" value={counts.total} color="var(--cp-cyan)" active={statusFilter === "all"} onClick={() => setStatusFilter("all")} />
+            <KpiCard label="Running" value={counts.running} color="#7dd3fc" active={statusFilter === "running"} onClick={() => setStatusFilter("running")} pulse={counts.running > 0} />
+            <KpiCard label="Queued" value={counts.queued} color="#ffbd59" active={statusFilter === "queued"} onClick={() => setStatusFilter("queued")} />
+            <KpiCard label="Completed" value={counts.done} color="#27f2a4" active={statusFilter === "done"} onClick={() => setStatusFilter("done")} />
+            <KpiCard label="Failed" value={counts.failed} color="#ff4d78" active={statusFilter === "failed"} onClick={() => setStatusFilter("failed")} />
+            <KpiCard label="Cancelled" value={counts.cancelled} color="#a1a1aa" active={statusFilter === "cancelled"} onClick={() => setStatusFilter("cancelled")} />
+          </div>
 
-        <select
-          aria-label="Filter by Job Type"
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-          className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] px-3 py-2 text-xs"
-        >
-          <option value="all">All Job Types</option>
-          {distinctTypes.map((type) => (
-            <option key={type} value={type}>
-              {type}
-            </option>
-          ))}
-        </select>
+          {/* Filters Bar */}
+          <div className="flex flex-wrap gap-3 items-center text-xs">
+            <div className="flex items-center gap-2 border border-[var(--cp-border)] bg-[var(--cp-bg-2)] px-2.5 py-1.5 flex-1 min-w-[200px] max-w-sm">
+              <Search size={14} className="opacity-50 text-[var(--cp-cyan)]" />
+              <input
+                type="text"
+                placeholder="Search by repo, type, or ID..."
+                value={targetSearch}
+                onChange={(e) => setTargetSearch(e.target.value)}
+                className="bg-transparent border-none outline-none w-full text-xs text-[var(--cp-text)]"
+              />
+              {targetSearch && (
+                <button onClick={() => setTargetSearch("")} className="opacity-50 hover:opacity-100">
+                  <X size={12} />
+                </button>
+              )}
+            </div>
 
-        <span className="ml-auto opacity-55 text-xs">{visibleJobs.length} jobs listed</span>
-      </div>
-
-      {actionNotice && (
-        <div className="border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 p-2.5 text-xs flex items-center gap-2">
-          <Check size={14} />
-          {actionNotice}
-        </div>
-      )}
-
-      {error && (
-        <div role="alert" className="border border-red-500/40 bg-red-500/10 text-red-300 p-3 text-xs flex items-center gap-2">
-          <AlertTriangle size={15} />
-          {error}
-        </div>
-      )}
-
-      {/* Table */}
-      <div className="flex-1 overflow-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)]">
-        <table className="w-full text-xs border-collapse">
-          <thead className="sticky top-0 bg-[var(--cp-bg-2)] text-left text-[10px] uppercase tracking-wider z-10">
-            <tr>
-              {["Job ID", "Type", "Target Repo", "Status", "Progress / Phase", "Created", "Duration", "Actions", ""].map((header) => (
-                <th key={header} className="p-3 border-b border-[var(--cp-border)]">
-                  {header}
-                </th>
+            <select
+              aria-label="Filter by Job Type"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="bg-[var(--cp-bg-2)] border border-[var(--cp-border)] px-3 py-2 text-xs"
+            >
+              <option value="all">All Job Types</option>
+              {distinctTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {visibleJobs.map((job) => {
-              const isRunning = job.status === "running" || job.status === "cancelling";
-              const isQueued = job.status === "queued";
-              const canCancel = isRunning || isQueued;
-              const canDelete = !isRunning;
+            </select>
 
-              return (
-                <tr
-                  key={job.id}
-                  onClick={() => setSelectedJob(job)}
-                  className="border-b border-[var(--cp-border)] hover:bg-cyan-400/5 cursor-pointer transition-colors"
-                >
-                  {/* Job ID */}
-                  <td className="p-3 font-mono text-[11px]">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-opacity-80">{job.id.slice(0, 8)}</span>
-                      <button
-                        title="Copy full Job ID"
-                        onClick={(e) => handleCopy(job.id, e)}
-                        className="opacity-40 hover:opacity-100 p-0.5 text-[var(--cp-cyan)]"
-                      >
-                        {copiedId === job.id ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
-                      </button>
-                    </div>
-                  </td>
+            <span className="ml-auto opacity-55 text-xs">{visibleJobs.length} jobs listed</span>
+          </div>
 
-                  {/* Type */}
-                  <td className="p-3">
-                    <span className="px-2 py-0.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] rounded text-[11px] font-mono text-[var(--cp-cyan)]">
-                      {job.job_type}
-                    </span>
-                  </td>
+          {actionNotice && (
+            <div className="border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 p-2.5 text-xs flex items-center gap-2">
+              <Check size={14} />
+              {actionNotice}
+            </div>
+          )}
 
-                  {/* Target Repo */}
-                  <td className="p-3 font-semibold text-[var(--cp-text)]">{job.target}</td>
+          {error && (
+            <div role="alert" className="border border-red-500/40 bg-red-500/10 text-red-300 p-3 text-xs flex items-center gap-2">
+              <AlertTriangle size={15} />
+              {error}
+            </div>
+          )}
 
-                  {/* Status */}
-                  <td className="p-3 whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1.5 font-medium" style={{ color: statusColor(job.status) }}>
-                      <span
-                        className={`size-2 rounded-full inline-block ${isRunning ? "animate-ping" : ""}`}
-                        style={{ backgroundColor: statusColor(job.status) }}
-                      />
-                      {job.status}
-                    </span>
-                  </td>
-
-                  {/* Progress / Phase */}
-                  <td className="p-3 min-w-[180px]">
-                    <div className="flex flex-col gap-1">
-                      <div className="flex justify-between items-center text-[10px]">
-                        <span className="opacity-80 truncate max-w-[140px]" title={job.phase || job.message || ""}>
-                          {job.phase || (isQueued ? "Waiting in queue" : "Processing")}
-                        </span>
-                        <span className="font-mono">{job.progress ?? 0}%</span>
-                      </div>
-                      <div className="w-full bg-[var(--cp-bg-0)] border border-[var(--cp-border)] h-1.5 overflow-hidden">
-                        <div
-                          className="h-full transition-all duration-300"
-                          style={{
-                            width: `${Math.min(Math.max(job.progress ?? 0, 0), 100)}%`,
-                            backgroundColor: statusColor(job.status),
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* Created */}
-                  <td className="p-3 whitespace-nowrap opacity-65 font-mono text-[11px]">
-                    {formatDateTime(job.created_at)}
-                  </td>
-
-                  {/* Duration */}
-                  <td className="p-3 whitespace-nowrap font-mono text-[11px] opacity-75">
-                    {formatJobDuration(job.started_at, job.finished_at)}
-                  </td>
-
-                  {/* Actions */}
-                  <td className="p-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center gap-2">
-                      {canCancel && (
-                        <button
-                          title="Cancel Job"
-                          onClick={(e) => handleCancelJob(job.id, e)}
-                          className="flex items-center gap-1 px-2 py-1 border border-orange-500/40 text-orange-400 hover:bg-orange-500/10 text-[10px] font-mono transition-colors"
-                        >
-                          <XCircle size={12} />
-                          Cancel
-                        </button>
-                      )}
-                      {canDelete && (
-                        <button
-                          title="Delete Job Record"
-                          onClick={(e) => handleDeleteJob(job.id, e)}
-                          className="p-1 border border-[var(--cp-border)] text-red-400/70 hover:text-red-300 hover:border-red-500/50 hover:bg-red-500/10 transition-colors"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-
-                  {/* Arrow */}
-                  <td className="p-3 text-right">
-                    <ChevronRight size={14} className="opacity-40" />
-                  </td>
+          {/* Table */}
+          <div className="flex-1 overflow-auto border border-[var(--cp-border)] bg-[var(--cp-bg-1)]">
+            <table className="w-full text-xs border-collapse">
+              <thead className="sticky top-0 bg-[var(--cp-bg-2)] text-left text-[10px] uppercase tracking-wider z-10">
+                <tr>
+                  {["Job ID", "Type", "Target Repo", "Status", "Progress / Phase", "Created", "Duration", "Actions", ""].map((header) => (
+                    <th key={header} className="p-3 border-b border-[var(--cp-border)]">
+                      {header}
+                    </th>
+                  ))}
                 </tr>
-              );
-            })}
+              </thead>
+              <tbody>
+                {visibleJobs.map((job) => {
+                  const isRunning = job.status === "running" || job.status === "cancelling";
+                  const isQueued = job.status === "queued";
+                  const canCancel = isRunning || isQueued;
+                  const canDelete = !isRunning;
 
-            {!loading && !visibleJobs.length && (
-              <tr>
-                <td colSpan={9} className="p-12 text-center opacity-50">
-                  No jobs match the current filters.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                  return (
+                    <tr
+                      key={job.id}
+                      onClick={() => setSelectedJob(job)}
+                      className="border-b border-[var(--cp-border)] hover:bg-cyan-400/5 cursor-pointer transition-colors"
+                    >
+                      {/* Job ID */}
+                      <td className="p-3 font-mono text-[11px]">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-opacity-80">{job.id.slice(0, 8)}</span>
+                          <button
+                            title="Copy full Job ID"
+                            onClick={(e) => handleCopy(job.id, e)}
+                            className="opacity-40 hover:opacity-100 p-0.5 text-[var(--cp-cyan)]"
+                          >
+                            {copiedId === job.id ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+                          </button>
+                        </div>
+                      </td>
 
-      {/* Side Drawer for Job Details */}
-      {selectedJob && (
-        <JobInfoDrawer
-          job={selectedJob}
-          onClose={() => setSelectedJob(null)}
-          onCancel={handleCancelJob}
-          onDelete={handleDeleteJob}
-          onCopy={handleCopy}
-          copiedId={copiedId}
-        />
+                      {/* Type */}
+                      <td className="p-3">
+                        <span className="px-2 py-0.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] rounded text-[11px] font-mono text-[var(--cp-cyan)]">
+                          {job.job_type}
+                        </span>
+                      </td>
+
+                      {/* Target Repo */}
+                      <td className="p-3 font-semibold text-[var(--cp-text)]">{job.target}</td>
+
+                      {/* Status */}
+                      <td className="p-3 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1.5 font-medium" style={{ color: statusColor(job.status) }}>
+                          <span
+                            className={`size-2 rounded-full inline-block ${isRunning ? "animate-ping" : ""}`}
+                            style={{ backgroundColor: statusColor(job.status) }}
+                          />
+                          {job.status}
+                        </span>
+                      </td>
+
+                      {/* Progress / Phase */}
+                      <td className="p-3 min-w-[180px]">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex justify-between items-center text-[10px]">
+                            <span className="opacity-80 truncate max-w-[140px]" title={job.phase || job.message || ""}>
+                              {job.phase || (isQueued ? "Waiting in queue" : "Processing")}
+                            </span>
+                            <span className="font-mono">{job.progress ?? 0}%</span>
+                          </div>
+                          <div className="w-full bg-[var(--cp-bg-0)] border border-[var(--cp-border)] h-1.5 overflow-hidden">
+                            <div
+                              className="h-full transition-all duration-300"
+                              style={{
+                                width: `${Math.min(Math.max(job.progress ?? 0, 0), 100)}%`,
+                                backgroundColor: statusColor(job.status),
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Created */}
+                      <td className="p-3 whitespace-nowrap opacity-65 font-mono text-[11px]">
+                        {formatDateTime(job.created_at)}
+                      </td>
+
+                      {/* Duration */}
+                      <td className="p-3 whitespace-nowrap font-mono text-[11px] opacity-75">
+                        {formatJobDuration(job.started_at, job.finished_at)}
+                      </td>
+
+                      {/* Actions */}
+                      <td className="p-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          {canCancel && (
+                            <button
+                              title="Cancel Job"
+                              onClick={(e) => handleCancelJob(job.id, e)}
+                              className="flex items-center gap-1 px-2 py-1 border border-orange-500/40 text-orange-400 hover:bg-orange-500/10 text-[10px] font-mono transition-colors"
+                            >
+                              <XCircle size={12} />
+                              Cancel
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              title="Delete Job Record"
+                              onClick={(e) => handleDeleteJob(job.id, e)}
+                              className="p-1 border border-[var(--cp-border)] text-red-400/70 hover:text-red-300 hover:border-red-500/50 hover:bg-red-500/10 transition-colors"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Arrow */}
+                      <td className="p-3 text-right">
+                        <ChevronRight size={14} className="opacity-40" />
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {!loading && !visibleJobs.length && (
+                  <tr>
+                    <td colSpan={9} className="p-12 text-center opacity-50">
+                      No jobs match the current filters.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Side Drawer for Job Details */}
+          {selectedJob && (
+            <JobInfoDrawer
+              job={selectedJob}
+              onClose={() => setSelectedJob(null)}
+              onCancel={handleCancelJob}
+              onDelete={handleDeleteJob}
+              onCopy={handleCopy}
+              copiedId={copiedId}
+            />
+          )}
+        </>
       )}
     </section>
   );

@@ -8,7 +8,7 @@ import { createKnowledgeService } from "../services/knowledgeService";
 import { createWorkspaceService } from "../services/workspaceService";
 import { UsersService } from "../services/usersService";
 import { TagInput } from "./ui/tag-input";
-import { ATHENA_MODEL_CHANGED_EVENT, athenaModelFromSettings, reconcileAthenaModel, thinkingLevelsFor, invalidateCatalogCache } from "../lib/athenaModel";
+import { ATHENA_MODEL_CHANGED_EVENT, athenaConnectionFromSettings, athenaModelFromSettings, reconcileAthenaModel, thinkingLevelsFor, invalidateCatalogCache } from "../lib/athenaModel";
 import { suggestMcpEndpoints, McpDeploymentMode, McpServiceName } from "../services/agentSetupService";
 import { AppVariablesManager } from "./shared/AppVariablesManager";
 
@@ -30,6 +30,17 @@ interface ProviderOption {
   defaultThinkingLevel?: string;
   source: "gateway" | "terminal";
   installed: boolean;
+}
+
+interface LocalAgentOption {
+  id: string;
+  label: string;
+  defaultModel: string;
+}
+
+interface AthenaConnection {
+  mode: "gateway" | "direct";
+  agentId?: string;
 }
 
 interface AgentItem {
@@ -732,6 +743,9 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
   const [providerSource, setProviderSource] = useState<"gateway" | "terminal">("terminal");
   const [providersLoading, setProvidersLoading] = useState(false);
   const [providersError, setProvidersError] = useState("");
+  const [athenaConnection, setAthenaConnection] = useState<AthenaConnection>({ mode: "gateway" });
+  const [localAgents, setLocalAgents] = useState<LocalAgentOption[]>([]);
+  const [localAgentsLoading, setLocalAgentsLoading] = useState(false);
   const [abilitiesLoading, setAbilitiesLoading] = useState(false);
   const [abilitiesError, setAbilitiesError] = useState("");
   const [userApiKey, setUserApiKey] = useState("");
@@ -786,6 +800,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
 
       const savedAgents = settings["agents:enabledList"] ?? settings["agents:enabled"];
       setEnabledAgents(Array.isArray(savedAgents) ? savedAgents : null);
+      setAthenaConnection(athenaConnectionFromSettings(settings));
 
       const nextGateway = toLiveServiceConfig(settings["gateway:config"], {
         url: "http://localhost:3100",
@@ -814,13 +829,15 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
         "agents:list": settings["agents:list"] || [],
         "gateway:config": settings["gateway:config"] || { url: "http://localhost:3100", enabled: true },
         "gateway:enabledProviders": Array.isArray(savedProviders) ? savedProviders : null,
+        "athena:connection": athenaConnectionFromSettings(settings),
         "agents:enabledList": Array.isArray(savedAgents) ? savedAgents : null,
         "server:config": settings["server:config"] || { url: "http://127.0.0.1:8090", enabled: true },
         "mcp:endpoints": settings["mcp:endpoints"] || {},
       };
       initializedRef.current = true;
 
-      await refreshProviders(nextGateway);
+      if (athenaConnectionFromSettings(settings).mode === "gateway") await refreshProviders(nextGateway);
+      else await refreshLocalAgents();
       await refreshAbilities(nextServer);
 
       // First time setup: nothing saved yet, so auto-detect and prefill (still fully editable/overridable).
@@ -853,6 +870,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
       await window.system.saveSetting("agents:list", agents);
       await window.system.saveSetting("gateway:config", { ...gateway, status: "idle", url: normalizeServiceUrl(gateway.url) });
       await window.system.saveSetting("gateway:enabledProviders", enabledProviders);
+      await window.system.saveSetting("athena:connection", athenaConnection);
       await window.system.saveSetting("agents:enabledList", enabledAgents);
       await window.system.saveSetting("server:config", { ...server, status: "idle", url: normalizeServiceUrl(server.url) });
       await window.system.saveSetting("mcp:endpoints", mcpEndpoints);
@@ -861,7 +879,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
     }, 500);
 
     return () => clearTimeout(saveTimer);
-  }, [defaultDirectory, moderatorPrompt, providerChain, agents, gateway, server, mcpEndpoints, enabledProviders, enabledAgents]);
+  }, [defaultDirectory, moderatorPrompt, providerChain, agents, gateway, server, mcpEndpoints, enabledProviders, enabledAgents, athenaConnection]);
 
   async function detectMcpEndpoints(serverConfig: ServiceConfig = server, currentEndpoints: Record<McpServiceName, string> = mcpEndpoints) {
     setMcpDetectLoading(true);
@@ -906,6 +924,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
     await window.system.saveSetting("agents:list", agents);
     await window.system.saveSetting("gateway:config", { ...gateway, status: "idle", url: normalizeServiceUrl(gateway.url) });
     await window.system.saveSetting("gateway:enabledProviders", enabledProviders);
+    await window.system.saveSetting("athena:connection", athenaConnection);
     await window.system.saveSetting("agents:enabledList", enabledAgents);
     await window.system.saveSetting("server:config", { ...server, status: "idle", url: normalizeServiceUrl(server.url) });
     await window.system.saveSetting("mcp:endpoints", mcpEndpoints);
@@ -926,6 +945,7 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
     await window.system.saveSetting("agents:list", backupRef.current["agents:list"]);
     await window.system.saveSetting("gateway:config", backupRef.current["gateway:config"]);
     await window.system.saveSetting("gateway:enabledProviders", backupRef.current["gateway:enabledProviders"]);
+    await window.system.saveSetting("athena:connection", backupRef.current["athena:connection"]);
     await window.system.saveSetting("agents:enabledList", backupRef.current["agents:enabledList"]);
     await window.system.saveSetting("server:config", backupRef.current["server:config"]);
     await window.system.saveSetting("mcp:endpoints", backupRef.current["mcp:endpoints"]);
@@ -1065,6 +1085,29 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
     } finally {
       setProvidersLoading(false);
     }
+  }
+
+  async function refreshLocalAgents() {
+    setLocalAgentsLoading(true);
+    try {
+      const discovered = await window.system.listLocalAgents();
+      setLocalAgents(discovered);
+      setAthenaConnection((current) => {
+        if (current.mode !== "direct") return current;
+        if (discovered.some((agent) => agent.id === current.agentId)) return current;
+        return discovered[0] ? { mode: "direct", agentId: discovered[0].id } : { mode: "direct" };
+      });
+    } finally {
+      setLocalAgentsLoading(false);
+    }
+  }
+
+  function setAthenaMode(mode: AthenaConnection["mode"]) {
+    setAthenaConnection((current) => mode === "gateway"
+      ? { mode: "gateway" }
+      : { mode: "direct", agentId: current.agentId || localAgents[0]?.id });
+    if (mode === "direct") void refreshLocalAgents();
+    else void refreshProviders();
   }
 
   async function refreshAbilities(serverConfig: ServiceConfig = server) {
@@ -1247,15 +1290,22 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
                   <input ref={directoryInputRef} type="file" onChange={handleDirectorySelect} className="hidden" {...({ webkitdirectory: "", directory: "" } as any)} />
                 </div>
 
-                <AthenaMentalMode
-                  value={athenaModelFromSettings({ "provider:chain": providerChain })}
-                  options={selectedProviderOptions}
-                  loading={providersLoading}
-                  onRefresh={() => refreshProviders()}
-                  onChange={(next) => setProviderChain(prev => [{ ...(prev[0] || { id: "p1" }), ...next }, ...prev.slice(1)])}
-                  labelStyle={labelStyle}
-                  inputStyle={inputStyle}
-                />
+                {athenaConnection.mode === "gateway" ? (
+                  <AthenaMentalMode
+                    value={athenaModelFromSettings({ "provider:chain": providerChain })}
+                    options={selectedProviderOptions}
+                    loading={providersLoading}
+                    onRefresh={() => refreshProviders()}
+                    onChange={(next) => setProviderChain(prev => [{ ...(prev[0] || { id: "p1" }), ...next }, ...prev.slice(1)])}
+                    labelStyle={labelStyle}
+                    inputStyle={inputStyle}
+                  />
+                ) : (
+                  <div className="p-3 border border-[var(--cp-cyan)]/50 bg-[var(--cp-bg-1)] text-xs">
+                    <span style={labelStyle}>ATHENA Direct Connect</span>
+                    <p className="mt-1 opacity-70">Using {localAgents.find((agent) => agent.id === athenaConnection.agentId)?.label || athenaConnection.agentId || "no local agent"} with its default settings.</p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1263,13 +1313,30 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
             {/* ── GATEWAY ── */}
             {activeTab === "gateway" && (
               <div className="space-y-6">
-                <ServicePanel
-                  description="API gateway routing and connection settings"
-                  config={gateway}
-                  onChange={patch => setGateway(prev => ({ ...prev, ...patch }))}
-                  healthPath="/health"
-                  apiKey={userApiKey}
-                />
+                <div className="p-4 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] space-y-3">
+                  <div>
+                    <h4 style={{ color: "var(--cp-cyan)", fontFamily: "'Orbitron', sans-serif" }} className="text-xs uppercase tracking-wider font-semibold">ATHENA Connection</h4>
+                    <p className="text-[11px] opacity-60 mt-0.5">Choose the API Gateway or bypass it and run one installed local agent directly.</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {(["gateway", "direct"] as const).map((mode) => {
+                      const active = athenaConnection.mode === mode;
+                      return <button key={mode} type="button" onClick={() => setAthenaMode(mode)} style={{ borderColor: active ? "var(--cp-cyan)" : "var(--cp-border)", background: active ? "var(--cp-bg-2)" : "var(--cp-bg-3)" }} className="p-3 border text-left hover:border-[var(--cp-cyan)] transition-colors">
+                        <span style={{ fontFamily: "'Share Tech Mono', monospace" }} className="block text-xs font-bold uppercase">{mode === "gateway" ? "Gateway API" : "Direct Connect"}</span>
+                        <span className="block mt-1 text-[10px] opacity-60">{mode === "gateway" ? "Route ATHENA through the configured Gateway service." : "Run an installed local agent with its own defaults."}</span>
+                      </button>;
+                    })}
+                  </div>
+                </div>
+
+                {athenaConnection.mode === "gateway" ? <>
+                  <ServicePanel
+                    description="API gateway routing and connection settings"
+                    config={gateway}
+                    onChange={patch => setGateway(prev => ({ ...prev, ...patch }))}
+                    healthPath="/health"
+                    apiKey={userApiKey}
+                  />
 
                 <div className="p-4 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1351,6 +1418,24 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
                     </div>
                   )}
                 </div>
+                </> : <div className="p-4 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <h4 style={{ color: "var(--cp-cyan)", fontFamily: "'Orbitron', sans-serif" }} className="text-xs uppercase tracking-wider font-semibold">Installed Local Agents</h4>
+                      <p className="text-[11px] opacity-60 mt-0.5">ATHENA bypasses Gateway and uses the selected agent's default settings.</p>
+                    </div>
+                    <button type="button" onClick={() => refreshLocalAgents()} className="flex items-center gap-1 text-[10px] opacity-70 hover:opacity-100"><RefreshCw size={11} className={localAgentsLoading ? "animate-spin" : ""} /> refresh</button>
+                  </div>
+                  {localAgentsLoading ? <div className="py-4 text-xs opacity-60">Scanning local agents...</div> : localAgents.length === 0 ? <div className="py-4 text-xs opacity-50 italic">No supported local agents found on PATH.</div> : <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {localAgents.map((agent) => {
+                      const active = athenaConnection.agentId === agent.id;
+                      return <button key={agent.id} type="button" onClick={() => setAthenaConnection({ mode: "direct", agentId: agent.id })} style={{ borderColor: active ? "var(--cp-cyan)" : "var(--cp-border)", background: active ? "var(--cp-bg-2)" : "var(--cp-bg-3)" }} className="p-3 border text-left hover:border-[var(--cp-cyan)] transition-colors">
+                        <span style={{ fontFamily: "'Share Tech Mono', monospace" }} className="block text-xs font-bold uppercase">{agent.label}</span>
+                        <span className="block mt-1 text-[10px] opacity-60">Default: {agent.defaultModel}</span>
+                      </button>;
+                    })}
+                  </div>}
+                </div>}
               </div>
             )}
 

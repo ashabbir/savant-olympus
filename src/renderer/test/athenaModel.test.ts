@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { athenaModelFromSettings, extractAthenaModelTag, formatAthenaModel, reconcileAthenaModel, runAthenaAgent, thinkingLevelsFor, invalidateCatalogCache } from "../lib/athenaModel";
+import { athenaConnectionFromSettings, athenaModelFromSettings, extractAthenaModelTag, formatAthenaModel, reconcileAthenaModel, runAthenaAgent, thinkingLevelsFor, invalidateCatalogCache } from "../lib/athenaModel";
 
 const providers = [
   { id: "hermes", models: ["configured"], configuredModel: "copilot/gpt-5.6-luna", thinkingLevels: ["none", "medium", "ultra"], defaultThinkingLevel: "medium" },
@@ -14,6 +14,12 @@ describe("athenaModel", () => {
     expect(athenaModelFromSettings({ "provider:chain": [{ provider: "copilot", model: "auto", thinkingLevel: "xhigh" }] }))
       .toEqual({ provider: "copilot", model: "auto", thinkingLevel: "xhigh" });
     expect(athenaModelFromSettings({})).toEqual({ provider: "hermes", model: "configured", thinkingLevel: "medium" });
+  });
+
+  it("defaults existing installations to Gateway routing", () => {
+    expect(athenaConnectionFromSettings({})).toEqual({ mode: "gateway" });
+    expect(athenaConnectionFromSettings({ "athena:connection": { mode: "direct", agentId: "codex" } }))
+      .toEqual({ mode: "direct", agentId: "codex" });
   });
 
   it("drops stale models and unsupported efforts", () => {
@@ -63,5 +69,18 @@ describe("athenaModel", () => {
       thinkingLevel: "medium",
       prompt: "hi",
     });
+  });
+
+  it("runs ATHENA directly through the selected local agent without Gateway discovery", async () => {
+    window.system.getSettings = vi.fn().mockResolvedValue({ "athena:connection": { mode: "direct", agentId: "codex" } });
+    window.system.listLocalAgents = vi.fn().mockResolvedValue([{ id: "codex", label: "Codex", defaultModel: "default" }]);
+    window.system.runAgentDirect = vi.fn().mockResolvedValue({ response: "Direct answer", provider: "codex", model: "default" });
+    window.system.listProviders = vi.fn();
+
+    const response = await runAthenaAgent({ prompt: "hi" });
+
+    expect(window.system.runAgentDirect).toHaveBeenCalledWith({ agentId: "codex", prompt: "hi" });
+    expect(window.system.listProviders).not.toHaveBeenCalled();
+    expect(extractAthenaModelTag(response)).toEqual({ text: "Direct answer", model: "CODEX: default · default" });
   });
 });

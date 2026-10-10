@@ -28,6 +28,7 @@ interface Window {
         installed: boolean
       }>
     }>
+    listLocalAgents: () => Promise<Array<{ id: string; label: string; defaultModel: string }>>
     getDbStatus: () => Promise<string>
     getChatHistory: (target_id: string) => Promise<any[]>
     saveChatHistory: (
@@ -41,6 +42,7 @@ interface Window {
     clearAthenaThread: (target_id: string) => Promise<boolean>
     readGraphifyJson: (repoPath: string) => Promise<any | null>
     runAgentViaGateway: (args: { provider: string; model: string; thinkingLevel?: string; prompt: string }) => Promise<string>
+    runAgentDirect: (args: { agentId: string; prompt: string }) => Promise<{ response: string; provider: string; model: string }>
     exportDocument: (args: {
       format: 'html' | 'pdf'
       html: string

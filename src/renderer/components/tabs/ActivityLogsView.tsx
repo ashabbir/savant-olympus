@@ -43,8 +43,8 @@ const statusColor = (status: string) => ({
   cancelled: "#ffbd59", queued: "#7dd3fc", running: "#7dd3fc", skipped: "#9ca3af",
 }[status] || "#9ca3af");
 
-export function ActivityLogsView({ serverUrl, apiKey, isAdmin }: {
-  serverUrl: string; apiKey: string; isAdmin: boolean;
+export function ActivityLogsView({ serverUrl, apiKey, isAdmin, embedded = false }: {
+  serverUrl: string; apiKey: string; isAdmin: boolean; embedded?: boolean;
 }) {
   const service = useMemo(() => createContextService(serverUrl, apiKey), [serverUrl, apiKey]);
   const [windowId, setWindowId] = useState<WindowId>("1d");
@@ -93,16 +93,18 @@ export function ActivityLogsView({ serverUrl, apiKey, isAdmin }: {
   if (!isAdmin) return <main className="h-full grid place-items-center text-sm opacity-60">Administrator access required.</main>;
 
   return (
-    <section className="h-full overflow-hidden flex flex-col p-5 gap-4" style={{ background: "var(--cp-bg-0)" }}>
-      <header className="flex items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-[var(--cp-cyan)]"><Activity size={18} /><h1 className="font-bold tracking-[0.18em]">ACTIVITY LOG</h1></div>
-          <p className="text-xs opacity-55 mt-1">Scheduled and user-triggered repository execution history</p>
-        </div>
-        <button aria-label="Refresh activity logs" onClick={() => void load()} className="p-2 border border-[var(--cp-border)] text-[var(--cp-cyan)]">
-          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-        </button>
-      </header>
+    <section className={`h-full overflow-hidden flex flex-col gap-4 ${embedded ? "p-0" : "p-5"}`} style={embedded ? undefined : { background: "var(--cp-bg-0)" }}>
+      {!embedded && (
+        <header className="flex items-end justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-[var(--cp-cyan)]"><Activity size={18} /><h1 className="font-bold tracking-[0.18em]">ACTIVITY LOG</h1></div>
+            <p className="text-xs opacity-55 mt-1">Scheduled and user-triggered repository execution history</p>
+          </div>
+          <button aria-label="Refresh activity logs" onClick={() => void load()} className="p-2 border border-[var(--cp-border)] text-[var(--cp-cyan)]">
+            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+          </button>
+        </header>
+      )}
 
       <div className="flex gap-3 items-center text-xs">
         <label className="flex items-center gap-2"><Clock3 size={13} />

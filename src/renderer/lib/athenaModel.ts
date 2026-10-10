@@ -6,6 +6,11 @@ export interface AthenaModelSelection {
   thinkingLevel: string;
 }
 
+export interface AthenaConnection {
+  mode: "gateway" | "direct";
+  agentId?: string;
+}
+
 export interface AthenaProviderOption {
   id: string;
   label?: string;
@@ -19,6 +24,14 @@ export interface AthenaProviderOption {
 
 export const DEFAULT_THINKING_LEVELS = ["low", "medium", "high"];
 export const DEFAULT_ATHENA_MODEL: AthenaModelSelection = { provider: "hermes", model: "configured", thinkingLevel: "medium" };
+export const DEFAULT_ATHENA_CONNECTION: AthenaConnection = { mode: "gateway" };
+
+export function athenaConnectionFromSettings(settings: Record<string, any> | null | undefined): AthenaConnection {
+  const saved = settings?.["athena:connection"];
+  return saved?.mode === "direct" && typeof saved.agentId === "string"
+    ? { mode: "direct", agentId: saved.agentId }
+    : DEFAULT_ATHENA_CONNECTION;
+}
 
 /** Reads the ATHENA mental mode (provider, model, effort) from saved settings. */
 export function athenaModelFromSettings(settings: Record<string, any> | null | undefined): AthenaModelSelection {
@@ -69,6 +82,16 @@ export async function resolveAthenaModel(): Promise<AthenaModelSelection> {
     console.error("Failed to load ATHENA mental mode:", error);
     return DEFAULT_ATHENA_MODEL;
   }
+  const connection = athenaConnectionFromSettings(settings);
+  if (connection.mode === "direct") {
+    try {
+      const agent = (await window.system.listLocalAgents()).find((item) => item.id === connection.agentId);
+      if (agent) return { provider: agent.id, model: agent.defaultModel, thinkingLevel: "default" };
+    } catch (error) {
+      console.error("Failed to discover the selected local ATHENA agent:", error);
+    }
+    return { provider: connection.agentId || "local", model: "unavailable", thinkingLevel: "default" };
+  }
   const saved = athenaModelFromSettings(settings);
   try {
     return reconcileAthenaModel(saved, await loadProviderCatalog(settings));
@@ -95,6 +118,14 @@ export function extractAthenaModelTag(text: string): { text: string; model?: str
  */
 export async function runAthenaAgent({ prompt, tagModel = true }: { prompt: string; tagModel?: boolean }): Promise<string> {
   const selection = await resolveAthenaModel();
+  const settings = await window.system.getSettings();
+  const connection = athenaConnectionFromSettings(settings);
+  if (connection.mode === "direct") {
+    if (!connection.agentId) throw new Error("Select a local agent in Settings before using Direct Connect.");
+    const result = await window.system.runAgentDirect({ agentId: connection.agentId, prompt });
+    const directSelection = { provider: result.provider, model: result.model, thinkingLevel: "default" };
+    return tagModel ? tagAthenaResponse(result.response || "", directSelection) : result.response;
+  }
   const response = await window.system.runAgentViaGateway({ ...selection, prompt });
   return tagModel ? tagAthenaResponse(response || "", selection) : response;
 }

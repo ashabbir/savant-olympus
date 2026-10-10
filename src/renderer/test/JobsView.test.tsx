@@ -169,4 +169,26 @@ describe("JobsView", () => {
       expect(screen.queryByRole("dialog", { name: "Job Details" })).not.toBeInTheDocument();
     });
   });
+
+  it("switches to Activity & History subview within JobsView", async () => {
+    render(<JobsView serverUrl="http://server.test" apiKey="key" isAdmin />);
+    await waitFor(() => {
+      expect(screen.getByText("savant-core")).toBeInTheDocument();
+    });
+
+    const historyTabBtn = screen.getByRole("button", { name: /Activity & History/i });
+    fireEvent.click(historyTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Time range")).toBeInTheDocument();
+      expect(screen.getByLabelText("Git hash change")).toBeInTheDocument();
+    });
+
+    const queueTabBtn = screen.getByRole("button", { name: /Job Queue/i });
+    fireEvent.click(queueTabBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("savant-core")).toBeInTheDocument();
+    });
+  });
 });

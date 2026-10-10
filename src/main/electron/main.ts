@@ -4,6 +4,7 @@ import fs from 'node:fs/promises'
 import nodeFs from 'node:fs'
 import os from 'node:os'
 import { pathToFileURL } from 'node:url'
+import { listLocalAgents, runLocalAgent } from './localAgents'
 
 // Persistence configuration
 const SAVANT_DIR = path.join(os.homedir(), '.savant')
@@ -344,6 +345,8 @@ async function runGatewayAgent(provider: string, model: string, prompt: string, 
 }
 
 ipcMain.handle('run-agent', async (_event, { provider, model, prompt, thinkingLevel }) => runGatewayAgent(provider, model, prompt, thinkingLevel))
+ipcMain.handle('list-local-agents', async () => listLocalAgents())
+ipcMain.handle('run-agent-direct', async (_event, { agentId, prompt }) => runLocalAgent(String(agentId || ''), String(prompt || '')))
 
 ipcMain.handle('export-document', async (event, { format, html, defaultFilename }) => {
   if ((format !== 'html' && format !== 'pdf') || typeof html !== 'string' || !html.trim()) {
