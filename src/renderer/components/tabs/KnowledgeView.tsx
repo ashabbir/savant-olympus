@@ -5,7 +5,7 @@ import * as d3 from "d3";
 import { GitFork, Network, Layers, RefreshCw, ZoomIn, ZoomOut, Maximize, Plus, Trash2, Search, ArrowRight, ArrowLeft, Download, Upload, Info, Check, Copy, Box, ChevronDown, ChevronLeft, ChevronRight, History, FileCode2, FileText } from "lucide-react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { AthenaMessage } from "@/components/shared/AthenaMessage";
-import { createKnowledgeService } from "@/services/knowledgeService";
+import { createKnowledgeService, type KnowledgeMaintenanceStatus } from "@/services/knowledgeService";
 import { createWorkspaceService } from "@/services/workspaceService";
 import { buildAthenaConversationPrompt, ensureAthenaMcpSummary } from "@/lib/athenaContext";
 import {
@@ -140,6 +140,8 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false, isGuest = fa
   const [is3DMode, setIs3DMode] = useState(false);
   const intelligentFiltering = true;
   const [isLoading, setIsLoading] = useState(false);
+  const [maintenanceStatus, setMaintenanceStatus] = useState<KnowledgeMaintenanceStatus | null>(null);
+  const [isContemplating, setIsContemplating] = useState(false);
   const [filterSearch, setFilterSearch] = useState("");
   const [openType, setOpenType] = useState<string | null>(null);
   const [isFilterPaneOpen, setIsFilterPaneOpen] = useState(true);
@@ -427,6 +429,33 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false, isGuest = fa
   // Track which nodes have had their labels loaded
   const loadedLabelsRef = useRef<Set<string>>(new Set());
   const nodeLabelsRef = useRef<Map<string, string>>(new Map());
+
+  const loadMaintenanceStatus = React.useCallback(async () => {
+    if (!isAdmin) return;
+    try {
+      setMaintenanceStatus(await knowledgeService.getMaintenanceStatus());
+    } catch (error) {
+      reportKnowledgeError("load contemplate status", error);
+    }
+  }, [isAdmin, knowledgeService]);
+
+  useEffect(() => {
+    void loadMaintenanceStatus();
+  }, [loadMaintenanceStatus]);
+
+  const runContemplate = async () => {
+    setIsContemplating(true);
+    try {
+      await knowledgeService.runContemplate();
+      window.setTimeout(() => void loadMaintenanceStatus(), 2500);
+    } catch (error) {
+      alert(reportKnowledgeError("run contemplate", error));
+    } finally {
+      setIsContemplating(false);
+    }
+  };
+
+  const latestMaintenanceRun = maintenanceStatus?.runs[0];
 
   // Insights only enter the graph once a domain is drilled into, so this gates the
   // Show/Hide insights toggle: no drill-down yet means nothing to toggle.
@@ -2758,6 +2787,28 @@ return (
         </div>
       </div>
         <div className="flex items-center gap-3">
+          {isAdmin && (
+            <div className="flex items-center gap-2 border border-[var(--cp-border)] bg-[var(--cp-bg-2)] px-2 py-1" aria-label="Contemplate status">
+              <div className="min-w-0">
+                <div className="text-[9px] font-mono font-bold text-[var(--cp-cyan)] uppercase">Contemplate · every 4h</div>
+                {latestMaintenanceRun ? (
+                  <div className="text-[9px] font-mono text-muted-foreground whitespace-nowrap" title={latestMaintenanceRun.error || ""}>
+                    {latestMaintenanceRun.status.toUpperCase()} · {new Date(latestMaintenanceRun.finished_at || latestMaintenanceRun.started_at).toLocaleString()} · {latestMaintenanceRun.nodes_promoted} committed · {latestMaintenanceRun.duplicates_merged} merged · {latestMaintenanceRun.edges_pruned} edges pruned
+                  </div>
+                ) : (
+                  <div className="text-[9px] font-mono text-muted-foreground">Loading last run…</div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => void runContemplate()}
+                disabled={isContemplating}
+                className="shrink-0 border border-[var(--cp-cyan)]/50 px-2 py-1 text-[9px] font-mono text-[var(--cp-cyan)] hover:bg-[var(--cp-cyan)]/10 disabled:opacity-50"
+              >
+                {isContemplating ? "QUEUING…" : "RUN NOW"}
+              </button>
+            </div>
+          )}
           <div className="flex items-center gap-1 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-0.5">
             <button
               type="button"

@@ -93,6 +93,12 @@ describe('KnowledgeView', () => {
       if (u.includes('/api/knowledge/nodes') && (init as RequestInit | undefined)?.method === 'POST') {
         return Promise.resolve({ ok: true, status: 201, json: () => Promise.resolve({ node_id: 'n3' }) } as Response)
       }
+      if (u.includes('/api/knowledge/maintenance/status')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ scheduler: {}, runs: [{ id: 1, status: 'success', trigger: 'scheduled', started_at: '2026-10-10T12:00:00Z', finished_at: '2026-10-10T12:00:02Z', nodes_promoted: 3, duplicates_merged: 2, contradictions_resolved: 0, nodes_expired: 0, edges_pruned: 1 }] }) } as Response)
+      }
+      if (u.includes('/api/knowledge/maintenance/run')) {
+        return Promise.resolve({ ok: true, status: 202, json: () => Promise.resolve({ accepted: true, reused: false, job: { id: 'contemplate-1', status: 'queued' } }) } as Response)
+      }
       if (u.includes('/api/knowledge/prune') || u.includes('/api/knowledge/purge-workspace')) {
         return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true }) } as Response)
       }
@@ -607,6 +613,19 @@ describe('KnowledgeView', () => {
     window.dispatchEvent(new CustomEvent('knowledge-purge'))
 
     await waitFor(() => expect(window.fetch).toHaveBeenCalledWith('http://savant.local/api/knowledge/purge-workspace', expect.objectContaining({ method: 'POST' })))
+  })
+
+  it('shows the latest contemplate run and queues one for administrators', async () => {
+    render(<KnowledgeView serverUrl="http://savant.local" apiKey="sk-test" isAdmin />)
+
+    expect(await screen.findByText(/contemplate · every 4h/i)).toBeInTheDocument()
+    expect(screen.getByText(/3 committed · 2 merged · 1 edges pruned/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'RUN NOW' }))
+
+    await waitFor(() => expect(window.fetch).toHaveBeenCalledWith(
+      'http://savant.local/api/knowledge/maintenance/run',
+      expect.objectContaining({ method: 'POST' }),
+    ))
   })
 
   it('shows operation and organization filters when those node types are present', async () => {

@@ -51,4 +51,18 @@ describe("KnowledgeService", () => {
       "http://localhost:8090/api/knowledge/prune",
     ]);
   });
+
+  it("loads and queues knowledge contemplation", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ scheduler: {}, runs: [] }))
+      .mockResolvedValueOnce(response({ accepted: true, reused: false, job: { id: "job-1", status: "queued" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new KnowledgeService("http://localhost:8090", "secret");
+
+    await service.getMaintenanceStatus();
+    await service.runContemplate();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "http://localhost:8090/api/knowledge/maintenance/status?limit=1", expect.anything());
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://localhost:8090/api/knowledge/maintenance/run", expect.objectContaining({ method: "POST" }));
+  });
 });

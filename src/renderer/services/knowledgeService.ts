@@ -16,6 +16,25 @@ export interface KGEdgePayload {
   weight?: number;
 }
 
+export interface KnowledgeMaintenanceRun {
+  id: number;
+  status: "success" | "failed" | "running" | string;
+  trigger: string;
+  started_at: string;
+  finished_at?: string | null;
+  nodes_promoted: number;
+  duplicates_merged: number;
+  contradictions_resolved: number;
+  nodes_expired: number;
+  edges_pruned: number;
+  error?: string;
+}
+
+export interface KnowledgeMaintenanceStatus {
+  scheduler: { next_run_at?: string | null };
+  runs: KnowledgeMaintenanceRun[];
+}
+
 export class KnowledgeService {
   private readonly client: SavantHttpClient;
 
@@ -119,6 +138,14 @@ export class KnowledgeService {
   }> {
     const ws = workspaceId ? `&workspace_id=${encodeURIComponent(workspaceId)}` : "";
     return this.client.request(`/api/knowledge/info?summary=true&include_staged=${includeStaged}${ws}&_=${Date.now()}`);
+  }
+
+  getMaintenanceStatus(): Promise<KnowledgeMaintenanceStatus> {
+    return this.client.request("/api/knowledge/maintenance/status?limit=1");
+  }
+
+  runContemplate(): Promise<{ accepted: boolean; reused: boolean; job: { id: string; status: string } }> {
+    return this.client.request("/api/knowledge/maintenance/run", { method: "POST" });
   }
 }
 
