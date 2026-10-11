@@ -28,6 +28,27 @@ export interface KnowledgeMaintenanceRun {
   nodes_expired: number;
   edges_pruned: number;
   error?: string;
+  report_available?: boolean;
+  details?: {
+    affected_node_count?: number;
+    affected_node_limit?: number;
+    limit_reached?: boolean;
+    deferred_operations?: number;
+  };
+}
+
+export interface KnowledgeMaintenanceHistory {
+  runs: KnowledgeMaintenanceRun[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface ContemplateReport {
+  schema_version: number;
+  run_id: number;
+  integrity_sha256: string;
+  [key: string]: unknown;
 }
 
 export interface KnowledgeMaintenanceStatus {
@@ -142,6 +163,14 @@ export class KnowledgeService {
 
   getMaintenanceStatus(): Promise<KnowledgeMaintenanceStatus> {
     return this.client.request("/api/knowledge/maintenance/status?limit=1");
+  }
+
+  getMaintenanceRuns(page = 1): Promise<KnowledgeMaintenanceHistory> {
+    return this.client.request(`/api/knowledge/maintenance/runs?page=${page}&limit=20`);
+  }
+
+  getMaintenanceReport(runId: number): Promise<ContemplateReport> {
+    return this.client.request(`/api/knowledge/maintenance/runs/${runId}/report`);
   }
 
   runContemplate(): Promise<{ accepted: boolean; reused: boolean; job: { id: string; status: string } }> {

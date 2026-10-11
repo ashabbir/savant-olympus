@@ -56,19 +56,35 @@ function ollamaDefaultModel(): string {
   return result.stdout.split(/\r?\n/).slice(1).map((line) => line.trim().split(/\s+/)[0]).find(Boolean) || "";
 }
 
+import { runAgyDirectPrompt } from "./agyDirect";
+import { runCopilotDirectPrompt } from "./copilotDirect";
+
 export function listLocalAgents(): LocalAgent[] {
-  return (Object.entries(AGENTS) as Array<[AgentId, (typeof AGENTS)[AgentId]]>)
-    .filter(([, agent]) => isAvailable(agent.command))
-    .flatMap(([id, agent]) => {
-      const defaultModel = id === "ollama" ? ollamaDefaultModel() : "default";
-      return id === "ollama" && !defaultModel ? [] : [{ id, label: agent.label, defaultModel }];
-    });
+  return [
+    {
+      id: "agy",
+      label: "AGY Direct",
+      defaultModel: "gemini-3.8-flash-high",
+    },
+    {
+      id: "copilot",
+      label: "Copilot Direct",
+      defaultModel: "gpt-4o",
+    },
+  ];
 }
 
 export async function runLocalAgent(
   agentId: string,
   prompt: string,
 ): Promise<{ response: string; provider: string; model: string }> {
+  if (agentId === "agy" || agentId === "agy-direct") {
+    return runAgyDirectPrompt(prompt);
+  }
+  if (agentId === "copilot" || agentId === "copilot-direct") {
+    return runCopilotDirectPrompt(prompt);
+  }
+
   const agent = AGENTS[agentId as AgentId];
   if (!agent) throw new Error("Unsupported local agent.");
   if (!isAvailable(agent.command)) throw new Error(`${agent.label} is no longer installed or available on PATH.`);

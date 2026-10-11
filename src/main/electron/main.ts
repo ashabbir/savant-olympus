@@ -5,6 +5,8 @@ import nodeFs from 'node:fs'
 import os from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { listLocalAgents, runLocalAgent } from './localAgents'
+import { initAgyDirect, getAgyAuthStatus, startAgyBrowserAuth, cancelAgyBrowserAuth, disconnectAgyAuth } from './agyDirect'
+import { initCopilotDirect, getCopilotAuthStatus, startCopilotBrowserAuth, cancelCopilotBrowserAuth, disconnectCopilotAuth } from './copilotDirect'
 
 // Persistence configuration
 const SAVANT_DIR = path.join(os.homedir(), '.savant')
@@ -77,6 +79,16 @@ async function initDb() {
     if (!chatHistoryColumns.has('context')) db.exec('ALTER TABLE chat_history ADD COLUMN context TEXT')
     if (!chatHistoryColumns.has('kind')) db.exec("ALTER TABLE chat_history ADD COLUMN kind TEXT DEFAULT 'general'")
     console.log('[OLYMPUS] SQLite engine initialized.')
+    try {
+      await initAgyDirect(db, () => win)
+    } catch (e) {
+      console.error('[OLYMPUS] Failed to initialize AGY Direct auth check:', e)
+    }
+    try {
+      await initCopilotDirect(db, () => win)
+    } catch (e) {
+      console.error('[OLYMPUS] Failed to initialize Copilot Direct auth check:', e)
+    }
   } catch (e) {
     console.error('Failed to initialize Savant Olympus database:', e)
   }
@@ -347,6 +359,14 @@ async function runGatewayAgent(provider: string, model: string, prompt: string, 
 ipcMain.handle('run-agent', async (_event, { provider, model, prompt, thinkingLevel }) => runGatewayAgent(provider, model, prompt, thinkingLevel))
 ipcMain.handle('list-local-agents', async () => listLocalAgents())
 ipcMain.handle('run-agent-direct', async (_event, { agentId, prompt }) => runLocalAgent(String(agentId || ''), String(prompt || '')))
+ipcMain.handle('get-agy-auth-status', async () => getAgyAuthStatus())
+ipcMain.handle('start-agy-auth', async () => startAgyBrowserAuth(db))
+ipcMain.handle('cancel-agy-auth', async () => cancelAgyBrowserAuth())
+ipcMain.handle('disconnect-agy-auth', async () => disconnectAgyAuth(db))
+ipcMain.handle('get-copilot-auth-status', async () => getCopilotAuthStatus())
+ipcMain.handle('start-copilot-auth', async () => startCopilotBrowserAuth(db))
+ipcMain.handle('cancel-copilot-auth', async () => cancelCopilotBrowserAuth())
+ipcMain.handle('disconnect-copilot-auth', async () => disconnectCopilotAuth(db))
 
 ipcMain.handle('export-document', async (event, { format, html, defaultFilename }) => {
   if ((format !== 'html' && format !== 'pdf') || typeof html !== 'string' || !html.trim()) {

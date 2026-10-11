@@ -45,6 +45,16 @@ if (!window.system) {
     getSkillExportProfiles: async () => ({}),
     exportSkillPackage: async () => ({ provider: '', path: '', format: '' }),
     installDefaultSkills: async () => ({ providers: {} }),
+    getAgyAuthStatus: async () => ({ authenticated: true, email: 'operator@savant.local' }),
+    startAgyAuth: async () => ({ success: true, email: 'operator@savant.local' }),
+    cancelAgyAuth: async () => true,
+    disconnectAgyAuth: async () => true,
+    onAgyAuthStatusChanged: () => () => {},
+    getCopilotAuthStatus: async () => ({ authenticated: true, username: 'operator' }),
+    startCopilotAuth: async () => ({ success: true, username: 'operator' }),
+    cancelCopilotAuth: async () => true,
+    disconnectCopilotAuth: async () => true,
+    onCopilotAuthStatusChanged: () => () => {},
   }
 }
 

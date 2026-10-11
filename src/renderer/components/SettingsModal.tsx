@@ -746,6 +746,12 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
   const [athenaConnection, setAthenaConnection] = useState<AthenaConnection>({ mode: "gateway" });
   const [localAgents, setLocalAgents] = useState<LocalAgentOption[]>([]);
   const [localAgentsLoading, setLocalAgentsLoading] = useState(false);
+  const [agyAuth, setAgyAuth] = useState<{ authenticated: boolean; email?: string; error?: string }>({ authenticated: false });
+  const [agyAuthLoading, setAgyAuthLoading] = useState(false);
+  const [agyAuthStarting, setAgyAuthStarting] = useState(false);
+  const [copilotAuth, setCopilotAuth] = useState<{ authenticated: boolean; username?: string; userCode?: string; verificationUri?: string; error?: string }>({ authenticated: false });
+  const [copilotAuthLoading, setCopilotAuthLoading] = useState(false);
+  const [copilotAuthStarting, setCopilotAuthStarting] = useState(false);
   const [abilitiesLoading, setAbilitiesLoading] = useState(false);
   const [abilitiesError, setAbilitiesError] = useState("");
   const [userApiKey, setUserApiKey] = useState("");
@@ -857,6 +863,23 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
       initializedRef.current = false;
       return;
     }
+    void refreshAgyAuth();
+    void refreshCopilotAuth();
+    const unsubAgy = window.system?.onAgyAuthStatusChanged
+      ? window.system.onAgyAuthStatusChanged((status) => {
+          setAgyAuth(status);
+        })
+      : undefined;
+    const unsubCopilot = window.system?.onCopilotAuthStatusChanged
+      ? window.system.onCopilotAuthStatusChanged((status) => {
+          setCopilotAuth(status);
+        })
+      : undefined;
+
+    return () => {
+      if (unsubAgy) unsubAgy();
+      if (unsubCopilot) unsubCopilot();
+    };
   }, [open]);
 
   useEffect(() => {
@@ -1095,19 +1118,124 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
       setAthenaConnection((current) => {
         if (current.mode !== "direct") return current;
         if (discovered.some((agent) => agent.id === current.agentId)) return current;
-        return discovered[0] ? { mode: "direct", agentId: discovered[0].id } : { mode: "direct" };
+        return { mode: "direct", agentId: "agy" };
       });
+      await refreshAgyAuth();
+      await refreshCopilotAuth();
     } finally {
       setLocalAgentsLoading(false);
     }
   }
 
+  async function refreshAgyAuth() {
+    setAgyAuthLoading(true);
+    try {
+      if (window.system?.getAgyAuthStatus) {
+        const status = await window.system.getAgyAuthStatus();
+        setAgyAuth(status);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setAgyAuthLoading(false);
+    }
+  }
+
+  async function refreshCopilotAuth() {
+    setCopilotAuthLoading(true);
+    try {
+      if (window.system?.getCopilotAuthStatus) {
+        const status = await window.system.getCopilotAuthStatus();
+        setCopilotAuth(status);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setCopilotAuthLoading(false);
+    }
+  }
+
+  async function handleStartAgyAuth() {
+    setAgyAuthStarting(true);
+    try {
+      if (window.system?.startAgyAuth) {
+        const res = await window.system.startAgyAuth();
+        if (res?.success) {
+          setAgyAuth({ authenticated: true, email: res.email });
+        }
+      }
+    } catch (e: any) {
+      setAgyAuth((prev) => ({ ...prev, error: e?.message || "Auth failed" }));
+    } finally {
+      setAgyAuthStarting(false);
+    }
+  }
+
+  async function handleCancelAgyAuth() {
+    try {
+      if (window.system?.cancelAgyAuth) {
+        await window.system.cancelAgyAuth();
+      }
+    } finally {
+      setAgyAuthStarting(false);
+    }
+  }
+
+  async function handleDisconnectAgyAuth() {
+    try {
+      if (window.system?.disconnectAgyAuth) {
+        await window.system.disconnectAgyAuth();
+        setAgyAuth({ authenticated: false });
+      }
+    } catch {}
+  }
+
+  async function handleStartCopilotAuth() {
+    setCopilotAuthStarting(true);
+    try {
+      if (window.system?.startCopilotAuth) {
+        const res = await window.system.startCopilotAuth();
+        if (res?.success) {
+          setCopilotAuth({ authenticated: true, username: res.username });
+        }
+      }
+    } catch (e: any) {
+      setCopilotAuth((prev) => ({ ...prev, error: e?.message || "Auth failed" }));
+    } finally {
+      setCopilotAuthStarting(false);
+    }
+  }
+
+  async function handleCancelCopilotAuth() {
+    try {
+      if (window.system?.cancelCopilotAuth) {
+        await window.system.cancelCopilotAuth();
+      }
+    } finally {
+      setCopilotAuthStarting(false);
+    }
+  }
+
+  async function handleDisconnectCopilotAuth() {
+    try {
+      if (window.system?.disconnectCopilotAuth) {
+        await window.system.disconnectCopilotAuth();
+        setCopilotAuth({ authenticated: false });
+      }
+    } catch {}
+  }
+
   function setAthenaMode(mode: AthenaConnection["mode"]) {
     setAthenaConnection((current) => mode === "gateway"
       ? { mode: "gateway" }
-      : { mode: "direct", agentId: current.agentId || localAgents[0]?.id });
-    if (mode === "direct") void refreshLocalAgents();
-    else void refreshProviders();
+      : { mode: "direct", agentId: current.mode === "direct" ? current.agentId : "agy" });
+    if (mode === "direct") {
+      void refreshLocalAgents();
+      void refreshAgyAuth();
+      void refreshCopilotAuth();
+    } else {
+      void refreshProviders();
+    }
   }
 
   async function refreshAbilities(serverConfig: ServiceConfig = server) {
@@ -1301,9 +1429,26 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
                     inputStyle={inputStyle}
                   />
                 ) : (
-                  <div className="p-3 border border-[var(--cp-cyan)]/50 bg-[var(--cp-bg-1)] text-xs">
-                    <span style={labelStyle}>ATHENA Direct Connect</span>
-                    <p className="mt-1 opacity-70">Using {localAgents.find((agent) => agent.id === athenaConnection.agentId)?.label || athenaConnection.agentId || "no local agent"} with its default settings.</p>
+                  <div className="p-3 border border-[var(--cp-cyan)]/50 bg-[var(--cp-bg-1)] text-xs flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span style={labelStyle}>ATHENA Direct Connect</span>
+                        {(athenaConnection.agentId === "copilot" ? copilotAuth.authenticated : agyAuth.authenticated) ? (
+                          <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-mono font-bold">
+                            <CheckCircle size={12} className="text-emerald-400" /> (authenticated)
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-[10px] text-rose-400 font-mono font-bold">
+                            <XCircle size={12} className="text-rose-400" /> (auth required)
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 opacity-70">
+                        {athenaConnection.agentId === "copilot"
+                          ? "Using Copilot Direct (gpt-4o / Claude) via GitHub Copilot Chat bridge."
+                          : "Using AGY Direct (gemini-3.8-flash-high) via Google CloudCode bridge."}
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1418,23 +1563,270 @@ export function SettingsModal({ open, onClose, onSettingsChanged, isAdmin = fals
                     </div>
                   )}
                 </div>
-                </> : <div className="p-4 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] space-y-3">
+                </> : <div className="p-4 border border-[var(--cp-border)] bg-[var(--cp-bg-1)] space-y-4">
                   <div className="flex items-center justify-between gap-2">
                     <div>
-                      <h4 style={{ color: "var(--cp-cyan)", fontFamily: "'Orbitron', sans-serif" }} className="text-xs uppercase tracking-wider font-semibold">Installed Local Agents</h4>
-                      <p className="text-[11px] opacity-60 mt-0.5">ATHENA bypasses Gateway and uses the selected agent's default settings.</p>
+                      <h4 style={{ color: "var(--cp-cyan)", fontFamily: "'Orbitron', sans-serif" }} className="text-xs uppercase tracking-wider font-semibold">Direct Connect</h4>
+                      <p className="text-[11px] opacity-60 mt-0.5">Select a direct connect agent for ATHENA. 1 option enabled at a time.</p>
                     </div>
-                    <button type="button" onClick={() => refreshLocalAgents()} className="flex items-center gap-1 text-[10px] opacity-70 hover:opacity-100"><RefreshCw size={11} className={localAgentsLoading ? "animate-spin" : ""} /> refresh</button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void refreshAgyAuth();
+                        void refreshCopilotAuth();
+                      }}
+                      className="flex items-center gap-1 text-[10px] opacity-70 hover:opacity-100 cursor-pointer"
+                    >
+                      <RefreshCw size={11} className={(agyAuthLoading || copilotAuthLoading) ? "animate-spin" : ""} /> check auth
+                    </button>
                   </div>
-                  {localAgentsLoading ? <div className="py-4 text-xs opacity-60">Scanning local agents...</div> : localAgents.length === 0 ? <div className="py-4 text-xs opacity-50 italic">No supported local agents found on PATH.</div> : <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {localAgents.map((agent) => {
-                      const active = athenaConnection.agentId === agent.id;
-                      return <button key={agent.id} type="button" onClick={() => setAthenaConnection({ mode: "direct", agentId: agent.id })} style={{ borderColor: active ? "var(--cp-cyan)" : "var(--cp-border)", background: active ? "var(--cp-bg-2)" : "var(--cp-bg-3)" }} className="p-3 border text-left hover:border-[var(--cp-cyan)] transition-colors">
-                        <span style={{ fontFamily: "'Share Tech Mono', monospace" }} className="block text-xs font-bold uppercase">{agent.label}</span>
-                        <span className="block mt-1 text-[10px] opacity-60">Default: {agent.defaultModel}</span>
-                      </button>;
-                    })}
-                  </div>}
+
+                  <div className="space-y-4">
+                    {/* AGY Direct Card */}
+                    {(() => {
+                      const isSelected = athenaConnection.agentId !== "copilot";
+                      return (
+                        <div
+                          onClick={() => {
+                            if (!isSelected) {
+                              setAthenaConnection({ mode: "direct", agentId: "agy" });
+                            }
+                          }}
+                          style={{
+                            borderColor: isSelected ? "var(--cp-cyan)" : "var(--cp-border)",
+                            background: isSelected ? "var(--cp-bg-2)" : "var(--cp-bg-3)",
+                          }}
+                          className={`p-4 border text-left transition-colors space-y-3 cursor-pointer ${
+                            isSelected ? "shadow-[0_0_10px_rgba(0,229,255,0.1)]" : "opacity-75 hover:opacity-100"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2.5">
+                              {agyAuth.authenticated ? (
+                                <CheckCircle size={18} className="text-emerald-400 shrink-0" />
+                              ) : (
+                                <XCircle size={18} className="text-rose-500 shrink-0" />
+                              )}
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span style={{ fontFamily: "'Share Tech Mono', monospace" }} className="text-xs font-bold uppercase text-[var(--foreground)]">AGY Direct</span>
+                                  <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${
+                                    agyAuth.authenticated 
+                                      ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/40" 
+                                      : "bg-rose-950/60 text-rose-400 border-rose-500/40"
+                                  }`}>
+                                    {agyAuth.authenticated ? "AUTHENTICATED" : "AUTH REQUIRED"}
+                                  </span>
+                                </div>
+                                <span className="block mt-0.5 text-[10px] opacity-60">Model: gemini-3.8-flash-high · Google CloudCode Strategy</span>
+                              </div>
+                            </div>
+                            <span
+                              style={{
+                                background: isSelected ? "var(--cp-cyan)" : "var(--cp-bg-0)",
+                                color: isSelected ? "var(--cp-bg-0)" : "var(--foreground)",
+                                border: "1px solid var(--cp-border)",
+                                fontFamily: "'Share Tech Mono', monospace",
+                              }}
+                              className="px-2 py-0.5 text-[10px] font-bold uppercase rounded shrink-0"
+                            >
+                              {isSelected ? "ENABLED" : "SELECT"}
+                            </span>
+                          </div>
+
+                          {agyAuth.authenticated ? (
+                            <div className="flex items-center justify-between pt-2 border-t border-[var(--cp-border)]/50 text-xs">
+                              <span className="text-[11px] opacity-70 font-mono">
+                                {agyAuth.email ? `User: ${agyAuth.email}` : "Auth token saved in Savant Olympus DB"}
+                              </span>
+                              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={handleStartAgyAuth}
+                                  disabled={agyAuthStarting}
+                                  className="text-[10px] px-2.5 py-1 border border-[var(--cp-border)] hover:border-[var(--cp-cyan)] text-[var(--foreground)] opacity-80 hover:opacity-100 transition-all font-mono uppercase cursor-pointer"
+                                >
+                                  Re-authenticate
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleDisconnectAgyAuth}
+                                  className="text-[10px] px-2.5 py-1 border border-rose-500/40 text-rose-400 hover:bg-rose-950/40 transition-all font-mono uppercase cursor-pointer"
+                                >
+                                  Disconnect
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="pt-2 border-t border-[var(--cp-border)]/50 space-y-2">
+                              <p className="text-[11px] text-rose-300/90 font-mono">
+                                AGY Direct needs an auth token. Authenticate in a browser to save the token in Savant Olympus DB.
+                              </p>
+                              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={handleStartAgyAuth}
+                                  disabled={agyAuthStarting}
+                                  style={{
+                                    background: "var(--cp-cyan)",
+                                    color: "var(--cp-bg-0)",
+                                    fontFamily: "'Share Tech Mono', monospace",
+                                  }}
+                                  className="px-3 py-1.5 text-xs font-bold uppercase tracking-wider hover:opacity-90 transition-opacity flex items-center gap-2 cursor-pointer"
+                                >
+                                  {agyAuthStarting ? (
+                                    <>
+                                      <RefreshCw size={12} className="animate-spin" />
+                                      <span>Waiting for browser auth...</span>
+                                    </>
+                                  ) : (
+                                    <span>Authenticate in Browser</span>
+                                  )}
+                                </button>
+                                {agyAuthStarting && (
+                                  <button
+                                    type="button"
+                                    onClick={handleCancelAgyAuth}
+                                    className="px-2.5 py-1.5 text-xs font-mono uppercase border border-[var(--cp-border)] hover:border-red-400 text-red-400 transition-colors cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Copilot Direct Card */}
+                    {(() => {
+                      const isSelected = athenaConnection.agentId === "copilot";
+                      return (
+                        <div
+                          onClick={() => {
+                            if (!isSelected) {
+                              setAthenaConnection({ mode: "direct", agentId: "copilot" });
+                            }
+                          }}
+                          style={{
+                            borderColor: isSelected ? "var(--cp-cyan)" : "var(--cp-border)",
+                            background: isSelected ? "var(--cp-bg-2)" : "var(--cp-bg-3)",
+                          }}
+                          className={`p-4 border text-left transition-colors space-y-3 cursor-pointer ${
+                            isSelected ? "shadow-[0_0_10px_rgba(0,229,255,0.1)]" : "opacity-75 hover:opacity-100"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2.5">
+                              {copilotAuth.authenticated ? (
+                                <CheckCircle size={18} className="text-emerald-400 shrink-0" />
+                              ) : (
+                                <XCircle size={18} className="text-rose-500 shrink-0" />
+                              )}
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span style={{ fontFamily: "'Share Tech Mono', monospace" }} className="text-xs font-bold uppercase text-[var(--foreground)]">Copilot Direct</span>
+                                  <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${
+                                    copilotAuth.authenticated 
+                                      ? "bg-emerald-950/60 text-emerald-400 border-emerald-500/40" 
+                                      : "bg-rose-950/60 text-rose-400 border-rose-500/40"
+                                  }`}>
+                                    {copilotAuth.authenticated ? "AUTHENTICATED" : "AUTH REQUIRED"}
+                                  </span>
+                                </div>
+                                <span className="block mt-0.5 text-[10px] opacity-60">Model: gpt-4o · GitHub Copilot Chat Strategy</span>
+                              </div>
+                            </div>
+                            <span
+                              style={{
+                                background: isSelected ? "var(--cp-cyan)" : "var(--cp-bg-0)",
+                                color: isSelected ? "var(--cp-bg-0)" : "var(--foreground)",
+                                border: "1px solid var(--cp-border)",
+                                fontFamily: "'Share Tech Mono', monospace",
+                              }}
+                              className="px-2 py-0.5 text-[10px] font-bold uppercase rounded shrink-0"
+                            >
+                              {isSelected ? "ENABLED" : "SELECT"}
+                            </span>
+                          </div>
+
+                          {copilotAuth.authenticated ? (
+                            <div className="flex items-center justify-between pt-2 border-t border-[var(--cp-border)]/50 text-xs">
+                              <span className="text-[11px] opacity-70 font-mono">
+                                {copilotAuth.username ? `GitHub User: ${copilotAuth.username}` : "Copilot token saved in Savant Olympus DB"}
+                              </span>
+                              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={handleStartCopilotAuth}
+                                  disabled={copilotAuthStarting}
+                                  className="text-[10px] px-2.5 py-1 border border-[var(--cp-border)] hover:border-[var(--cp-cyan)] text-[var(--foreground)] opacity-80 hover:opacity-100 transition-all font-mono uppercase cursor-pointer"
+                                >
+                                  Re-authenticate
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleDisconnectCopilotAuth}
+                                  className="text-[10px] px-2.5 py-1 border border-rose-500/40 text-rose-400 hover:bg-rose-950/40 transition-all font-mono uppercase cursor-pointer"
+                                >
+                                  Disconnect
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="pt-2 border-t border-[var(--cp-border)]/50 space-y-2">
+                              <p className="text-[11px] text-rose-300/90 font-mono">
+                                Copilot Direct requires GitHub authentication. Authenticate in a browser to save the token in Savant Olympus DB.
+                              </p>
+                              {copilotAuth.userCode && (
+                                <div className="p-2.5 bg-black/40 border border-[var(--cp-cyan)]/40 rounded text-xs space-y-1">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] uppercase tracking-wider text-[var(--cp-cyan)] font-mono">One-Time Code:</span>
+                                    <span className="font-mono text-base font-bold text-[var(--cp-cyan)] tracking-widest">{copilotAuth.userCode}</span>
+                                  </div>
+                                  <p className="text-[10px] opacity-70 font-mono">
+                                    Enter this code at {copilotAuth.verificationUri || "https://github.com/login/device"} in your browser.
+                                  </p>
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={handleStartCopilotAuth}
+                                  disabled={copilotAuthStarting}
+                                  style={{
+                                    background: "var(--cp-cyan)",
+                                    color: "var(--cp-bg-0)",
+                                    fontFamily: "'Share Tech Mono', monospace",
+                                  }}
+                                  className="px-3 py-1.5 text-xs font-bold uppercase tracking-wider hover:opacity-90 transition-opacity flex items-center gap-2 cursor-pointer"
+                                >
+                                  {copilotAuthStarting ? (
+                                    <>
+                                      <RefreshCw size={12} className="animate-spin" />
+                                      <span>Waiting for GitHub auth...</span>
+                                    </>
+                                  ) : (
+                                    <span>Authenticate in Browser</span>
+                                  )}
+                                </button>
+                                {copilotAuthStarting && (
+                                  <button
+                                    type="button"
+                                    onClick={handleCancelCopilotAuth}
+                                    className="px-2.5 py-1.5 text-xs font-mono uppercase border border-[var(--cp-border)] hover:border-red-400 text-red-400 transition-colors cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
                 </div>}
               </div>
             )}

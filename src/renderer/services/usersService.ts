@@ -18,6 +18,65 @@ export interface ToolUsage {
   last_called_at: string | null;
 }
 
+export interface TopicKeyword {
+  term: string;
+  weight: number;
+}
+
+export interface TopicModelItem {
+  id: string;
+  label: string;
+  keywords: TopicKeyword[];
+  top_terms: string[];
+  weight_pct: number;
+  activity_counts: {
+    searches: number;
+    contributions: number;
+    total: number;
+  };
+  sample_searches: { text: string; tool?: string }[];
+  sample_contributions: { title: string; node_type?: string }[];
+}
+
+export interface PersonaAffinity {
+  name: string;
+  type: "persona" | "rule";
+  score?: number;
+  pct?: number;
+  description?: string;
+  status?: string;
+}
+
+export interface UserTopicModel {
+  user_id: string;
+  days_analyzed: number;
+  total_documents_analyzed: number;
+  archetype: {
+    title: string;
+    description: string;
+    confidence: number;
+    dominant_persona: string;
+  };
+  topics: TopicModelItem[];
+  top_search_topics: { label: string; count: number; pct: number }[];
+  top_contribution_topics: { label: string; count: number; pct: number }[];
+  abilities_profiles: {
+    dominant_persona: string;
+    personas: PersonaAffinity[];
+    top_rules: PersonaAffinity[];
+    ability_tool_calls: Record<string, number>;
+  };
+  activity_summary: {
+    total_searches: number;
+    total_contributions: number;
+    total_tool_calls: number;
+    total_logins: number;
+    active_login_days: number;
+    cadence_pattern: string;
+    ratio_searches_to_contributions: number;
+  };
+}
+
 export interface UserUsage {
   user_id: string;
   days: number;
@@ -35,6 +94,7 @@ export interface UserUsage {
     last_used_at: string | null;
   }[];
   recent_queries: { mcp_server: string; tool_name: string; query: string; repo: string; created_at: string }[];
+  topic_model?: UserTopicModel | null;
 }
 
 export interface UserContributions {
@@ -164,6 +224,14 @@ export class UsersService {
   async getUserUsage(userId: string, days = 30): Promise<UserUsage> {
     const res = await fetch(`${this.baseUrl}/api/users/${userId}/usage?days=${days}`, { headers: this.headers });
     if (!res.ok) throw new Error(`Failed to load user usage: ${res.statusText}`);
+    return res.json();
+  }
+
+  async getUserTopicModel(userId: string, days = 30, topics = 5): Promise<UserTopicModel> {
+    const res = await fetch(`${this.baseUrl}/api/users/${encodeURIComponent(userId)}/topic-model?days=${days}&topics=${topics}`, {
+      headers: this.headers,
+    });
+    if (!res.ok) throw new Error(`Failed to load user topic model: ${res.statusText}`);
     return res.json();
   }
 

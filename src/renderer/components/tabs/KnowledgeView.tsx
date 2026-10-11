@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AthenaContextMeter } from "@/components/shared/AthenaContextMeter";
+import { ContemplateHistory } from "./knowledge/components/ContemplateHistory";
 import { runAthenaAgent, formatAthenaModel, useAthenaModel } from "@/lib/athenaModel";
 import * as d3 from "d3";
 import { GitFork, Network, Layers, RefreshCw, ZoomIn, ZoomOut, Maximize, Plus, Trash2, Search, ArrowRight, ArrowLeft, Download, Upload, Info, Check, Copy, Box, ChevronDown, ChevronLeft, ChevronRight, History, FileCode2, FileText } from "lucide-react";
@@ -142,6 +143,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false, isGuest = fa
   const [isLoading, setIsLoading] = useState(false);
   const [maintenanceStatus, setMaintenanceStatus] = useState<KnowledgeMaintenanceStatus | null>(null);
   const [isContemplating, setIsContemplating] = useState(false);
+  const [showContemplateHistory, setShowContemplateHistory] = useState(false);
   const [filterSearch, setFilterSearch] = useState("");
   const [openType, setOpenType] = useState<string | null>(null);
   const [isFilterPaneOpen, setIsFilterPaneOpen] = useState(true);
@@ -455,7 +457,7 @@ export function KnowledgeView({ serverUrl, apiKey, isAdmin = false, isGuest = fa
     }
   };
 
-  const latestMaintenanceRun = maintenanceStatus?.runs[0];
+  const latestMaintenanceRun = maintenanceStatus?.runs?.[0];
 
   // Insights only enter the graph once a domain is drilled into, so this gates the
   // Show/Hide insights toggle: no drill-down yet means nothing to toggle.
@@ -2807,6 +2809,8 @@ return (
               >
                 {isContemplating ? "QUEUING…" : "RUN NOW"}
               </button>
+              <button type="button" onClick={() => setShowContemplateHistory(true)} className="px-2 py-1 text-[9px] font-mono text-[var(--cp-cyan)]">RUN HISTORY</button>
+              {showContemplateHistory && <ContemplateHistory service={knowledgeService} onClose={() => setShowContemplateHistory(false)} />}
             </div>
           )}
           <div className="flex items-center gap-1 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] p-0.5">

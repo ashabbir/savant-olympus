@@ -70,6 +70,12 @@ Important endpoints:
 - `GET /api/knowledge/export`
 - `POST /api/knowledge/import`
 
+Knowledge administrators can open **RUN HISTORY** beside Contemplate to load
+server-paginated maintenance runs on demand, refresh explicitly, and download
+lossless JSON undo reports. Legacy runs without snapshots show
+"Undo report unavailable". History uses `/api/knowledge/maintenance/runs?page=...&limit=20`;
+reports use `/api/knowledge/maintenance/runs/:id/report`. History does not poll.
+
 ## Context tab
 
 Source: `src/renderer/components/tabs/ContextView.tsx` and `ContextVisualizations.tsx`.
@@ -142,3 +148,10 @@ Important endpoints:
 - `GET /api/context/memory/read?uri=...`
 - `GET /api/context/code/list?repo=...`
 - `GET /api/context/code/read?uri=...`
+
+## Direct Connect (ATHENA)
+
+ATHENA can be routed directly to local agents or providers without Gateway discovery:
+- **AGY Direct**: Direct integration with Google Cloud Code API (`gemini-3.8-flash-high`) using OAuth PKCE with cloud-platform scopes and automatic migration/self-healing from Antigravity CLI credentials.
+- **Copilot Direct**: Direct integration with GitHub Copilot Chat completions using Device Code OAuth flow.
+Credentials and session state are persisted securely in `~/.savant/olympus.db`.

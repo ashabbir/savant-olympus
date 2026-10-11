@@ -358,7 +358,54 @@ describe('UsersView Component', () => {
               ],
               recent_queries: [
                 { mcp_server: 'savant-context', tool_name: 'research', query: 'kafka consumer retries', repo: 'icn', created_at: '2026-09-30T21:10:00+00:00' },
-              ]
+              ],
+              topic_model: {
+                user_id: 'usr-2',
+                days_analyzed: 30,
+                total_documents_analyzed: 5,
+                archetype: {
+                  title: 'Core Systems Architect',
+                  description: 'Primary focus on system boundaries and durable knowledge modeling.',
+                  confidence: 0.88,
+                  dominant_persona: 'architect',
+                },
+                topics: [
+                  {
+                    id: 'topic_1',
+                    label: 'Auth & Security: Kafka Retries',
+                    weight_pct: 65.0,
+                    top_terms: ['kafka', 'retries', 'consumer'],
+                    keywords: [{ term: 'kafka', weight: 0.82 }, { term: 'retries', weight: 0.65 }],
+                    activity_counts: { searches: 4, contributions: 1, total: 5 },
+                    sample_searches: [{ text: 'kafka consumer retries', tool: 'research' }],
+                    sample_contributions: [{ title: 'Kafka retry policy insight', node_type: 'insight' }],
+                  },
+                ],
+                top_search_topics: [{ label: 'Auth & Security: Kafka Retries', count: 4, pct: 80.0 }],
+                top_contribution_topics: [{ label: 'Auth & Security: Kafka Retries', count: 1, pct: 20.0 }],
+                abilities_profiles: {
+                  dominant_persona: 'architect',
+                  personas: [
+                    { name: 'architect', type: 'persona', score: 15, pct: 60.0, description: 'Explicit boundaries and safe evolution.' },
+                    { name: 'engineer', type: 'persona', score: 8, pct: 30.0, description: 'Practical code correctness.' },
+                    { name: 'product', type: 'persona', score: 2, pct: 10.0, description: 'User value and defaults.' },
+                  ],
+                  top_rules: [
+                    { name: 'boundaries', type: 'rule', status: 'Active' },
+                    { name: 'backend_api', type: 'rule', status: 'Active' },
+                  ],
+                  ability_tool_calls: { list_personas: 2 },
+                },
+                activity_summary: {
+                  total_searches: 4,
+                  total_contributions: 1,
+                  total_tool_calls: 18,
+                  total_logins: 4,
+                  active_login_days: 2,
+                  cadence_pattern: 'Regular Weekly Operator',
+                  ratio_searches_to_contributions: 4.0,
+                },
+              },
             })
           } as Response)
         }
@@ -644,6 +691,28 @@ describe('UsersView Component', () => {
 
     const calls = (window.fetch as any).mock.calls as [string, RequestInit | undefined][]
     expect(calls.some(([url]) => url.toString().includes('/api/users/usr-2/usage?days=30'))).toBe(true)
+  })
+
+  it('renders topic modeling intelligence, inferred archetype, and topic clusters under user profile usage', async () => {
+    const { UsersView } = await import('../components/tabs/UsersView')
+    render(<UsersView serverUrl="http://127.0.0.1:8090" apiKey="test-key" isAdmin={true} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Lex Friedman')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('Lex Friedman'))
+
+    fireEvent.click(await screen.findByRole('tab', { name: /Usage/i }))
+    const topicSection = await screen.findByTestId('user-topic-modeling')
+    expect(topicSection).toHaveTextContent('Topic Modeling & Usage Intelligence')
+    expect(topicSection).toHaveTextContent('Core Systems Architect')
+    expect(topicSection).toHaveTextContent('persona.architect')
+    expect(topicSection).toHaveTextContent('Auth & Security: Kafka Retries')
+    expect(topicSection).toHaveTextContent('65%')
+    expect(topicSection).toHaveTextContent('Top Topics Searched (Inquiries)')
+    expect(topicSection).toHaveTextContent('Top Topics Contributed (Authored)')
+    expect(screen.getByTestId('archetype-banner')).toBeInTheDocument()
+    expect(screen.getByTestId('topic-clusters-grid')).toBeInTheDocument()
   })
 
   it('loads creator-attributed knowledge node counts only when contributions are opened', async () => {

@@ -63,6 +63,16 @@ interface Window {
     installDefaultSkills: (args: {
       skills: Array<{ id: string; files: Array<{ path: string; content: string }> }>
     }) => Promise<{ providers: Record<string, { present: boolean; installed: string[]; existing: string[]; error?: string }> }>
+    getAgyAuthStatus: () => Promise<{ authenticated: boolean; email?: string; expiresAt?: number; error?: string }>
+    startAgyAuth: () => Promise<{ success: boolean; email?: string; error?: string }>
+    cancelAgyAuth: () => Promise<boolean>
+    disconnectAgyAuth: () => Promise<boolean>
+    onAgyAuthStatusChanged: (callback: (status: { authenticated: boolean; email?: string; expiresAt?: number; error?: string }) => void) => () => void
+    getCopilotAuthStatus: () => Promise<{ authenticated: boolean; username?: string; expiresAt?: number; userCode?: string; verificationUri?: string; error?: string }>
+    startCopilotAuth: () => Promise<{ success: boolean; username?: string; userCode?: string; verificationUri?: string; error?: string }>
+    cancelCopilotAuth: () => Promise<boolean>
+    disconnectCopilotAuth: () => Promise<boolean>
+    onCopilotAuthStatusChanged: (callback: (status: { authenticated: boolean; username?: string; expiresAt?: number; userCode?: string; verificationUri?: string; error?: string }) => void) => () => void
   }
   electronAPI?: {
     pickDirectory: (defaultPath?: string) => Promise<string | null>;

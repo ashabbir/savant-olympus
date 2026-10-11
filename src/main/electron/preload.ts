@@ -50,6 +50,24 @@ contextBridge.exposeInMainWorld('system', {
   getAgentSetupStatus: () => ipcRenderer.invoke('get-agent-setup-status'),
   triggerAgentSetup: (args: { provider: string; parts?: string[]; workspaceRoot?: string; transport?: 'streamable-http' | 'sse' }) =>
     ipcRenderer.invoke('trigger-agent-setup', args),
+  getAgyAuthStatus: () => ipcRenderer.invoke('get-agy-auth-status'),
+  startAgyAuth: () => ipcRenderer.invoke('start-agy-auth'),
+  cancelAgyAuth: () => ipcRenderer.invoke('cancel-agy-auth'),
+  disconnectAgyAuth: () => ipcRenderer.invoke('disconnect-agy-auth'),
+  onAgyAuthStatusChanged: (callback: (status: any) => void) => {
+    const handler = (_event: any, status: any) => callback(status)
+    ipcRenderer.on('agy-auth-status-changed', handler)
+    return () => ipcRenderer.off('agy-auth-status-changed', handler)
+  },
+  getCopilotAuthStatus: () => ipcRenderer.invoke('get-copilot-auth-status'),
+  startCopilotAuth: () => ipcRenderer.invoke('start-copilot-auth'),
+  cancelCopilotAuth: () => ipcRenderer.invoke('cancel-copilot-auth'),
+  disconnectCopilotAuth: () => ipcRenderer.invoke('disconnect-copilot-auth'),
+  onCopilotAuthStatusChanged: (callback: (status: any) => void) => {
+    const handler = (_event: any, status: any) => callback(status)
+    ipcRenderer.on('copilot-auth-status-changed', handler)
+    return () => ipcRenderer.off('copilot-auth-status-changed', handler)
+  },
 })
 
 contextBridge.exposeInMainWorld('electronAPI', {

@@ -48,6 +48,16 @@ const mockSystem: any = {
   }),
   exportSkillPackage: vi.fn().mockResolvedValue({ provider: 'codex', path: '/tmp/.codex/skills/example', format: 'Agent Skills / SKILL.md' }),
   installDefaultSkills: vi.fn().mockResolvedValue({ providers: {} }),
+  getAgyAuthStatus: vi.fn().mockResolvedValue({ authenticated: true, email: 'user@example.com' }),
+  startAgyAuth: vi.fn().mockResolvedValue({ success: true, email: 'user@example.com' }),
+  cancelAgyAuth: vi.fn().mockResolvedValue(true),
+  disconnectAgyAuth: vi.fn().mockResolvedValue(true),
+  onAgyAuthStatusChanged: vi.fn().mockReturnValue(() => {}),
+  getCopilotAuthStatus: vi.fn().mockResolvedValue({ authenticated: true, username: 'testuser' }),
+  startCopilotAuth: vi.fn().mockResolvedValue({ success: true, username: 'testuser' }),
+  cancelCopilotAuth: vi.fn().mockResolvedValue(true),
+  disconnectCopilotAuth: vi.fn().mockResolvedValue(true),
+  onCopilotAuthStatusChanged: vi.fn().mockReturnValue(() => {}),
 }
 
 mockSystem.getChatHistory = vi.fn().mockResolvedValue([])

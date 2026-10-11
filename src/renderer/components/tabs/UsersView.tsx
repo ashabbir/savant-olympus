@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { Users, Key, Shield, UserCheck, Eye, EyeOff, X, Save, Mail, Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Copy, Activity, Bot, Terminal, Code2, FileText, Check, Trophy, LucideIcon } from "lucide-react";
+import { Users, Key, Shield, UserCheck, Eye, EyeOff, X, Save, Mail, Plus, RefreshCw, ChevronDown, ChevronLeft, ChevronRight, Copy, Activity, Bot, Terminal, Code2, FileText, Check, Trophy, LucideIcon, Brain, Layers, Search, PenTool, Tag } from "lucide-react";
 import { toast } from "sonner";
 import { setStoredApiKey } from "../../services/auth";
-import { createUsersService, type UserContributions, type UserUsage, type LeaderboardEntry } from "../../services/usersService";
+import { createUsersService, type UserContributions, type UserUsage, type LeaderboardEntry, type UserTopicModel } from "../../services/usersService";
 import { ALL_CODING_AGENTS_META, buildUserMcpConfig, type AgentProvider, type AgentMcpTransport, type CodingAgentMeta } from "../../services/agentSetupService";
 import { UsersLeaderboard } from "./UsersLeaderboard";
 
@@ -1199,6 +1199,247 @@ export function UsersView({ serverUrl, apiKey, activeUserId, onSettingsChanged, 
           ) : !userUsage ? (
             <p className="text-xs text-muted-foreground font-mono">Loading usage…</p>
           ) : (<>
+          {/* Topic Modeling & Activity Intelligence */}
+          <div className="border border-[var(--cp-border)] bg-[var(--cp-bg-2)] p-4 space-y-4" data-testid="user-topic-modeling">
+            {/* Header with Title and Document Count */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--cp-border)]/60 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 bg-[rgba(0,229,255,0.1)] border border-[var(--cp-cyan)]/40 text-[var(--cp-cyan)]">
+                  <Brain size={16} />
+                </div>
+                <div>
+                  <div className="text-[12px] font-bold text-[var(--cp-cyan)] tracking-wider uppercase flex items-center gap-2">
+                    Topic Modeling & Usage Intelligence
+                    {userUsage.topic_model && (
+                      <span className="text-[10px] px-2 py-0.5 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-muted-foreground font-normal">
+                        {userUsage.topic_model.total_documents_analyzed} signals analyzed
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground font-mono">
+                    Semantic NLP modeling of search queries, knowledge contributions, and inferred ability personas
+                  </p>
+                </div>
+              </div>
+
+              {/* Cadence badge & Refresh */}
+              <div className="flex items-center gap-2 text-[11px] font-mono">
+                {userUsage.topic_model?.activity_summary?.cadence_pattern && (
+                  <span className="px-2 py-1 bg-[rgba(0,255,102,0.1)] border border-[var(--cp-green)]/40 text-[var(--cp-green)] flex items-center gap-1.5">
+                    <Activity size={12} /> {userUsage.topic_model.activity_summary.cadence_pattern}
+                  </span>
+                )}
+                <button
+                  onClick={() => selectedUserId && void fetchUserUsage(selectedUserId)}
+                  disabled={isRefreshingUsage}
+                  className="px-2 py-0.5 text-[10px] border border-[var(--cp-cyan)] text-[var(--cp-cyan)] hover:bg-[rgba(0,229,255,0.1)] transition-colors cursor-pointer flex items-center gap-1 font-mono uppercase disabled:opacity-50"
+                  title="Recalculate topic models"
+                >
+                  <RefreshCw size={10} className={isRefreshingUsage ? "animate-spin" : ""} />
+                  <span>REFRESH MODEL</span>
+                </button>
+              </div>
+            </div>
+
+            {!userUsage.topic_model ? (
+              <div className="p-4 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] text-center space-y-2 font-mono">
+                <p className="text-xs text-muted-foreground">Topic model is calculating or awaiting server synchronization.</p>
+                <button
+                  onClick={() => selectedUserId && void fetchUserUsage(selectedUserId)}
+                  disabled={isRefreshingUsage}
+                  className="px-3 py-1.5 text-xs bg-[var(--cp-cyan)] text-black font-bold uppercase tracking-wider hover:opacity-90 cursor-pointer disabled:opacity-50"
+                >
+                  {isRefreshingUsage ? "Calculating Topics..." : "Analyze & Generate Topic Model"}
+                </button>
+              </div>
+            ) : (
+              <>
+
+              {/* Archetype & Inferred Persona Profile Banner */}
+              <div className="p-3.5 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] space-y-3" data-testid="archetype-banner">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">Inferred Archetype:</span>
+                      <span className="text-xs font-bold text-foreground font-mono px-2 py-0.5 bg-[rgba(0,229,255,0.15)] border border-[var(--cp-cyan)] text-[var(--cp-cyan)]">
+                        {userUsage.topic_model.archetype.title}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground font-mono">
+                        ({Math.round(userUsage.topic_model.archetype.confidence * 100)}% match)
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground font-mono">
+                      {userUsage.topic_model.archetype.description}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-[11px] font-mono">
+                    <span className="text-muted-foreground text-[10px]">Dominant Profile:</span>
+                    <span className="px-2 py-0.5 uppercase font-bold text-[var(--cp-cyan)] bg-[var(--cp-bg-2)] border border-[var(--cp-border)]">
+                      persona.{userUsage.topic_model.archetype.dominant_persona}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Personas Affinity Distribution */}
+                <div className="space-y-1.5 pt-2 border-t border-[var(--cp-border)]/40">
+                  <div className="flex items-center justify-between text-[10px] text-muted-foreground font-mono uppercase tracking-wider">
+                    <span>Abilities & Personas Affinity</span>
+                    <span>Architect / Engineer / Product</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {userUsage.topic_model.abilities_profiles.personas.map((p) => (
+                      <div key={p.name} className="p-2 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] space-y-1">
+                        <div className="flex items-center justify-between text-xs font-mono">
+                          <span className="capitalize font-bold text-foreground">{p.name}</span>
+                          <span className="text-[var(--cp-cyan)]">{p.pct}%</span>
+                        </div>
+                        <div className="h-1.5 bg-[var(--cp-bg-3)] w-full">
+                          <div
+                            className="h-1.5 bg-[var(--cp-cyan)]/70 transition-all"
+                            style={{ width: `${Math.min(100, Math.max(5, p.pct || 0))}%` }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-muted-foreground line-clamp-1" title={p.description}>
+                          {p.description}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Active Rules in Profile */}
+                {userUsage.topic_model.abilities_profiles.top_rules.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1 text-[10px] font-mono text-muted-foreground">
+                    <span className="uppercase tracking-wider">Top Rules in Work:</span>
+                    {userUsage.topic_model.abilities_profiles.top_rules.map((r) => (
+                      <span key={r.name} className="px-2 py-0.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-foreground flex items-center gap-1">
+                        <Tag size={10} className="text-[var(--cp-cyan)]" /> {r.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Modeled Topic Clusters Grid */}
+              <div className="space-y-2">
+                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider font-mono flex items-center justify-between">
+                  <span>Discovered Activity Topics (NMF Topic Modeling)</span>
+                  <span>{userUsage.topic_model.topics.length} clusters identified</span>
+                </div>
+
+                {userUsage.topic_model.topics.length === 0 ? (
+                  <EmptyNote>No distinct topic clusters identified in this activity window.</EmptyNote>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="topic-clusters-grid">
+                    {userUsage.topic_model.topics.map((topic, idx) => (
+                      <div
+                        key={topic.id || idx}
+                        className="p-3 border border-[var(--cp-border)] bg-[var(--cp-bg-3)]/60 hover:border-[var(--cp-cyan)]/50 transition-colors space-y-2"
+                        data-testid={`topic-card-${idx}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="text-xs font-bold font-mono text-foreground flex items-center gap-1.5">
+                            <Layers size={13} className="text-[var(--cp-cyan)] shrink-0" />
+                            <span>{topic.label}</span>
+                          </div>
+                          <span className="text-[10px] font-mono px-2 py-0.5 bg-[rgba(0,229,255,0.1)] border border-[var(--cp-cyan)]/30 text-[var(--cp-cyan)] shrink-0">
+                            {topic.weight_pct}%
+                          </span>
+                        </div>
+
+                        {/* Activity breakdown pill */}
+                        <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <Search size={10} className="text-[var(--cp-cyan)]" /> {topic.activity_counts.searches} searches
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <PenTool size={10} className="text-[var(--cp-green)]" /> {topic.activity_counts.contributions} contributions
+                          </span>
+                          <span>Total: {topic.activity_counts.total}</span>
+                        </div>
+
+                        {/* Keyword tags */}
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {topic.keywords.slice(0, 5).map((kw, kwIdx) => (
+                            <span
+                              key={kwIdx}
+                              className="text-[10px] font-mono px-1.5 py-0.5 bg-[var(--cp-bg-2)] border border-[var(--cp-border)] text-muted-foreground flex items-center gap-1"
+                              title={`Weight: ${kw.weight}`}
+                            >
+                              <span>{kw.term}</span>
+                              <span className="text-[9px] text-[var(--cp-cyan)]/70">{kw.weight}</span>
+                            </span>
+                          ))}
+                        </div>
+
+                        {/* Sample Activities */}
+                        {(topic.sample_searches?.length > 0 || topic.sample_contributions?.length > 0) && (
+                          <div className="text-[10px] font-mono text-muted-foreground space-y-1 pt-1 border-t border-[var(--cp-border)]/30">
+                            {topic.sample_searches?.slice(0, 2).map((s, sIdx) => (
+                              <div key={`s-${sIdx}`} className="truncate text-foreground/80 flex items-center gap-1" title={s.text}>
+                                <span className="text-[var(--cp-cyan)]">🔍</span>
+                                <span className="truncate">{s.text}</span>
+                              </div>
+                            ))}
+                            {topic.sample_contributions?.slice(0, 2).map((c, cIdx) => (
+                              <div key={`c-${cIdx}`} className="truncate text-foreground/80 flex items-center gap-1" title={c.title}>
+                                <span className="text-[var(--cp-green)]">✍️</span>
+                                <span className="truncate">{c.title}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Searches vs Contributions Comparison */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-[var(--cp-border)]/50">
+                {/* Searches Column */}
+                <div className="p-3 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] space-y-2">
+                  <div className="text-[10px] font-bold text-[var(--cp-cyan)] uppercase tracking-wider font-mono flex items-center gap-1.5">
+                    <Search size={12} /> Top Topics Searched (Inquiries)
+                  </div>
+                  {userUsage.topic_model.top_search_topics.length === 0 ? (
+                    <p className="text-[10px] text-muted-foreground italic font-mono">No search inquiries recorded in window.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {userUsage.topic_model.top_search_topics.map((t, i) => (
+                        <div key={i} className="flex items-center justify-between text-xs font-mono">
+                          <span className="truncate pr-2 text-foreground" title={t.label}>{t.label}</span>
+                          <span className="text-[var(--cp-cyan)] shrink-0">{t.count} ({t.pct}%)</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Contributions Column */}
+                <div className="p-3 bg-[var(--cp-bg-3)] border border-[var(--cp-border)] space-y-2">
+                  <div className="text-[10px] font-bold text-[var(--cp-green)] uppercase tracking-wider font-mono flex items-center gap-1.5">
+                    <PenTool size={12} /> Top Topics Contributed (Authored)
+                  </div>
+                  {userUsage.topic_model.top_contribution_topics.length === 0 ? (
+                    <p className="text-[10px] text-muted-foreground italic font-mono">No knowledge contributions authored in window.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {userUsage.topic_model.top_contribution_topics.map((t, i) => (
+                        <div key={i} className="flex items-center justify-between text-xs font-mono">
+                          <span className="truncate pr-2 text-foreground" title={t.label}>{t.label}</span>
+                          <span className="text-[var(--cp-green)] shrink-0">{t.count} ({t.pct}%)</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              </>
+            )}
+          </div>
+
           <UsageCard title="Logins per day" testId="usage-logins">
             {userUsage.logins_per_day.length === 0 ? (
               <EmptyNote>No logins recorded in this window.</EmptyNote>
